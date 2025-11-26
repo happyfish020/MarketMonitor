@@ -1,5 +1,6 @@
 __pycache__/
+reports/
+data/
 *.log
 *.bak
 __init__.py
-reports/

@@ -1,3 +1,2 @@
-requests
-pytz
-pyyaml
+requests>=2.28
+pytz>=2022.0

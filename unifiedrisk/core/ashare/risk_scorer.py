@@ -22,35 +22,48 @@ class RiskScorer:
             "total_score": total,
             "risk_level": level,
             "advise": advice,
-            "explanation": expl
+            "explanation": expl,
         }
 
     def _turnover(self, idx):
-        vals = [idx[k]["turnover"] for k in ["shanghai", "shenzhen", "chi_next"]
-                if k in idx and "turnover" in idx[k]]
+        vals = [
+            idx[k]["turnover"]
+            for k in ["shanghai", "shenzhen", "chi_next"]
+            if k in idx and "turnover" in idx[k]
+        ]
         if not vals:
             return 0, ["成交额缺失"]
         total = sum(vals)
         d = []
         s = 0
         if total > 7e10:
-            s += 3; d.append("全市场放量")
+            s += 3
+            d.append("全市场放量")
         elif total > 5e10:
-            s += 1; d.append("成交额偏强")
+            s += 1
+            d.append("成交额偏强")
         elif total < 3e10:
-            s -= 2; d.append("明显缩量")
+            s -= 2
+            d.append("明显缩量")
         else:
             d.append("成交额正常")
         return s, d
 
     def _global(self, g):
-        s = 0; d = []
+        s = 0
+        d = []
         nas = g.get("nasdaq", {}).get("change_pct", 0)
         spy = g.get("spy", {}).get("change_pct", 0)
         vix = g.get("vix", {}).get("last", 0)
-        if nas < -1: s -= 2; d.append(f"纳指下跌{nas}%")
-        if spy < -0.5: s -= 1; d.append(f"SPY下跌{spy}%")
-        if vix > 22: s -= 2; d.append(f"VIX={vix}")
+        if nas < -1:
+            s -= 2
+            d.append(f"纳指下跌{nas}%")
+        if spy < -0.5:
+            s -= 1
+            d.append(f"SPY下跌{spy}%")
+        if vix > 22:
+            s -= 2
+            d.append(f"VIX={vix}")
         return s, d
 
     def _north(self, idx):
@@ -77,10 +90,16 @@ class RiskScorer:
         return "Extreme"
 
     def _adv(self, l):
-        return {"Low": "加仓", "Medium": "观察", "High": "减仓", "Extreme": "规避"}[l]
+        return {
+            "Low": "加仓",
+            "Medium": "观察",
+            "High": "减仓",
+            "Extreme": "规避",
+        }[l]
 
     def _expl(self, total, level, *ds):
         lines = [f"风险等级：{level}（{total}分）", "", "【因子解读】"]
         for sec in ds:
-            lines += ["- " + x for x in sec]
+            for x in sec:
+                lines.append("- " + x)
         return "\n".join(lines)

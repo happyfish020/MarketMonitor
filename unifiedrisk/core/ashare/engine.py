@@ -1,9 +1,6 @@
 
-import logging
 from .data_fetcher import AShareDataFetcher
 from .risk_scorer import RiskScorer
-
-log = logging.getLogger(__name__)
 
 class AShareDailyEngine:
     def __init__(self):

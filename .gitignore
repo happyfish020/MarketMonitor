@@ -1,6 +1,6 @@
 __pycache__/
 reports/
 data/
-*.log
+logs
 *.bak
 __init__.py

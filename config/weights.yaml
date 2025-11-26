@@ -1,0 +1,13 @@
+horizons:
+  midterm: 0.3
+  shortterm: 0.25
+  ashare_daily: 0.2
+  global_daily: 0.25
+factors:
+  macro: 1.0
+  global_equity: 1.0
+  commodity: 1.0
+  liquidity: 1.0
+  sentiment: 1.0
+  policy: 1.0
+  ashare_internal: 1.0

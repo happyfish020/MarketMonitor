@@ -2,3 +2,4 @@ __pycache__/
 *.log
 *.bak
 __init__.py
+reports/

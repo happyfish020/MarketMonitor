@@ -11,7 +11,7 @@ def main():
     setup_logger(level=level)
     log = logging.getLogger("UnifiedRisk.main")
 
-    log.info("UnifiedRisk starting (v3.4, mode=ashare)")
+    log.info("UnifiedRisk starting (v4.0, mode=ashare)")
     engine = AShareDailyEngine()
     result = engine.run()
 

@@ -1,245 +1,334 @@
-from typing import Dict, Any, List
+
+"""
+unifiedrisk/core/ashare/risk_scorer.py
+
+Simplified risk scoring module for UnifiedRisk v4.
+
+- 输入: raw dict, 结构与 UnifiedRisk main 输出中的 "raw" 一致
+- 输出: score dict, 包含各个因子得分、总分、风险等级、操作建议与中文解释说明
+
+本版本重点：
+1）在原有成交额 / 北向 / 流动性得分基础上，加入宏观反射因子 macro_reflection_risk
+2）预留风格切换 / 量价结构 / 两融节奏 / Bear Trap / 技术形态 / 政策 ETF 等因子
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, asdict
+from typing import Any, Dict, Tuple
+
+
+@dataclass
+class RiskScoreResult:
+    turnover_score: int = 0
+    global_score: int = 0
+    north_score: int = 0
+    liquidity_score: int = 0
+
+    # v4 新增 / 预留因子
+    macro_reflection_risk: int = 0
+    style_switch: int = 0
+    vp_risk: int = 0
+    margin_speed: int = 0
+    bear_trap: int = 0
+    tech_pattern: int = 0
+    policy_etf: int = 0
+
+    total_score: int = 0
+    risk_level: str = "Medium"
+    advise: str = "观察"
+    explanation: str = ""
+
+
+def _safe_float(x: Any) -> float | None:
+    try:
+        if x is None:
+            return None
+        return float(x)
+    except Exception:
+        return None
 
 
 class RiskScorer:
-    """UnifiedRisk v4.0 RiskScorer
+    """
+    统一的 A 股日级风险打分器。
 
-    在原有 4 个因子的基础上，预留并接入更多扩展因子：
-    - macro_reflection_risk: 基于美元、黄金、原油、铜等宏观资产
-    - style_switch: 风格切换（成长 vs 价值），从 payload.get("factors", {}) 中读取
-    - vp_risk: 量价结构风险，同上
-    - margin_speed: 两融节奏，同上
-    - bear_trap: 假跌破陷阱，同上
-    - tech_pattern: 技术形态风险，同上
-    - policy_etf: 政策 ETF 资金流，同上
+    使用方式（示例）::
 
-    说明：
-    - 如果 payload 中没有提供对应扩展因子，则记为 0 分，描述为“未提供”，不影响总分。
-    - 这样可以保证与你现有数据流兼容，新因子可以逐步接入。
+        scorer = RiskScorer(raw_payload)
+        score_dict = scorer.run()
     """
 
-    def score(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        idx = payload.get("index_turnover", {})
-        g = payload.get("global", {})
-        macro = payload.get("macro", {})
-        fact = payload.get("factors", {}) or {}
+    def __init__(self, raw: Dict[str, Any]) -> None:
+        self.raw = raw or {}
+        self.result = RiskScoreResult()
+        self._explanation_parts: list[str] = []
 
-        # 原有 4 个因子
-        t_s, t_d = self._turnover(idx)
-        g_s, g_d = self._global(g)
-        n_s, n_d = self._north(idx)
-        l_s, l_d = self._liq(idx)
+    # === 对外主入口 ===
 
-        # 新增：宏观反射因子（直接从 raw.macro 计算）
-        m_s, m_d = self._macro(macro)
+    def run(self) -> Dict[str, Any]:
+        """主流程：计算各项因子分数 → 聚合成总分与风险等级。"""
+        self._score_turnover()
+        self._score_global()
+        self._score_north()
+        self._score_liquidity()
+        self._score_macro_reflection()
+        self._aggregate()
 
-        # 扩展预留因子：从 payload["factors"] 透传，如果没有就为 0
-        style_s, style_d = self._style_switch(fact)
-        vp_s, vp_d = self._vp_risk(fact)
-        margin_s, margin_d = self._margin_speed(fact)
-        bear_s, bear_d = self._bear_trap(fact)
-        tech_s, tech_d = self._tech_pattern(fact)
-        policy_s, policy_d = self._policy_etf(fact)
+        # 生成中文解释
+        self.result.explanation = self._build_explanation()
+        return asdict(self.result)
 
-        total = (
-            t_s
-            + g_s
-            + n_s
-            + l_s
-            + m_s
-            + style_s
-            + vp_s
-            + margin_s
-            + bear_s
-            + tech_s
-            + policy_s
-        )
+    # === 各单项因子 ===
 
-        level = self._level(total)
-        advice = self._adv(level)
-        expl = self._expl(
-            total,
-            level,
-            t_d,
-            g_d,
-            n_d,
-            l_d,
-            m_d,
-            style_d,
-            vp_d,
-            margin_d,
-            bear_d,
-            tech_d,
-            policy_d,
-        )
+    def _score_turnover(self) -> None:
+        """
+        成交额因子：
+        - 使用 510300 / 159901 / 159915 的成交额简单求和作为当日市场活跃度 proxy
+        - 目前先用绝对阈值（后续可以接入历史均值进行标准化）
+        """
+        idx = self.raw.get("index_turnover") or {}
 
-        return {
-            "turnover_score": t_s,
-            "global_score": g_s,
-            "north_score": n_s,
-            "liquidity_score": l_s,
-            "macro_reflection_risk": m_s,
-            "style_switch": style_s,
-            "vp_risk": vp_s,
-            "margin_speed": margin_s,
-            "bear_trap": bear_s,
-            "tech_pattern": tech_s,
-            "policy_etf": policy_s,
-            "total_score": total,
-            "risk_level": level,
-            "advise": advice,
-            "explanation": expl,
-        }
+        def get_turn(name: str) -> float:
+            node = idx.get(name) or {}
+            val = node.get("turnover")
+            if val is None:
+                # 某些场景只给了 price + volume
+                price = _safe_float(node.get("price")) or 0.0
+                volume = _safe_float(node.get("volume")) or 0.0
+                return float(price * volume)
+            return float(val)
 
-    # ========== 原有逻辑 ==========
-    def _turnover(self, idx):
-        vals = [
-            idx[k]["turnover"]
-            for k in ["shanghai", "shenzhen", "chi_next"]
-            if k in idx and "turnover" in idx[k]
-        ]
-        if not vals:
-            return 0, ["成交额缺失"]
-        total = sum(vals)
-        d: List[str] = []
-        s = 0
-        if total > 7e10:
-            s += 3
-            d.append("全市场放量")
-        elif total > 5e10:
-            s += 1
-            d.append("成交额偏强")
-        elif total < 3e10:
-            s -= 2
-            d.append("明显缩量")
+        sh = get_turn("shanghai")
+        sz = get_turn("shenzhen")
+        cyb = get_turn("chi_next")
+        total = sh + sz + cyb
+
+        score = 0
+        if total >= 60e9:
+            score = 2
+            self._explanation_parts.append("成交额明显放量")
+        elif total >= 50e9:
+            score = 1
+            self._explanation_parts.append("成交额偏强")
+        elif total >= 30e9:
+            score = 0
+            self._explanation_parts.append("成交额中性")
         else:
-            d.append("成交额正常")
-        return s, d
+            score = -2
+            self._explanation_parts.append("明显缩量")
 
-    def _global(self, g):
-        s = 0
-        d: List[str] = []
-        nas = g.get("nasdaq", {}).get("change_pct", 0)
-        spy = g.get("spy", {}).get("change_pct", 0)
-        vix = g.get("vix", {}).get("last", 0)
-        if nas < -1:
-            s -= 2
-            d.append(f"纳指下跌{nas}%")
-        if spy < -0.5:
-            s -= 1
-            d.append(f"SPY下跌{spy}%")
-        if vix > 22:
-            s -= 2
-            d.append(f"VIX={vix}")
-        return s, d
+        self.result.turnover_score = int(score)
 
-    def _north(self, idx):
-        cyb = idx.get("chi_next", {}).get("turnover", 0)
-        if cyb > 3e9:
-            return 1, ["北向偏强"]
-        if cyb < 1e9:
-            return -1, ["北向偏弱"]
-        return 0, ["北向中性"]
+    def _score_global(self) -> None:
+        """
+        外围市场因子（当前版本先简化为 0，后续可接入完整的 GlobalRisk 信号）.
+        """
+        # 这里保留接口，方便未来接 GlobalRisk 的 us_daily / macro_scoring 结果
+        self.result.global_score = 0
 
-    def _liq(self, idx):
-        vol = idx.get("chi_next", {}).get("volume", 0)
-        if vol < 3e8:
-            return -2, ["创业板流动性下降"]
-        return 0, ["流动性正常"]
+    def _score_north(self) -> None:
+        """
+        北向资金因子：
+        - 当前 A 股不再披露实时北向，v4 暂不直接打分，统一返回 0（中性）
+        - 后续可以接入 ETF 流入替代（如 510300 / 159915 等）再调整
+        """
+        self.result.north_score = 0
 
-    def _level(self, t):
-        if t >= 4:
-            return "Low"
-        if t >= 0:
-            return "Medium"
-        if t >= -3:
-            return "High"
-        return "Extreme"
+    def _score_liquidity(self) -> None:
+        """
+        流动性因子：
+        - 预留接口，当前统一视为“流动性正常”，得分为 0
+        - 后续可接入融资余额 / 质押风险 / 小盘成交占比等信号
+        """
+        self.result.liquidity_score = 0
 
-    def _adv(self, l):
-        return {
-            "Low": "加仓",
-            "Medium": "观察",
-            "High": "减仓",
-            "Extreme": "规避",
-        }[l]
+    def _score_macro_reflection(self) -> None:
+        """
+        宏观 / 大宗对 A 股的反射风险（macro_reflection_risk）：
 
-    def _expl(self, total, level, *ds):
-        lines = [f"风险等级：{level}（{total}分）", "", "【因子解读】"]
-        for sec in ds:
-            for x in sec:
-                lines.append("- " + x)
+        设计思路：
+        - 黄金大涨 → 偏避险，单独来看对股市是压力（-1）
+        - 期铜大涨 → 经济预期改善，对周期 / 权重股偏利好（+2）
+        - 美元走强 → 流动性偏紧，对新兴市场略偏空（-1）
+        - 美元走弱 → 有利于全球风险资产（+1）
+        - 原油大涨 / 大跌主要影响通胀与成本，这里只在极端时略作调整
+
+        最终分数限制在 [-2, +2] 区间。
+        """
+        macro = self.raw.get("macro") or {}
+
+        def get_pct(key: str) -> float | None:
+            node = macro.get(key) or {}
+            return _safe_float(node.get("change_pct"))
+
+        dxy = get_pct("usd")
+        gold = get_pct("gold")
+        oil = get_pct("oil")
+        copper = get_pct("copper")
+
+        score = 0
+
+        # 美元指数
+        if dxy is not None:
+            if dxy > 0.8:
+                score -= 1
+            elif dxy < -0.8:
+                score += 1
+
+        # 黄金变动：避险情绪
+        if gold is not None:
+            if gold > 1.5:
+                # 黄金大涨，偏避险
+                score -= 1
+            elif gold < -1.5:
+                score += 1
+
+        # 期铜：对经济预期的反射更强，权重稍大
+        if copper is not None:
+            if copper > 2.0:
+                score += 2
+            elif copper < -2.0:
+                score -= 2
+
+        # 原油极端波动时略作调整
+        if oil is not None:
+            if oil > 4.0:
+                score -= 1
+            elif oil < -4.0:
+                score += 1
+
+        # 裁剪到 [-2, 2]
+        if score > 2:
+            score = 2
+        elif score < -2:
+            score = -2
+
+        self.result.macro_reflection_risk = int(score)
+
+        # 解释文案（只在有可用数据时输出）
+        if copper is not None and abs(copper) >= 2.0:
+            if copper > 0:
+                self._explanation_parts.append(f"铜价大涨({copper:.3f}%) → 经济预期改善")
+            else:
+                self._explanation_parts.append(f"铜价大跌({copper:.3f}%) → 周期风险上升")
+
+    # === 聚合 & 文案 ===
+
+    def _aggregate(self) -> None:
+        """
+        汇总所有因子得分，并给出风险等级与操作建议。
+
+        当前简单规则：
+        - total <= -4  : Extreme / 规避
+        - -4 < total <= -1 : High / 减仓
+        - -1 < total <= 2 : Medium / 观察
+        - total > 2   : Low / 持有
+        """
+        # 聚合所有显式列出的因子（方便以后增加新因子）
+        factor_scores = [
+            self.result.turnover_score,
+            self.result.global_score,
+            self.result.north_score,
+            self.result.liquidity_score,
+            self.result.macro_reflection_risk,
+            self.result.style_switch,
+            self.result.vp_risk,
+            self.result.margin_speed,
+            self.result.bear_trap,
+            self.result.tech_pattern,
+            self.result.policy_etf,
+        ]
+        total = int(sum(x for x in factor_scores if x is not None))
+        self.result.total_score = total
+
+        if total <= -4:
+            level = "Extreme"
+            advise = "规避"
+        elif total <= -1:
+            level = "High"
+            advise = "减仓"
+        elif total <= 2:
+            level = "Medium"
+            advise = "观察"
+        else:
+            level = "Low"
+            advise = "持有"
+
+        self.result.risk_level = level
+        self.result.advise = advise
+
+    def _build_explanation(self) -> str:
+        """
+        生成最终中文解释文本，格式示例：
+
+        风险等级：High（-1分）
+
+        【因子解读】
+        - 明显缩量
+        - 北向中性
+        - 流动性正常
+        - 铜价大涨(2.902%) → 经济预期改善
+        - 风格切换因子未提供
+        ...
+        """
+        lines: list[str] = []
+
+        # 1) 头部总览
+        lines.append(f"风险等级：{self.result.risk_level}（{self.result.total_score}分）")
+        lines.append("")
+        lines.append("【因子解读】")
+
+        # 2) 核心三大因子（成交额 / 北向 / 流动性）
+        # Turnover
+        if self.result.turnover_score <= -2:
+            lines.append("- 明显缩量")
+        elif self.result.turnover_score >= 2:
+            lines.append("- 成交额明显放量")
+        elif self.result.turnover_score == 1:
+            lines.append("- 成交额偏强")
+        else:
+            lines.append("- 成交额中性")
+
+        # Northbound
+        if self.result.north_score > 0:
+            lines.append("- 北向偏强")
+        elif self.result.north_score < 0:
+            lines.append("- 北向偏弱")
+        else:
+            lines.append("- 北向中性")
+
+        # Liquidity
+        if self.result.liquidity_score < 0:
+            lines.append("- 流动性偏紧")
+        elif self.result.liquidity_score > 0:
+            lines.append("- 流动性宽松")
+        else:
+            lines.append("- 流动性正常")
+
+        # 3) 宏观 / 大宗说明（如果 _score_macro_reflection 已经加入）
+        for part in self._explanation_parts:
+            lines.append(f"- {part}")
+
+        # 4) 预留因子说明
+        lines.append("- 风格切换因子未提供")
+        lines.append("- 量价结构因子未提供")
+        lines.append("- 两融节奏因子未提供")
+        lines.append("- Bear Trap 因子未提供")
+        lines.append("- 技术形态因子未提供")
+        lines.append("- 政策 ETF 因子未提供")
+
         return "\n".join(lines)
 
-    # ========== 新增扩展因子实现/占位 ==========
-    def _macro(self, macro: Dict[str, Any]):
-        """宏观反射因子：简单用美元、黄金、原油、铜来衡量风险偏好。
 
-        规则（可日后再细化）：
-        - 美元指数上行 + 黄金上行 → 风险偏好下降 → -1 分
-        - 美元下行 + 黄金调整 → 风险偏好改善 → +1 分
-        - 极端大涨大跌时，额外 +-1
-        """
-        s = 0
-        d: List[str] = []
+def score_ashare_risk(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    对外的便捷函数封装，便于在 main.py / engine 中直接调用。
 
-        usd = macro.get("usd", {}).get("change_pct", 0) or 0
-        gold = macro.get("gold", {}).get("change_pct", 0) or 0
-        oil = macro.get("oil", {}).get("change_pct", 0) or 0
-        copper = macro.get("copper", {}).get("change_pct", 0) or 0
+    示例::
 
-        if usd > 0.5 and gold > 0.5:
-            s -= 1
-            d.append(f"美元({usd}%) + 黄金({gold}%) 同涨 → 风险偏好下降")
-        elif usd < -0.5 and gold < 0.5:
-            s += 1
-            d.append(f"美元({usd}%) 回落 + 黄金温和 → 风险偏好改善")
+        from unifiedrisk.core.ashare.risk_scorer import score_ashare_risk
 
-        if oil < -2:
-            s -= 1
-            d.append(f"油价大跌({oil}%) → 需求担忧")
-        if copper > 2:
-            s += 1
-            d.append(f"铜价大涨({copper}%) → 经济预期改善")
-
-        if not d:
-            d.append("宏观情绪中性")
-        return s, d
-
-    def _style_switch(self, fact: Dict[str, Any]):
-        v = fact.get("style_switch_score")
-        if v is None:
-            return 0, ["风格切换因子未提供"]
-        desc = "风格偏成长" if v > 0 else "风格偏价值" if v < 0 else "风格均衡"
-        return v, [f"Style Switch: {v}（{desc}）"]
-
-    def _vp_risk(self, fact: Dict[str, Any]):
-        v = fact.get("volume_price_score")
-        if v is None:
-            return 0, ["量价结构因子未提供"]
-        return v, [f"量价结构风险: {v}"]
-
-    def _margin_speed(self, fact: Dict[str, Any]):
-        v = fact.get("margin_speed_score")
-        if v is None:
-            return 0, ["两融节奏因子未提供"]
-        desc = "两融快速扩张" if v > 0 else "两融快速收缩" if v < 0 else "两融节奏平稳"
-        return v, [f"Margin Speed: {v}（{desc}）"]
-
-    def _bear_trap(self, fact: Dict[str, Any]):
-        v = fact.get("bear_trap_score")
-        if v is None:
-            return 0, ["Bear Trap 因子未提供"]
-        return v, [f"Bear Trap 信号: {v}"]
-
-    def _tech_pattern(self, fact: Dict[str, Any]):
-        v = fact.get("tech_pattern_score")
-        if v is None:
-            return 0, ["技术形态因子未提供"]
-        return v, [f"技术形态风险: {v}"]
-
-    def _policy_etf(self, fact: Dict[str, Any]):
-        v = fact.get("policy_etf_score")
-        if v is None:
-            return 0, ["政策 ETF 因子未提供"]
-        return v, [f"政策 ETF 资金流: {v}"]
+        result = score_ashare_risk(raw_payload)
+    """
+    return RiskScorer(raw).run()

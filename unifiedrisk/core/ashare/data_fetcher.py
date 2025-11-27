@@ -30,7 +30,7 @@ class AShareDataFetcher:
         return {
             "meta": {
                 "bj_time": bj_now.isoformat(),
-                "version": "UnifiedRisk_v3.4",
+                "version": "UnifiedRisk_v4.0",
                 "yahoo_enabled": True,
             },
             "index_turnover": self._fetch_turnover(bj_now),

@@ -1,7 +1,8 @@
 __pycache__/
 reports/
 data/
-logs
+logs/
 *.bak
+*.json
 test*.*
 __init__.py

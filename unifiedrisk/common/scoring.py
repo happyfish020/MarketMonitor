@@ -1,73 +1,42 @@
 
-"""UnifiedRisk common scoring helpers (v4.0)
+from typing import Dict
 
-This module centralizes basic risk level classification logic so that both
-A-share engines and global risk engines can share the same mapping rules.
-
-It is intentionally dependency-light: it only relies on the standard library.
-"""
-from __future__ import annotations
-
-from dataclasses import dataclass
-from typing import Dict, Tuple
-
-# --- Core API ------------------------------------------------------------
-
-RISK_LEVELS = [
-    (-9999.0, "极高风险", "🔴 极高风险：系统性或剧烈波动风险，建议大幅减仓甚至观望。"),
-    (-5.0,   "偏高风险", "🟠 偏高风险：短期调整压力较大，建议控制仓位、择机减仓。"),
-    (-1.0,   "中性偏空", "🟡 中性偏空：略偏空，但风险可控，注意防守。"),
-    (1.0,    "中性",     "⚪ 中性：多空力量基本均衡，可保持正常仓位。"),
-    (5.0,    "友好偏多", "🟢 友好偏多：环境偏多，适度加仓或持股为主。"),
-    (9999.0, "极度友好", "🔵 极度友好：趋势性机会明显，但仍需控制整体风险。"),
-]
+def normalize_score(v: float, lo: float, hi: float) -> float:
+    """线性映射到 [-3, 3]。"""
+    if hi == lo:
+        return 0.0
+    r = (v - lo) / (hi - lo)
+    r = max(0.0, min(1.0, r))
+    return round(-3.0 + 6.0 * r, 2)
 
 
-def classify_level(score: float) -> str:
-    """Return only the textual risk level name for a numeric score.
-
-    This is a very small and stable API that other modules can import:
-
-        from unifiedrisk.common.scoring import classify_level
-
-    If you need more detail than just the label, use :func:`classify_level_detail`.
-    """
-    label, _ = classify_level_detail(score)
-    return label
+def aggregate_factor_scores(d: Dict[str, float]) -> float:
+    if not d:
+        return 0.0
+    return round(sum(d.values()) / len(d), 2)
 
 
-def classify_level_detail(score: float) -> Tuple[str, str]:
-    """Return (label, description) for the given total_score.
+def classify_level_with_advice(score: float):
+    """简单 demo 分级，可后续替换为更精细规则。"""
+    if score <= -2:
+        level = "较安全"
+        desc = "系统性风险较低，偏多头环境。"
+        advice = "可适度加仓，关注高景气板块。"
+    elif score <= 0:
+        level = "中性"
+        desc = "多空力量均衡，指数以震荡为主。"
+        advice = "控制节奏，精选个股，避免追高。"
+    elif score <= 2:
+        level = "偏高风险"
+        desc = "空头力量增强，短期回调压力加大。"
+        advice = "适当降低仓位，减少高波动标的敞口。"
+    else:
+        level = "高风险"
+        desc = "情绪或资金有踩踏风险。"
+        advice = "防守为主，必要时减仓或观望。"
 
-    The thresholds are inclusive on the upper bound; they are ordered from
-    low score (more risky) to high score (more friendly).
-    """
-    for threshold, label, desc in RISK_LEVELS:
-        if score <= threshold:
-            return label, desc
-    # Fallback (should never hit because last threshold is +inf-like)
-    return "中性", "⚪ 中性：多空力量基本均衡，可保持正常仓位。"
-
-
-@dataclass
-class RiskSummary:
-    """Lightweight container for risk scoring results.
-
-    This is optional sugar: engines can choose to use it or simply work with
-    dicts. It is kept here because it is generic enough to be shared.
-    """
-    total_score: float
-    level: str
-    description: str
-
-    @classmethod
-    def from_score(cls, score: float) -> "RiskSummary":
-        lvl, desc = classify_level_detail(score)
-        return cls(total_score=score, level=lvl, description=desc)
-
-    def to_dict(self) -> Dict[str, object]:
-        return {
-            "total_score": self.total_score,
-            "risk_level": self.level,
-            "risk_description": self.description,
-        }
+    return {
+        "risk_level": level,
+        "risk_description": desc,
+        "risk_advice": advice,
+    }

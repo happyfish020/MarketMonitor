@@ -26,7 +26,7 @@ def main():
     except Exception:
         log.exception("Failed to write daily report")
 
-    print("\n=== UnifiedRisk v3.3 Output ===")
+    print("\n=== UnifiedRisk v4.0 Output ===")
     print(result)
 
 if __name__ == "__main__":

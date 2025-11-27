@@ -1,154 +1,73 @@
+
+"""UnifiedRisk common scoring helpers (v4.0)
+
+This module centralizes basic risk level classification logic so that both
+A-share engines and global risk engines can share the same mapping rules.
+
+It is intentionally dependency-light: it only relies on the standard library.
 """
-UnifiedRisk v1.9 - Common Scoring Utilities
------------------------------------------
-This module provides:
-
-1) Risk level classification
-2) Multi-horizon aggregation
-3) YAML-driven threshold & weight config
-4) Unified debug logging
-
-It is used by:
-    - MidtermEngine
-    - ShorttermEngine
-    - GlobalDailyRiskEngine
-    - AShareDailyEngine
-    - Future: US/EU/Commodity Risk Engines
-"""
-
 from __future__ import annotations
-from typing import Dict, Any
-from pathlib import Path
-import yaml
 
-from unifiedrisk.common.logger import get_logger
+from dataclasses import dataclass
+from typing import Dict, Tuple
+
+# --- Core API ------------------------------------------------------------
+
+RISK_LEVELS = [
+    (-9999.0, "极高风险", "🔴 极高风险：系统性或剧烈波动风险，建议大幅减仓甚至观望。"),
+    (-5.0,   "偏高风险", "🟠 偏高风险：短期调整压力较大，建议控制仓位、择机减仓。"),
+    (-1.0,   "中性偏空", "🟡 中性偏空：略偏空，但风险可控，注意防守。"),
+    (1.0,    "中性",     "⚪ 中性：多空力量基本均衡，可保持正常仓位。"),
+    (5.0,    "友好偏多", "🟢 友好偏多：环境偏多，适度加仓或持股为主。"),
+    (9999.0, "极度友好", "🔵 极度友好：趋势性机会明显，但仍需控制整体风险。"),
+]
 
 
-LOG = get_logger("UnifiedRisk.Scoring", debug=False)
+def classify_level(score: float) -> str:
+    """Return only the textual risk level name for a numeric score.
 
+    This is a very small and stable API that other modules can import:
 
-# ============================================================
-# 1. Risk Level Classification
-# ============================================================
+        from unifiedrisk.common.scoring import classify_level
 
-def classify_level(score: float, thresholds: Dict[str, Any]):
+    If you need more detail than just the label, use :func:`classify_level_detail`.
     """
-    Classify risk level based on user-defined thresholds.
+    label, _ = classify_level_detail(score)
+    return label
 
-    thresholds.yaml example:
-    ------------------------
-    bull: 1.0
-    neutral: 0.0
-    bear: -1.0
 
-    Returned:
-        (key, label)
+def classify_level_detail(score: float) -> Tuple[str, str]:
+    """Return (label, description) for the given total_score.
+
+    The thresholds are inclusive on the upper bound; they are ordered from
+    low score (more risky) to high score (more friendly).
     """
-
-    bull = thresholds.get("bull", 1.0)
-    neutral = thresholds.get("neutral", 0.0)
-    bear = thresholds.get("bear", -1.0)
-
-    if score >= bull:
-        return "bull", "做多 / Bullish"
-    elif score >= neutral:
-        return "neutral", "中性 / Neutral"
-    else:
-        return "bear", "偏空 / Bearish"
+    for threshold, label, desc in RISK_LEVELS:
+        if score <= threshold:
+            return label, desc
+    # Fallback (should never hit because last threshold is +inf-like)
+    return "中性", "⚪ 中性：多空力量基本均衡，可保持正常仓位。"
 
 
-# ============================================================
-# 2. Multi-Horizon Aggregation (Core Logic)
-# ============================================================
+@dataclass
+class RiskSummary:
+    """Lightweight container for risk scoring results.
 
-def aggregate_horizons(horizon_results: Dict[str, Dict[str, Any]]):
+    This is optional sugar: engines can choose to use it or simply work with
+    dicts. It is kept here because it is generic enough to be shared.
     """
-    Aggregate risk across multiple time horizons.
+    total_score: float
+    level: str
+    description: str
 
-    Input example:
-    ----------------
-    {
-        "midterm": {
-            "total_score": 0.35,
-            "risk_level": "bull",
-            ...
-        },
-        "shortterm": {
-            "total_score": -0.10,
-            "risk_level": "bear",
-            ...
-        },
-        "ashare_daily": {
-            "total_score": 0.05,
-            "risk_level": "neutral",
-            ...
+    @classmethod
+    def from_score(cls, score: float) -> "RiskSummary":
+        lvl, desc = classify_level_detail(score)
+        return cls(total_score=score, level=lvl, description=desc)
+
+    def to_dict(self) -> Dict[str, object]:
+        return {
+            "total_score": self.total_score,
+            "risk_level": self.level,
+            "risk_description": self.description,
         }
-    }
-
-    weights.yaml:
-    -------------
-    horizons:
-        midterm: 0.30
-        shortterm: 0.25
-        global_daily: 0.25
-        ashare_daily: 0.20
-
-    Output:
-    -------
-    {
-        "total_score": float,
-        "risk_level": "neutral",
-        "risk_label": "中性 / Neutral",
-        "details": {...}
-    }
-    """
-
-    # -------- Load horizon weights --------
-    weight_path = Path("config/weights.yaml")
-    if weight_path.exists():
-        cfg = yaml.safe_load(weight_path.read_text(encoding="utf-8"))
-        weights = cfg.get("horizons", {})
-    else:
-        # Default weights
-        weights = {
-            "midterm": 0.30,
-            "shortterm": 0.25,
-            "global_daily": 0.25,
-            "ashare_daily": 0.20,
-        }
-
-    LOG.info("=== Aggregation Start ===")
-
-    final_score = 0.0
-
-    for horizon_name, result in horizon_results.items():
-        raw_score = float(result.get("total_score", 0.0))
-        w = float(weights.get(horizon_name, 0.0))
-
-        LOG.info(
-            "Horizon %-15s | score=%6.3f | weight=%.2f | weighted=%.3f",
-            horizon_name,
-            raw_score,
-            w,
-            raw_score * w,
-        )
-
-        final_score += raw_score * w
-
-    # -------- Load thresholds --------
-    thr_path = Path("config/thresholds.yaml")
-    if thr_path.exists():
-        thr = yaml.safe_load(thr_path.read_text(encoding="utf-8"))
-    else:
-        thr = {"bull": 1.0, "neutral": 0.0, "bear": -1.0}
-
-    risk_key, risk_label = classify_level(final_score, thr)
-
-    LOG.info("Final Aggregated Score = %.3f → %s", final_score, risk_key)
-
-    return {
-        "total_score": final_score,
-        "risk_level": risk_key,
-        "risk_label": risk_label,
-        "details": horizon_results,
-    }

@@ -3,4 +3,5 @@ reports/
 data/
 logs
 *.bak
+test*.*
 __init__.py

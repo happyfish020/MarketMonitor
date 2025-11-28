@@ -1,10 +1,12 @@
 __pycache__/
 reports/
+.venv/
 data/
 logs/
+__init__.py
 *.bak
 *.zip
 *.txt
 *.json
 test*.*
-__init__.py
+*.patch

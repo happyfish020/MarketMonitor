@@ -1,5 +1,6 @@
 from pathlib import Path
-from unifiedrisk.core.ashare.report_writer import run_and_write
+import unified_risk.config.path_config
+from unified_risk.core.ashare.report_writer import run_and_write
 
 def main():
     out_dir = Path("reports")   # ←必须转成 Path

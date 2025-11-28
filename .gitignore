@@ -6,6 +6,7 @@ logs/
 __init__.py
 *.bak
 *.zip
+*.csv
 *.txt
 *.json
 test*.*

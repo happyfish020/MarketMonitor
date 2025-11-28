@@ -18,9 +18,9 @@ GlobalMultiRisk v5.6.full - unified entry
 import argparse
 import logging
 from datetime import datetime
-from global_risk.cache.auction_cache import has_auction_cache, write_auction_cache
-#from global_risk.cache.auction_cache import write_auction_cache
-from global_risk.utils.time_utils import now_bj
+from unified_risk.global_core.cache.auction_cache import has_auction_cache, write_auction_cache
+#from unified_risk.global_core.cache.auction_cache import write_auction_cache
+from unified_risk.global_core.utils.time_utils import now_bj
 
 # ============================================================
 # ① 关键修复：清空旧 handler（否则不会写入日志文件）
@@ -32,7 +32,7 @@ logging.getLogger().handlers.clear()
 # ============================================================
 # ② 必须在 logger 初始化前确保 logs 目录存在
 # ============================================================
-from global_risk.config import (
+from unified_risk.global_core.config import (
     LOG_DIR, REPORT_DIR, VERSION
 )
 LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -41,21 +41,21 @@ REPORT_DIR.mkdir(parents=True, exist_ok=True)
 # ============================================================
 # ③ 初始化日志系统
 # ============================================================
-from global_risk.utils.logging_utils import setup_logger
+from unified_risk.global_core.utils.logging_utils import setup_logger
 logger = setup_logger("GlobalMultiRisk.main")
 
 # ============================================================
 # ④ 导入主引擎 / 模式调度
 # ============================================================
 from global_risk import GlobalRiskEngine, get_daily_global_risk
-from global_risk.modes import (
+from unified_risk.global_core.modes import (
     run_us_daily_mode,
     run_preopen_mode,
     run_tomorrow_mode,
 )
 
 # 报告模块（你刚才上传的）
-from global_risk.report_writer import (
+from unified_risk.global_core.report_writer import (
     write_preopen_report,
     write_auction_report,
     write_morning_report,
@@ -64,7 +64,7 @@ from global_risk.report_writer import (
 )
 
 # 时间工具
-from global_risk.utils.time_utils import now_bj
+from unified_risk.global_core.utils.time_utils import now_bj
 
 
 # ============================================================

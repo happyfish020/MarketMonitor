@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-UnifiedRisk v4.3.8 - DataFetcher
+UnifiedRisk v5.0.1 - DataFetcher
 --------------------------------
 负责获取 A 股全市场所需的全部数据，包括：
     • 指数行情（上证/深证/创业板/科创50）
@@ -19,7 +19,7 @@ import json
 import re
 import requests
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 import os
 import akshare as ak
@@ -45,7 +45,7 @@ ak_cache = AkCache(base_dir=str(BASE_DIR))
 day_cache = CacheManager(base_dir=str(BASE_DIR))
 
 
-BJ_TZ = datetime.now().astimezone().tzinfo
+BJ_TZ = timezone(timedelta(hours=8))
 
 
 class DataFetcher:
@@ -501,7 +501,7 @@ class DataFetcher:
             "meta": {
                 "bj_time": bj_now.strftime("%Y-%m-%d %H:%M:%S"),
                 "date": date_str,
-                "version": "UnifiedRisk_v4.3.8",
+                "version": "UnifiedRisk_v5.0.1",
             },
             "index": index_data,
             "breadth": breadth,
@@ -515,6 +515,25 @@ class DataFetcher:
 
      
  
+
+    def _get_or_fetch(self, key: str, fetch_func):
+        """通用缓存包装：优先读 day_cache，失败时执行 fetch_func 再写入缓存"""
+        cache_key = f"misc_{key}"
+        cached = day_cache.get(cache_key)
+        if cached is not None:
+            return cached
+    
+        try:
+            data = fetch_func()
+        except Exception as e:
+            LOG.warning(f"[cache] fetch {key} failed: {e}")
+            return cached
+    
+        if data is not None:
+            day_cache.set(cache_key, data)
+        return data
+
+
     def get_spot_all_with_cache(self) -> pd.DataFrame:
         """
         使用 AkCache 缓存的全市场快照。
@@ -717,5 +736,16 @@ class DataFetcher:
         }
 
 
-# 结束：DataFetcher 类
 
+
+    # ===== 修复后的方法 =====
+    def _today_str(self) -> str:
+        return datetime.now(BJ_TZ).strftime("%Y-%m-%d")
+
+    def _cache_key(self, name: str) -> str:
+        return name
+ 
+ 
+ 
+ 
+# 结束：DataFetcher 类

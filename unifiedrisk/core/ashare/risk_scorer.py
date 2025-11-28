@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-UnifiedRisk v4.3.8 - RiskScorer
+UnifiedRisk v5.0.2 - RiskScorer
 --------------------------------
 基于 DataFetcher 提供的 raw 数据，计算 7 大核心风险因子：
     • Price 因子（大盘价格 & 指数趋势）

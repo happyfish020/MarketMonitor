@@ -49,6 +49,50 @@ BJ_TZ = timezone(timedelta(hours=8))
 
 
 class DataFetcher:
+
+    # ------------------------------------------------------------
+    # 工具：由 north_list 构造趋势视图（n1..n5 + slope + reverse）
+    # ------------------------------------------------------------
+    def _build_north_trend_view(self, north_list, max_days: int = 5) -> dict:
+        if not isinstance(north_list, list) or not north_list:
+            return {"n1": None, "n2": None, "n3": None, "n4": None, "n5": None,
+                    "slope": None, "reverse": False}
+
+        valid = [x for x in north_list if x.get("date")]
+        if not valid:
+            return {"n1": None, "n2": None, "n3": None, "n4": None, "n5": None,
+                    "slope": None, "reverse": False}
+
+        valid.sort(key=lambda x: x["date"])
+        latest = list(reversed(valid[-max_days:]))
+
+        trend = {"n1": None, "n2": None, "n3": None, "n4": None, "n5": None,
+                 "slope": None, "reverse": False}
+
+        for i in range(5):
+            key = f"n{i+1}"
+            if i < len(latest):
+                try:
+                    trend[key] = float(latest[i].get("fund_net", 0.0))
+                except Exception:
+                    trend[key] = None
+            else:
+                trend[key] = None
+
+        n1, n2, n3 = trend["n1"], trend["n2"], trend["n3"]
+        if n1 is not None and n3 is not None:
+            trend["slope"] = (n1 - n3) / 3.0
+        else:
+            trend["slope"] = None
+
+        reverse = False
+        if n1 is not None and n2 is not None:
+            if n2 < 0 < n1 or (n2 > 0 > n1):
+                reverse = True
+        trend["reverse"] = reverse
+
+        return trend
+
     """
     核心数据采集类。
     每次运行 A-Share Daily Engine 时，由 DataFetcher 统一抓取数据。
@@ -302,7 +346,8 @@ class DataFetcher:
             except Exception:
                 continue
 
-        return {"north": north_list}
+        trend_view = self._build_north_trend_view(north_list, max_days=5)
+        return {"north": north_list, "trend": trend_view}
 
 
     # ------------------------------------------------------------

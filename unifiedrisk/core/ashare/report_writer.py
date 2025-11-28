@@ -210,3 +210,10 @@ def run_and_write(out_dir="reports"):
     eng = AShareDailyEngine()
     payload = eng.run()
     return write_daily_report(payload, Path(out_dir))
+
+    def _write_sector_rotation(self, raw, lines):
+        sr = (raw.get('sector_rotation') or {}).get('summary_lines', [])
+        lines.append('')
+        lines.append('Ⅸ. 行业轮动 / 板块强弱')
+        for s in sr:
+            lines.append(f'- {s}')

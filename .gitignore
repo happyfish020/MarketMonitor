@@ -3,6 +3,8 @@ reports/
 data/
 logs/
 *.bak
+*.zip
+*.txt
 *.json
 test*.*
 __init__.py

@@ -11,7 +11,7 @@ def main():
     setup_logger(level=level)
     log = logging.getLogger("UnifiedRisk.main")
 
-    log.info("UnifiedRisk starting (v4.04, mode=ashare)")
+    log.info("UnifiedRisk starting (v4.3.8, mode=ashare)")
     engine = AShareDailyEngine()
     result = engine.run()
 
@@ -26,7 +26,7 @@ def main():
     except Exception:
         log.exception("Failed to write daily report")
 
-    print("\n=== UnifiedRisk v4.0 Output ===")
+    print("\n=== UnifiedRisk v4.3.8 Output ===")
     print(result)
 
 if __name__ == "__main__":

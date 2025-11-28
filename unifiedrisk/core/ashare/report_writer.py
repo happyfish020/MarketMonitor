@@ -1,133 +1,212 @@
+# -*- coding: utf-8 -*-
+"""
+UnifiedRisk v4.3.8 - Daily Report Writer
+----------------------------------------
+负责将 engine.run() 结果写入 txt 报告。
+
+最终输出格式：
+    reports/A-RiskReport-YYYY-MM-DD.txt
+"""
+
+import logging
 from pathlib import Path
-from typing import Any, Dict
 
-from .engine import AShareDailyEngine
-from .data_fetcher import BJ_TZ
-from datetime import datetime
+LOG = logging.getLogger(__name__)
 
 
-def write_daily_report(payload: Dict[str, Any], out_dir: Path) -> Path:
+# ================================================================
+# 工具：格式化函数
+# ================================================================
+def fmt_pct(x):
+    """格式化涨跌幅"""
+    try:
+        return f"{float(x):+.2f}%"
+    except:
+        return "-"
+
+
+def fmt_billion(x):
+    """亿级数字"""
+    try:
+        return f"{float(x):,.2f}"
+    except:
+        return "-"
+
+
+# ================================================================
+# 主函数：写报告
+# ================================================================
+def write_daily_report(payload: dict, out_dir: Path):
+    """
+    生成：
+        A-RiskReport-YYYY-MM-DD.txt
+    """
+
+    out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    meta = payload.get("meta", {})
-    date_str = meta.get("date") or datetime.now(BJ_TZ).date().isoformat()
-    bj_time = meta.get("bj_time") or datetime.now(BJ_TZ).isoformat(timespec="seconds")
-    version = meta.get("version", "UnifiedRisk_v4.3.7")
+    date = payload["meta"].get("date")
+    filename = f"A-RiskReport-{date}.txt"
+    out_path = out_dir / filename
 
-    fname = f"A-RiskReport-{date_str}.txt"
-    fpath = out_dir / fname
+    LOG.info(f"Writing daily report → {out_path}")
 
-    factor_scores = payload.get("factor_scores", {})
-    factor_explain = payload.get("factor_explain", {})
+    score = payload["score"]
+    raw = payload["raw"]
 
+    # ------------------------------
+    # Header
+    # ------------------------------
     lines = []
-    lines.append("=== A股日级别风险量化报告（UnifiedRisk v4.3.7） ===")
-    lines.append(f"日期：{date_str}")
-    lines.append(f"运行时间（北京）：{bj_time}")
-    lines.append(f"引擎版本：{version}")
-    lines.append("")
-    lines.append(f"综合风险评分 (T0): {payload.get('total_risk_score', 0):+.2f}")
-    lines.append(f"风险等级: {payload.get('risk_level', 'N/A')}")
-    lines.append(f"风险描述: {payload.get('risk_description', '')}")
-    lines.append(f"操作建议: {payload.get('risk_advice', '')}")
-    lines.append("")
-    lines.append("[关键因子打分]")
-    lines.append("")
-    for name, score in factor_scores.items():
-        lines.append(f"・ {name}: {score:+.2f}")
-        explain = factor_explain.get(name, "")
-        if explain:
-            lines.append(f"    - {explain}")
+    lines.append("=== A股日级别风险量化报告 ===")
+    lines.append(f"日期：{date}")
+    lines.append(f"运行时间：{payload['meta']['run_time']}")
     lines.append("")
 
-    # 简要市场概览
-    raw = payload.get("raw", {})
-    etf = raw.get("etf") or {}
-    sh = etf.get("sh") or {}
-    sz = etf.get("sz") or {}
-    margin = raw.get("margin") or {}
-    north = raw.get("north") or []
-    market = raw.get("market") or {}
-
-    lines.append("[市场概览（代理 + clist 快照）]")
+    # ------------------------------
+    # Ⅰ. 综合风险等级
+    # ------------------------------
+    lines.append("[综合风险评分]")
+    lines.append(f"总分：{score['total_score']:+.2f}")
+    lines.append(f"风险等级：{score['risk_level']}")
+    lines.append("")
+    lines.append(score["comment"])
     lines.append("")
 
-    # ETF 成交额合计
-    total_turn = float(sh.get("turnover_100m") or 0.0) + float(sz.get("turnover_100m") or 0.0)
-    if total_turn > 0:
-        lines.append(f"・ ETF 代理合计成交额约：{total_turn:.0f} 亿元（510300 + 159901）")
+    # ------------------------------
+    # Ⅱ. 指数表现
+    # ------------------------------
+    idx = raw.get("index", {})
+    sh = idx.get("sh000001")
+    sz = idx.get("sz399001")
+    cy = idx.get("sz399006")
 
-    # 两融
-    rz = margin.get("两融余额_亿")
-    rz_delta = margin.get("两融余额增减_亿")
-    if rz is not None:
-        lines.append(
-            f"・ 两融余额约：{float(rz):.2f} 亿元，日变动：{float(rz_delta or 0.0):+.2f} 亿元"
-        )
+    lines.append("[指数表现]")
+    if sh:
+        pct = (sh["close"] - sh["open"]) / max(1e-6, sh["open"]) * 100
+        lines.append(f"上证指数： {sh['close']:.2f}  ({pct:+.2f}%)")
 
-    # 北向
+    if sz:
+        pct = (sz["close"] - sz["open"]) / max(1e-6, sz["open"]) * 100
+        lines.append(f"深证成指： {sz['close']:.2f}  ({pct:+.2f}%)")
+
+    if cy:
+        pct = (cy["close"] - cy["open"]) / max(1e-6, cy["open"]) * 100
+        lines.append(f"创业板指： {cy['close']:.2f}  ({pct:+.2f}%)")
+
+    lines.append("")
+
+    # ------------------------------
+    # Ⅲ. 市场情绪 Breadth
+    # ------------------------------
+    br = raw.get("breadth", {})
+    lines.append("[市场宽度 / 情绪]")
+    lines.append(f"上涨家数：{br.get('advancers','-')}")
+    lines.append(f"下跌家数：{br.get('decliners','-')}")
+    #lines.append(f"平均涨跌幅：{br.get('market_avg_change','-'):+.2f}%")
+    # 取值
+    avg_chg = br.get("market_avg_change")
+    
+    # 防止 None 或 '-' 崩溃
+    if isinstance(avg_chg, (int, float)):
+        avg_chg_str = f"{avg_chg:+.2f}%"
+    else:
+        avg_chg_str = "-"
+    
+    lines.append(f"平均涨跌幅：{avg_chg_str}")
+    
+    lines.append("")
+
+    # ------------------------------
+    # Ⅳ. 上交所 / 深交所成交与市值
+    # ------------------------------
+    sse = raw.get("sse", {})
+    szse = raw.get("szse", {})
+
+    lines.append("[成交额 / 市值]")
+    if sse:
+        lines.append(f"上交所成交额：{fmt_billion(sse.get('turnover'))} 亿元")
+        lines.append(f"上交所流通市值：{fmt_billion(sse.get('float_mv'))} 亿元")
+    if szse:
+        lines.append(f"深交所成交额：{fmt_billion(szse.get('turnover'))} 亿元")
+        lines.append(f"深交所流通市值：{fmt_billion(szse.get('float_mv'))} 亿元")
+    lines.append("")
+
+    # ------------------------------
+    # Ⅴ. 北向资金
+    # ------------------------------
+    north = raw.get("north", {}).get("north", [])
+    lines.append("[北向资金]")
     if north:
-        net_sum = sum(float(r.get("northbound_net") or 0.0) for r in north)
-        tot_sum = sum(float(r.get("northbound_total") or 0.0) for r in north) or 1.0
-        ratio = net_sum / tot_sum
-        lines.append(f"・ 北向净买入：{net_sum:.2e}（占成交 {ratio:.2%}）")
+        t = north[-1]
+        lines.append(f"当日净买入：{fmt_billion(t.get('fund_net')/1e8)} 亿元")
+        lines.append(f"沪股通净买入：{fmt_billion(t.get('hk2sh')/1e8)} 亿元")
+        lines.append(f"深股通净买入：{fmt_billion(t.get('hk2sz')/1e8)} 亿元")
+    else:
+        lines.append("数据缺失")
+    lines.append("")
 
-    # clist 大盘快照
-    if market:
-        up = market.get("up")
-        down = market.get("down")
-        flat = market.get("flat")
-        breadth_val = market.get("breadth")
-        mean_change = market.get("mean_change")
-        total_amt_100m = market.get("total_amt_100m")
-        sample_size = market.get("sample_size")
+    # ------------------------------
+    # Ⅵ. 两融余额
+    # ------------------------------
+    margin = raw.get("margin", {}).get("margin", [])
+    lines.append("[两融余额]")
+    if margin:
+        m = margin[-1]
+        lines.append(f"两融余额：{fmt_billion(m.get('rzrqye_100m'))} 亿元")
+        lines.append(f"融资余额：{fmt_billion(m.get('rzye_100m'))} 亿元")
+        lines.append(f"融券余额：{fmt_billion(m.get('rqye_100m'))} 亿元")
+    else:
+        lines.append("数据缺失")
+    lines.append("")
 
-        if up is not None and down is not None:
+    # ------------------------------
+    # Ⅶ. 主力资金流向
+    # ------------------------------
+    main = raw.get("mainflow", {})
+    lines.append("[大盘主力资金]")
+    if main:
+        lines.append(f"主力净流入：{fmt_billion(main.get('main_net')/1e8)} 亿元")
+        lines.append(f"超大单净流入：{fmt_billion(main.get('super_net')/1e8)} 亿元")
+    else:
+        lines.append("数据缺失")
+    lines.append("")
+
+    # ------------------------------
+    # Ⅷ. 行业主力资金前 5
+    # ------------------------------
+    sector = raw.get("sector", {}).get("sectors", [])
+    lines.append("[行业主力资金（前5）]")
+    if sector:
+        top5 = sorted(sector, key=lambda x: x.get("main_100m", 0.0), reverse=True)[:5]
+        for s in top5:
             lines.append(
-                f"・ 主板样本（fs=b:MK0010）上涨 {up} 家，下跌 {down} 家，平盘 {flat} 家，"
-                f"宽度={breadth_val}（样本数={sample_size}）"
+                f"{s['name']}： 主力 {fmt_billion(s['main_100m'])} 亿，涨幅 {s['change_pct']:+.2f}%"
             )
-        if mean_change is not None:
-            lines.append(f"・ 主板平均涨跌幅：{float(mean_change):.2f}%")
-        if total_amt_100m is not None:
-            lines.append(f"・ 主板样本成交额合计约：{float(total_amt_100m):.0f} 亿元")
+    else:
+        lines.append("数据缺失")
 
     lines.append("")
 
-    # TOP 列表展示（简版）
-    if market:
-        top_g = market.get("top_gainers") or []
-        top_l = market.get("top_losers") or []
-        top_a = market.get("top_amplitude") or []
-
-        def _fmt_stock(s):
-            return f"{s['code']} {s['name']} 涨跌:{s['change_pct']:.2f}%, 成交:{s['amount_100m']:.1f}亿"
-
-        lines.append("[Top 涨幅股票（样本内，前 5）]")
-        for s in top_g[:5]:
-            lines.append(f"  - {_fmt_stock(s)}")
-        lines.append("")
-
-        lines.append("[Top 跌幅股票（样本内，前 5）]")
-        for s in top_l[:5]:
-            lines.append(f"  - {_fmt_stock(s)}")
-        lines.append("")
-
-        lines.append("[高振幅股票（样本内，前 5）]")
-        for s in top_a[:5]:
-            lines.append(
-                f"  - {s['code']} {s['name']} 振幅:{s['amp_pct']:.2f}%, "
-                f"涨跌:{s['change_pct']:.2f}%, 成交:{s['amount_100m']:.1f}亿"
-            )
-        lines.append("")
-
-    with fpath.open("w", encoding="utf-8") as f:
+    # ------------------------------
+    # 保存
+    # ------------------------------
+    with open(out_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
 
-    return fpath
+    LOG.info(f"Report written → {out_path}")
+    return out_path
 
 
-def run_and_write(out_dir: Path) -> Path:
-    engine = AShareDailyEngine()
-    payload = engine.run()
-    return write_daily_report(payload, out_dir)
+# ================================================================
+# 调度器入口（外部调用用）
+# ================================================================
+def run_and_write(out_dir="reports"):
+    """
+    engine.run() → report_writer → 写入文件
+    用于 run_ashare_daily.py 脚本
+    """
+    from .engine import AShareDailyEngine
+    eng = AShareDailyEngine()
+    payload = eng.run()
+    return write_daily_report(payload, Path(out_dir))

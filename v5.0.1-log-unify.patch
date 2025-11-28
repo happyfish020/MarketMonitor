@@ -1,0 +1,29 @@
+diff --git a/unifiedrisk/common/logger.py b/unifiedrisk/common/logger.py
+index 12abfe1..89dce45 100644
+--- a/unifiedrisk/common/logger.py
++++ b/unifiedrisk/common/logger.py
+@@ -1,6 +1,7 @@
+ import logging
+ import sys
++from datetime import datetime
+
+-def get_logger(name: str, level=logging.INFO):
++def get_logger(name: str, level=logging.INFO):
+     """
+     UnifiedRisk v5.0 - logger factory
+     All modules must call this for consistent log output.
+@@ -10,7 +11,14 @@ def get_logger(name: str, level=logging.INFO):
+     logger.setLevel(level)
+     if not logger.handlers:
+         handler = logging.StreamHandler(sys.stdout)
+-        fmt = "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
++        fmt = "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
+         handler.setFormatter(logging.Formatter(fmt))
+         logger.addHandler(handler)
+     return logger
++
++def log_header(logger, module: str, version: str):
++    """
++    Standard header for every UnifiedRisk module
++    """
++    logger.info(f"=== UnifiedRisk {module} (version {version}) ===")

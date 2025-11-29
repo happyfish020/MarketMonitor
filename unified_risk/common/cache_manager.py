@@ -1,60 +1,60 @@
-import os, json
-from datetime import datetime, timezone, timedelta
+import json
+from pathlib import Path
+from typing import Any, Dict, Optional
 
-BJ_TZ = timezone(timedelta(hours=8))
+from .logger import get_logger
+from .config_loader import get_path
+
+LOG = get_logger("UnifiedRisk.Cache")
+
+# 从配置获取 day_cache 目录
+CACHE_DIR: Path = get_path("cache")
+CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 
 class CacheManager:
-    """
-    v5.0.1 修复版：
-    - data_root= 和 base_dir= 两种参数都支持（向下兼容）
-    - subdir 默认为 "default_cache"
-    - 自动创建目录
-    """
+    """Day-cache 管理器：一个交易日一个 JSON 文件。"""
 
-    def __init__(self, data_root: str = None, subdir: str = "default_cache", base_dir: str = None):
-        # ---- 参数兼容处理 ----
-        if data_root is None and base_dir is None:
-            raise ValueError("CacheManager requires either data_root= or base_dir= argument.")
+    def __init__(self, base_dir: Optional[Path] = None) -> None:
+        self.base_dir = Path(base_dir) if base_dir else CACHE_DIR
 
-        if data_root is None:
-            data_root = base_dir
+    def _file_path(self, date_str: str) -> Path:
+        return self.base_dir / f"{date_str}.json"
 
-        # ---- 最终缓存根目录 ----
-        self.root = os.path.join(data_root, subdir)
-        os.makedirs(self.root, exist_ok=True)
-
-    # ---------------------------------------------
-    # 内部工具函数
-    # ---------------------------------------------
-    def _day(self):
-        return datetime.now(BJ_TZ).strftime("%Y%m%d")
-
-    def _path(self, key):
-        # 安全 key（不允许路径）
-        safe = key.replace("/", "_")
-
-        # 当日的目录
-        day_dir = os.path.join(self.root, self._day())
-        os.makedirs(day_dir, exist_ok=True)
-
-        return os.path.join(day_dir, safe + ".json")
-
-    # ---------------------------------------------
-    # 对外接口
-    # ---------------------------------------------
-    def get(self, key):
-        p = self._path(key)
-        if not os.path.exists(p):
-            return None
+    def load_day_cache(self, date_str: str) -> Dict[str, Any]:
+        path = self._file_path(date_str)
+        if not path.exists():
+            return {"date": date_str}
         try:
-            return json.load(open(p, "r", encoding="utf8"))
-        except:
-            return None
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception as e:
+            LOG.error(f"Failed reading cache {path}: {e}")
+            return {"date": date_str}
 
-    def set(self, key, value):
-        p = self._path(key)
+    def save_day_cache(self, date_str: str, data: Dict[str, Any]) -> None:
+        path = self._file_path(date_str)
         try:
-            json.dump(value, open(p, "w", encoding="utf8"), ensure_ascii=False)
-        except:
-            pass
+            path.write_text(
+                json.dumps(data, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except Exception as e:
+            LOG.error(f"Failed writing cache {path}: {e}")
+
+    def read_section(self, date_str: str, section: str) -> Dict[str, Any]:
+        return self.load_day_cache(date_str).get(section, {})
+
+    def write_section(self, date_str: str, section: str, payload: Dict[str, Any]) -> None:
+        cache = self.load_day_cache(date_str)
+        sec = cache.get(section, {})
+        sec.update(payload)
+        cache[section] = sec
+        self.save_day_cache(date_str, cache)
+
+    def read_key(self, date_str: str, section: str, key: str) -> Any:
+        return self.read_section(date_str, section).get(key)
+
+    def write_key(self, date_str: str, section: str, key: str, value: Any) -> None:
+        sec = self.read_section(date_str, section)
+        sec[key] = value
+        self.write_section(date_str, section, sec)

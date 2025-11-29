@@ -1,5 +1,4 @@
 __pycache__/
-reports/
 .venv/
 data/
 logs/
@@ -10,4 +9,3 @@ __init__.py
 *.txt
 *.json
 test*.*
-*.patch

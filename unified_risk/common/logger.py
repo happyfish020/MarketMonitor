@@ -1,40 +1,31 @@
 import logging
-import sys
 from datetime import datetime
-from pathlib import Path
+from .config_manager import CONFIG
 
-from .config_loader import get_path
+_LOGGERS = {}
 
-# 从配置获取日志目录
-LOG_DIR: Path = get_path("logs")
-LOG_DIR.mkdir(parents=True, exist_ok=True)
+def get_logger(name="UnifiedRisk"):
+    if name in _LOGGERS:
+        return _LOGGERS[name]
 
-
-def get_logger(name: str, level=logging.INFO, debug: bool = False) -> logging.Logger:
-    """
-    统一 logger 工厂：
-    - 日志文件：logs/unified_risk_{yyyy-MM-dd-HHmmss}.log
-    - 控制台：同步输出
-    - 不使用任何硬编码路径
-    """
     logger = logging.getLogger(name)
-    logger.setLevel(logging.DEBUG if debug else level)
-    logger.propagate = False
+    logger.setLevel(logging.INFO)
 
-    if not logger.handlers:
-        ts = datetime.now().strftime("%Y-%m-%d-%H%M%S")
-        logfile = LOG_DIR / f"unified_risk_{ts}.log"
+    log_dir = CONFIG.get_path("log_dir")
+    log_dir.mkdir(parents=True, exist_ok=True)
 
-        fh = logging.FileHandler(logfile, encoding="utf-8")
-        sh = logging.StreamHandler(sys.stdout)
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    fh_path = log_dir / f"unified_risk_{ts}.log"
 
-        fmt = "%(asctime)s | %(levelname)-7s | %(name)s | %(message)s"
-        formatter = logging.Formatter(fmt)
+    fmt = logging.Formatter("%(asctime)s | %(levelname)-7s | %(name)s | %(message)s")
 
-        fh.setFormatter(formatter)
-        sh.setFormatter(formatter)
+    ch = logging.StreamHandler()
+    ch.setFormatter(fmt)
+    logger.addHandler(ch)
 
-        logger.addHandler(fh)
-        logger.addHandler(sh)
+    fh = logging.FileHandler(fh_path, encoding="utf-8")
+    fh.setFormatter(fmt)
+    logger.addHandler(fh)
 
+    _LOGGERS[name] = logger
     return logger

@@ -1,3 +1,0 @@
-data_dir: "./unified_risk/data"
-report_dir: "./unified_risk/reports"
-log_level: "INFO"

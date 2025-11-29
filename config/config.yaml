@@ -1,0 +1,22 @@
+paths:
+  log_dir: logs
+  report_dir: reports
+  data_dir: data
+  cache_dir: data/cache
+  raw_dir: data/raw
+
+runtime:
+  mode: ashare_daily
+  default_date: auto
+
+factors:
+  enable_northbound: true
+  enable_turnover: true
+  enable_margin: true
+  enable_global: true
+
+weights:
+  northbound: 1.0
+  turnover: 1.0
+  margin: 1.0
+  global: 1.0

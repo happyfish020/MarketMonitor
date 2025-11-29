@@ -1,24 +1,16 @@
 from datetime import datetime
 from unified_risk.common.config_manager import CONFIG
 from unified_risk.common.logger import get_logger
-from unified_risk.engine.ashare_daily_engine import AshareDailyEngine
+from unified_risk.core.ashare.ashare_daily_engine import AShareDailyEngine
 
 LOG = get_logger("UnifiedRisk.Main")
 
 def main():
-    mode = CONFIG.get("runtime","mode")
-    d = CONFIG.get("runtime","default_date")
-    if d=="auto":
-        d = datetime.now().date()
-    else:
-        d = datetime.strptime(d,"%Y-%m-%d").date()
-
-    if mode=="ashare_daily":
-        e = AshareDailyEngine()
-        res = e.run(d)
-        LOG.info(f"[Main] Finished: score={res['total_risk_score']}")
-    else:
-        LOG.error(f"Unknown mode {mode}")
-
+    # d 是 datetime.date 或 datetime.datetime 都可以
+    d = None  # 或者传 date，比如 date.today()
+    e = AShareDailyEngine()
+    res = e.run(d)
+    LOG.info(f"[Main] Finished: score={res['total_risk_score']}")
+    
 if __name__ == "__main__":
     main()

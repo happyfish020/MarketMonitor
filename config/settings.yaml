@@ -1,3 +1,16 @@
+# settings
+
+logging:
+  level: INFO     # 日志等级，日志文件名由 logging_utils 自动生成
+
+market_hours:
+  ashare:
+    open: "09:30"
+    close: "15:00"
+  us:
+    open: "09:30"
+    close: "16:00"
+
 paths:
   log_dir: logs
   report_dir: reports

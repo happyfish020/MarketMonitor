@@ -1,16 +1,23 @@
-from datetime import datetime
-from unified_risk.common.config_manager import CONFIG
+from __future__ import annotations
+
+from datetime import date
+
 from unified_risk.common.logger import get_logger
 from unified_risk.core.ashare.ashare_daily_engine import AShareDailyEngine
+from unified_risk.core.ashare.report_writer import write_daily_report
 
 LOG = get_logger("UnifiedRisk.Main")
 
-def main():
-    # d 是 datetime.date 或 datetime.datetime 都可以
-    d = None  # 或者传 date，比如 date.today()
-    e = AShareDailyEngine()
-    res = e.run(d)
-    LOG.info(f"[Main] Finished: score={res['total_risk_score']}")
-    
+
+def main(run_date: date | None = None) -> None:
+    engine = AShareDailyEngine()
+    res = engine.run(run_date)
+    LOG.info(
+        "[Main] Finished: total_risk_score=%.3f",
+        res.get("total_risk_score", 0.0),
+    )
+    write_daily_report(res)
+
+
 if __name__ == "__main__":
     main()

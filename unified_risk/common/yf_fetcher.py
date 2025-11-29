@@ -1,74 +1,124 @@
-# unified_risk/common/yf_fetcher.py
 from __future__ import annotations
 
 import time
-from datetime import datetime, timezone, timedelta
-from typing import Dict, Optional, List
+from typing import Dict, Optional
 
 import pandas as pd
 import yfinance as yf
+
+try:
+    import akshare as ak
+except Exception:
+    ak = None
 
 from unified_risk.common.logger import get_logger
 
 LOG = get_logger("UnifiedRisk.YF.ETF")
 
-BJ_TZ = timezone(timedelta(hours=8))
-
 
 class YFETFClient:
-    """
-    轻量级 yfinance ETF 客户端，带内存缓存。
-    - get_etf_daily(symbol): 返回最近 N 日日线 DataFrame（date, close, volume）
-    - get_latest_change_pct(symbol): 返回最近一个交易日涨跌幅（%）
-    """
-
-    def __init__(self, cache_ttl: int = 600):
+    def __init__(self, ttl_seconds: int = 600) -> None:
         self._yf_cache: Dict[str, pd.DataFrame] = {}
         self._yf_cache_expire: Dict[str, float] = {}
-        self.cache_ttl = cache_ttl
+        self._ttl = ttl_seconds
 
-    def get_etf_daily(self, symbol: str, days: int = 20) -> pd.DataFrame:
-        """
-        优先使用缓存；如无缓存或缓存过期，则调用 yfinance。
-        返回字段：date, close, volume（按日期升序）
-        """
+        self._yf_map: Dict[str, str] = {
+            "510300": "510300.SS",
+            "510050": "510050.SS",
+            "159902": "159902.SZ",
+            "512880": "512880.SS",
+            "159915": "159915.SZ",
+            "159922": "159922.SZ",
+            "159619": "159619.SZ",
+            "512000": "512000.SS",
+            "159901": "159901.SZ",
+            "159919": "159919.SZ",
+        }
+
+    def get_etf_daily(self, symbol: str) -> Optional[pd.DataFrame]:
         now = time.time()
         if symbol in self._yf_cache and now < self._yf_cache_expire.get(symbol, 0):
             return self._yf_cache[symbol].copy()
 
         try:
-            tk = yf.Ticker(symbol)
-            hist = tk.history(period="60d", interval="1d")
-            if hist is None or hist.empty:
-                LOG.warning(f"[YF] history empty for {symbol}")
-                df = pd.DataFrame(columns=["date", "close", "volume"])
-            else:
-                df = (
-                    hist.reset_index()
-                    .rename(columns={"Date": "date", "Close": "close", "Volume": "volume"})
-                    [["date", "close", "volume"]]
-                )
-                if len(df) > days:
-                    df = df.iloc[-days:].reset_index(drop=True)
+            yf_symbol = self._yf_map.get(symbol, symbol)
+            if yf_symbol == symbol and symbol.isdigit():
+                yf_symbol = symbol + ".SS"
 
-            self._yf_cache[symbol] = df
-            self._yf_cache_expire[symbol] = now + self.cache_ttl
-            return df.copy()
+            tk = yf.Ticker(yf_symbol)
+            hist = tk.history(period="90d")
+
+            if hist is not None and not hist.empty:
+                tmp = hist[["Close", "Volume"]].copy()
+                tmp.reset_index(inplace=True)
+                tmp.rename(
+                    columns={
+                        "Date": "date",
+                        "Close": "close",
+                        "Volume": "volume",
+                    },
+                    inplace=True,
+                )
+                df = tmp.sort_values("date").reset_index(drop=True)
+
+                self._yf_cache[symbol] = df
+                self._yf_cache_expire[symbol] = now + self._ttl
+
+                LOG.info(
+                    "[YF] ETF %s(%s) rows=%d", symbol, yf_symbol, len(df)
+                )
+                return df.copy()
+            else:
+                LOG.warning("[YF] ETF %s(%s) 返回空数据", symbol, yf_symbol)
         except Exception as e:
-            LOG.error(f"[YF] fetch failed for {symbol}: {e}", exc_info=True)
-            return pd.DataFrame(columns=["date", "close", "volume"])
+            LOG.warning("[YF] ETF 获取失败 %s: %s", symbol, e)
+
+        if ak is not None and symbol.isdigit():
+            try:
+                df = ak.fund_etf_hist_sina(symbol=symbol)
+                if df is not None and not df.empty:
+                    df = df.rename(
+                        columns={
+                            "日期": "date",
+                            "收盘": "close",
+                            "成交量": "volume",
+                        }
+                    )
+                    df["date"] = pd.to_datetime(df["date"])
+                    df = df.sort_values("date").reset_index(drop=True)[
+                        ["date", "close", "volume"]
+                    ]
+                    self._yf_cache[symbol] = df
+                    self._yf_cache_expire[symbol] = now + self._ttl
+                    LOG.info("[AK] ETF %s 使用 akshare 备份成功", symbol)
+                    return df.copy()
+            except Exception as e:
+                LOG.warning("[AK] ETF 备份失败 %s: %s", symbol, e)
+
+        LOG.error("[ETF] 无法获取 ETF 日线数据: %s", symbol)
+        return None
 
     def get_latest_change_pct(self, symbol: str) -> Optional[float]:
-        """返回最近一个交易日的涨跌幅（%）。"""
-        df = self.get_etf_daily(symbol, days=5)
-        if df.empty or len(df) < 2:
-            return None
-        last = df.iloc[-1]
-        prev = df.iloc[-2]
-        if prev["close"] == 0 or pd.isna(prev["close"]) or pd.isna(last["close"]):
-            return None
-        return float((last["close"] / prev["close"] - 1.0) * 100.0)
+        if symbol.isdigit():
+            df = self.get_etf_daily(symbol)
+            if df is None or df.empty or len(df) < 2:
+                return None
+            last = df.iloc[-1]
+            prev = df.iloc[-2]
+            if prev["close"] == 0:
+                return None
+            return float((last["close"] / prev["close"] - 1.0) * 100.0)
 
-    def get_multi_latest_change_pct(self, symbols: List[str]) -> Dict[str, Optional[float]]:
-        """批量获取多个 ETF 最近一个交易日涨跌幅。"""
-        return {s: self.get_latest_change_pct(s) for s in symbols}
+        try:
+            tk = yf.Ticker(symbol)
+            hist = tk.history(period="5d")
+            if hist is None or hist.empty or len(hist) < 2:
+                return None
+            last = hist["Close"].iloc[-1]
+            prev = hist["Close"].iloc[-2]
+            if prev == 0:
+                return None
+            return float((last / prev - 1.0) * 100.0)
+        except Exception as e:
+            LOG.error("[YF] get_latest_change_pct 失败 %s: %s", symbol, e)
+            return None

@@ -1,4 +1,3 @@
-# unified_risk/core/ashare/ashare_daily_engine.py
 from __future__ import annotations
 
 from datetime import datetime, date, timezone, timedelta
@@ -15,18 +14,13 @@ LOG = get_logger("UnifiedRisk.Engine.AShareDaily")
 
 
 class AShareDailyEngine:
-    """
-    v7.5.3 A 股日级引擎（简化版，可直接跑）
-    """
-
     def __init__(self) -> None:
-        self.fetcher = AShareDataFetcher()
         self.yf_client = YFETFClient()
+        self.fetcher = AShareDataFetcher(self.yf_client)
         self.nb_factor = NorthboundFactor(self.yf_client)
         self.scorer = AShareRiskScorer()
 
     def run(self, run_time: Optional[datetime | date] = None) -> Dict[str, Any]:
-        # 允许传 date，对齐你 main.py 的调用方式
         if isinstance(run_time, date) and not isinstance(run_time, datetime):
             run_dt = datetime(run_time.year, run_time.month, run_time.day, 18, 0, tzinfo=BJ_TZ)
         elif isinstance(run_time, datetime):
@@ -43,7 +37,7 @@ class AShareDailyEngine:
         result: Dict[str, Any] = {
             "meta": {
                 "bj_time": run_dt.isoformat(),
-                "version": "UnifiedRisk_v7.5.3",
+                "version": "UnifiedRisk_v7.5.6",
             },
             "raw": {
                 "snapshot": snapshot,
@@ -52,7 +46,6 @@ class AShareDailyEngine:
             "scores": scores,
         }
 
-        # 为兼容旧版本，扁平化一份
         result.update(scores)
         result["northbound_score"] = nb_snap.northbound_score
         result["nb_nps_score"] = nb_snap.nb_nps_score

@@ -1,4 +1,3 @@
-# unified_risk/core/ashare/scorer.py
 from __future__ import annotations
 
 from typing import Dict, Any
@@ -9,18 +8,6 @@ LOG = get_logger("UnifiedRisk.Scorer.AShare")
 
 
 class AShareRiskScorer:
-    """
-    v7.5.3 简化版日级评分器。
-
-    输出字段：
-      turnover_score
-      margin_score
-      northbound_score
-      nb_nps_score
-      global_score   （先固定为 0.0，可以后接 global 因子）
-      total_risk_score
-    """
-
     def score_daily(self, snapshot: Dict[str, Any], nb_snap: Any) -> Dict[str, float]:
         scores: Dict[str, float] = {}
 
@@ -29,11 +16,8 @@ class AShareRiskScorer:
 
         scores["turnover_score"] = turnover_score
         scores["margin_score"] = margin_score
-
         scores["northbound_score"] = float(nb_snap.northbound_score)
         scores["nb_nps_score"] = float(nb_snap.nb_nps_score)
-
-        # 先占位，未来可以接入 global_daily_risk
         scores["global_score"] = 0.0
 
         total = (

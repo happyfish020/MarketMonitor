@@ -10,7 +10,10 @@ import requests
 
 from unified_risk.common.logger import get_logger
 from unified_risk.common.yf_fetcher import YFETFClient
-
+from unified_risk.core.cache.cache_writer import (
+    smart_write_ashare_turnover,
+    smart_write_ashare_margin,
+)
 LOG = get_logger("UnifiedRisk.Fetcher.AShare")
 
 BJ_TZ = timezone(timedelta(hours=8))
@@ -70,28 +73,37 @@ class AShareDataFetcher:
             "margin": margin,
         }
 
+##
     def get_turnover(self) -> Dict[str, Any]:
+        bj_now = datetime.now(BJ_TZ)  # ← 必须确保最先定义
+    
         df_sh = self.yf.get_etf_daily("510300")
         df_sz = self.yf.get_etf_daily("159901")
-
-        if df_sh is not None and not df_sh.empty and df_sz is not None and not df_sz.empty:
+    
+        data = None  # ← 预先定义，避免未定义变量
+    
+        if (
+            df_sh is not None and not df_sh.empty and 
+            df_sz is not None and not df_sz.empty
+        ):
             sh_last = df_sh.iloc[-1]
             sz_last = df_sz.iloc[-1]
-
+    
             sh_prev = df_sh.iloc[-2] if len(df_sh) >= 2 else sh_last
             sz_prev = df_sz.iloc[-2] if len(df_sz) >= 2 else sz_last
-
+    
             sh_turnover = float(sh_last["close"] * sh_last["volume"])
             sz_turnover = float(sz_last["close"] * sz_last["volume"])
-
-            sh_change = 0.0
-            if sh_prev["close"] != 0:
-                sh_change = float((sh_last["close"] / sh_prev["close"] - 1.0) * 100.0)
-
-            sz_change = 0.0
-            if sz_prev["close"] != 0:
-                sz_change = float((sz_last["close"] / sz_prev["close"] - 1.0) * 100.0)
-
+    
+            sh_change = (
+                float((sh_last["close"] / sh_prev["close"] - 1.0) * 100.0)
+                if sh_prev["close"] != 0 else 0.0
+            )
+            sz_change = (
+                float((sz_last["close"] / sz_prev["close"] - 1.0) * 100.0)
+                if sz_prev["close"] != 0 else 0.0
+            )
+    
             data = {
                 "sh": {
                     "date": str(sh_last["date"]),
@@ -108,41 +120,94 @@ class AShareDataFetcher:
                     "change_pct": sz_change,
                 },
             }
+    
+            # 旧缓存 (向下兼容)
             self._cache_json("turnover.json", data)
+    
+            # 新缓存写入 (智能盘中覆盖)
+            try:
+                smart_write_ashare_turnover(bj_now.date(), data, bj_now)
+            except Exception as e:
+                LOG.error("[Turnover] smart cache write failed: %s", e)
+    
             LOG.info(
                 "[Turnover] SH=%.2e SZ=%.2e (from YF ETF)",
                 sh_turnover,
                 sz_turnover,
             )
             return data
-
+    
+        # fallback: 读取旧缓存
         cached = self._load_json("turnover.json")
         if cached:
             LOG.warning("[Turnover] use cached data")
             return cached
-
+    
         LOG.error("[Turnover] no data (yf+cache both failed)")
         return {"sh": {}, "sz": {}}
 
+## 
+
     def get_margin(self) -> Dict[str, Any]:
-        for i in range(3):
+        """
+        两融数据（LSDB）修正版：采用方案 A
+        - payload.date 来自接口（T+1日期）可能落后于 trade_date
+        - 我们统一写入缓存时，将 `date` 设为当天 trade_date
+        - 将真实日期保存在 payload_date 字段
+        """
+        bj_now = datetime.now(BJ_TZ)
+        trade_date = bj_now.date()
+    
+        # 预定义（避免未定义异常）
+        result = None
+    
+        # -- 1. Primary fetch --
+        try:
             d = self._fetch_lsdb_primary()
             if d:
-                self._cache_json("lsdb.json", d)
-                return d
-            LOG.warning("[LSDB] primary retry %d failed", i + 1)
-            time.sleep(1.0)
-
-        d2 = self._fetch_lsdb_secondary()
-        if d2:
-            self._cache_json("lsdb.json", d2)
-            return d2
-
+                result = d
+        except Exception as e:
+            LOG.error("[LSDB] primary fetch failed: %s", e)
+    
+        # -- 2. Secondary fetch --
+        if result is None:
+            try:
+                d2 = self._fetch_lsdb_secondary()
+                if d2:
+                    result = d2
+            except Exception as e:
+                LOG.error("[LSDB] secondary fetch failed: %s", e)
+    
+        # -- 3. If primary/secondary fetched something --
+        if result:
+            # 保存原始接口日期（通常是 T+1：昨天日期）
+            original_date = result.get("date")
+    
+            # 方案 A：原始日期保存为 payload_date；对外 date 替换为 today's trade_date
+            result["payload_date"] = original_date
+            result["date"] = trade_date.strftime("%Y-%m-%d")
+    
+            # -- 写入旧缓存 (7.5.x 原有逻辑) --
+            try:
+                self._cache_json("lsdb.json", result)
+            except Exception as e:
+                LOG.error("[LSDB] old cache write failed: %s", e)
+    
+            # -- 写入新缓存（智能：盘中可覆盖 / 盘后只定稿一次） --
+            try:
+                smart_write_ashare_margin(trade_date, result, bj_now)
+            except Exception as e:
+                LOG.error("[LSDB] smart cache write failed: %s", e)
+    
+            return result
+    
+        # -- 4. 使用旧缓存 fallback --
         cached = self._load_json("lsdb.json")
         if cached:
             LOG.warning("[LSDB] use cached data")
             return cached
-
+    
+        # -- 5. 完全失败 --
         LOG.error("[LSDB] no data (primary+secondary+cache all failed)")
         return {}
 

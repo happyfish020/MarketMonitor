@@ -37,7 +37,7 @@ class AShareDailyEngine:
         result: Dict[str, Any] = {
             "meta": {
                 "bj_time": run_dt.isoformat(),
-                "version": "UnifiedRisk_v7.5.8",
+                "version": "UnifiedRisk_v7.5.6",
             },
             "raw": {
                 "snapshot": snapshot,

@@ -1,3 +1,4 @@
+from __future__ import annotations
 
 SYMBOL_MAP = {
     "^FTXIN9": "XIN9.FGI",

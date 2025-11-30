@@ -1,11 +1,14 @@
-
 from __future__ import annotations
-import yfinance as yf
-from typing import Optional, Dict, Any
+
 import logging
+from typing import Optional, Dict, Any
+
+import yfinance as yf
+
 from unified_risk.common.symbol_mapper import map_symbol
 
 logger = logging.getLogger(__name__)
+
 
 def fetch_index_change_pct(symbol: str) -> Optional[float]:
     mapped = map_symbol(symbol)
@@ -24,6 +27,7 @@ def fetch_index_change_pct(symbol: str) -> Optional[float]:
         logger.warning(f"[Index] pct failed {symbol}->{mapped}: {e}")
         return None
 
+
 def fetch_index_last_price(symbol: str) -> Optional[float]:
     mapped = map_symbol(symbol)
     try:
@@ -35,6 +39,7 @@ def fetch_index_last_price(symbol: str) -> Optional[float]:
     except Exception as e:
         logger.warning(f"[Index] last failed {symbol}->{mapped}: {e}")
         return None
+
 
 def fetch_index_snapshot(symbol: str) -> Dict[str, Any]:
     mapped = map_symbol(symbol)
@@ -72,6 +77,7 @@ def fetch_index_snapshot(symbol: str) -> Dict[str, Any]:
             "ret": None,
             "pct": None,
         }
+
 
 def get_a50_night_session() -> Dict[str, Any]:
     return fetch_index_snapshot("^FTXIN9")

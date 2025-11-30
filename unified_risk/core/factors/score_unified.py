@@ -19,29 +19,52 @@ def _risk_level(score: float) -> str:
     if score >= 20:
         return "偏高风险 / 谨慎"
     return "高风险 / 防守优先"
-
+    
 def unify_scores(
     a_emotion: float,
     a_short: float,
     a_mid: float,
+    a_north: float,
     us_daily: float,
     us_short: float,
     us_mid: float,
-    a_north: float | None = None,
+    a_sector: float = None,
 ) -> UnifiedScore:
-    comp: Dict[str, float] = {
+
+    # 组件字典（统一存这里）
+    comp = {
         "A_Emotion": a_emotion,
         "A_Short": a_short,
         "A_Mid": a_mid,
-    }
-    if a_north is not None:
-        comp["A_North"] = a_north
-    comp.update({
+        "A_North": a_north,
         "US_Daily": us_daily,
         "US_Short": us_short,
         "US_Mid": us_mid,
-    })
+    }
 
+    # sector 可选
+    if a_sector is not None:
+        comp["A_Sector"] = a_sector
+
+    # === 计算总分 ===
+    total_raw = sum(comp.values())
+
+    # 转换到 0-100
+    total = max(min(total_raw * 2.5, 100), 0)
+
+    level = _risk_level(total)
+
+    expl = f"综合风险得分 {total:.1f} / 100，{level}。"
+
+    return UnifiedScore(
+        total=total,
+        level=level,
+        components=comp,
+        explanation=expl,
+    )
+    
+    
+ 
     def _block(scores, max_block: float) -> float:
         vals = [s for s in scores if s is not None]
         if not vals:

@@ -13,8 +13,7 @@ from unified_risk.core.engines.ashare_daily_engine import run_ashare_daily
 from unified_risk.common.logging_utils import log_info
 from unified_risk.core.report.report_writer import write_ashare_daily_report
 from unified_risk.common.time_utils import now_bj, get_ashare_trade_date
-from unified_risk.core.ashare.factors.factor_history import append_factor_history
-
+from unified_risk.core.ashare.factor_history import append_factor_history
 
 def run_ashare_daily_mode():
     log_info("[UnifiedRisk] Running ashare_daily (unified_risk.core)…")

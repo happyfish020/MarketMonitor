@@ -11,6 +11,8 @@ from unified_risk.core.factors.a_mid_term import compute_a_mid_term
 from unified_risk.core.factors.a_northbound import compute_a_northbound
 from unified_risk.core.factors.score_unified import unify_scores
 from unified_risk.common.logging_utils import log_warning
+from unified_risk.core.factors.a_sector_rotation import compute_sector_rotation
+
 
 BJ_TZ = timezone(timedelta(hours=8))
 
@@ -55,14 +57,18 @@ def run_ashare_daily() -> Dict[str, Any]:
 
     north = compute_a_northbound(snap)
 
+    # === 新增：板块轮动因子 ===
+    sector_score, sector_desc = compute_sector_rotation(snap)
+
     unified = unify_scores(
         a_emotion=emo.score,
         a_short=short.score,
         a_mid=mid.score,
+        a_north=north.score,
+        a_sector=sector_score,  # ⭐（可选）加入权重体系
         us_daily=10.0,
         us_short=10.0,
         us_mid=10.0,
-        a_north=north.score,
     )
 
     summary = (
@@ -70,7 +76,8 @@ def run_ashare_daily() -> Dict[str, Any]:
         f"- 情绪：{emo.description}\n"
         f"- 短期：{short.description}\n"
         f"- 中期：{mid.description}\n"
-        f"- 北向：{north.description}"
+        f"- 北向：{north.description}\n"
+        f"- 板块轮动：{sector_desc}"
     )
 
     return {
@@ -80,6 +87,13 @@ def run_ashare_daily() -> Dict[str, Any]:
         "short": short,
         "mid": mid,
         "north": north,
+
+        # ⭐ 加入 sector 因子返回
+        "sector": {
+            "score": sector_score,
+            "desc": sector_desc,
+        },
+
         "unified": unified,
         "summary": summary,
     }

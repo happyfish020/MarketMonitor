@@ -1,83 +1,81 @@
+
+"""指数行情抓取模块（安全版，支持周末/假日自动回退）。"""
+
 from __future__ import annotations
 
-import logging
-from typing import Optional, Dict, Any
+from typing import Optional, Dict
 
-import yfinance as yf
-
-from unified_risk.common.symbol_mapper import map_symbol
-
-logger = logging.getLogger(__name__)
+from unified_risk.common.logging_utils import log_warning
+from unified_risk.common.yf_fetcher import get_last_valid_bar, safe_yf_last_bars
+from unified_risk.common.yf_safe import safe_yf_last_bars
+from unified_risk.common.logging_utils import log_info, log_warning
 
 
-def fetch_index_change_pct(symbol: str) -> Optional[float]:
-    mapped = map_symbol(symbol)
-    try:
-        tk = yf.Ticker(mapped)
-        hist = tk.history(period="5d", interval="1d")
-        closes = hist["Close"].dropna().tail(2)
-        if len(closes) < 2:
-            return None
-        prev, last = closes.iloc[-2], closes.iloc[-1]
-        if prev == 0:
-            return None
-        pct = (last - prev) / prev * 100
-        return round(pct, 4)
-    except Exception as e:
-        logger.warning(f"[Index] pct failed {symbol}->{mapped}: {e}")
-        return None
+def map_symbol(symbol: str) -> str:
+    s = symbol.upper()
+    mapping = {
+        "SH": "000001.SS",
+        "SZ": "399001.SZ",
+        "HS300": "000300.SS",
+        "CSI300": "000300.SS",
+        "A50": "XIN9.DE",
+        "SPX": "^GSPC",
+        "SP500": "^GSPC",
+        "SPY": "SPY",
+        "NASDAQ": "^IXIC",
+        "NDX": "^NDX",
+        "DOW": "^DJI",
+        "DJI": "^DJI",
+        "VIX": "^VIX",
+        "DXY": "DX-Y.NYB",
+        "HSI": "^HSI",
+        "^FTXIN9": "XIN9.FGI",
+        "FTXIN9": "XIN9.FGI",
+         "A50": "XIN9.FGI",
+    }
+    return mapping.get(s, symbol)
 
 
 def fetch_index_last_price(symbol: str) -> Optional[float]:
-    mapped = map_symbol(symbol)
-    try:
-        tk = yf.Ticker(mapped)
-        hist = tk.history(period="1d", interval="1d")
-        if hist.empty:
-            return None
-        return float(hist["Close"].dropna().iloc[-1])
-    except Exception as e:
-        logger.warning(f"[Index] last failed {symbol}->{mapped}: {e}")
+    yf_symbol = map_symbol(symbol)
+    bar = get_last_valid_bar(yf_symbol, lookback_days=15, interval="1d")
+    if bar is None:
+        log_warning(f"[INDEX] {symbol}({yf_symbol}): no valid bar")
         return None
+    _, close, _ = bar
+    return float(close)
+
+def fetch_index_change_pct(symbol: str) -> Optional[float]:
+    yf_symbol = map_symbol(symbol)
+    rets = safe_yf_last_bars(
+        yf_symbol,
+        lookback_days=10,
+        interval="1d",
+        min_points=1,
+    )
+
+    # 周末 / 长假：返回 0，不视为异常
+    if not rets:
+        return 0.0
+
+    return rets[-1]
 
 
-def fetch_index_snapshot(symbol: str) -> Dict[str, Any]:
-    mapped = map_symbol(symbol)
-    try:
-        tk = yf.Ticker(mapped)
-        hist = tk.history(period="5d", interval="1d")
-        closes = hist["Close"].dropna().tail(2)
-        if len(closes) < 2:
-            return {
-                "symbol": symbol,
-                "mapped": mapped,
-                "last": None,
-                "prev": None,
-                "ret": None,
-                "pct": None,
-            }
-        prev, last = float(closes.iloc[-2]), float(closes.iloc[-1])
-        ret = (last - prev) / prev if prev != 0 else None
-        pct = ret * 100 if ret is not None else None
-        return {
-            "symbol": symbol,
-            "mapped": mapped,
-            "last": last,
-            "prev": prev,
-            "ret": round(ret, 6) if ret is not None else None,
-            "pct": round(pct, 4) if pct is not None else None,
-        }
-    except Exception as e:
-        logger.warning(f"[Index] snapshot failed {symbol}->{mapped}: {e}")
-        return {
-            "symbol": symbol,
-            "mapped": mapped,
-            "last": None,
-            "prev": None,
-            "ret": None,
-            "pct": None,
-        }
+def fetch_index_snapshot(symbol: str):
+    """
+    统一指数行情接口
+    - 自动 fallback 最近有效交易日
+    """
+    yf_symbol = SYMBOL_MAP.get(symbol, symbol)
 
+    snap = safe_yf_last_bars(yf_symbol, lookback_days=10, interval="1d", min_points=2)
+    if not snap:
+        log_warning(f"[INDEX] {symbol}({yf_symbol}): empty snapshot")
+        return {"price": 0.0, "pct": 0.0, "last": 0.0}
 
-def get_a50_night_session() -> Dict[str, Any]:
-    return fetch_index_snapshot("^FTXIN9")
+    price = snap["last"]
+    pct = snap["changePct"]
+
+    log_info(f"[INDEX] {symbol} last={price:.3f}, pct={pct:.3f}")
+    return {"price": price, "pct": pct, "last": price}
+ 

@@ -17,8 +17,6 @@ BJ_TZ = timezone(timedelta(hours=8))
 def _get_etf_core_series() -> List[float]:
     """从 Yahoo 获取 510300 最近 10 日涨跌幅。"""
     try:
-        import time 
-        time.sleep(1)
         tk = yf.Ticker("510300.SS")
         hist = tk.history(period="10d")
         if hist is None or hist.empty or len(hist) < 2:
@@ -32,8 +30,6 @@ def _get_etf_core_series() -> List[float]:
 def _get_index_sh_weekly() -> List[float]:
     """从 Yahoo 获取上证指数周线涨跌幅序列。"""
     try:
-        import time
-        time.sleep(1)
         tk = yf.Ticker("000001.SS")
         hist = tk.history(period="6mo")
         if hist is None or hist.empty or len(hist) < 5:

@@ -68,3 +68,33 @@ def log_warning(msg: str):
 
 def log_error(msg: str):
     LOG.error(msg)
+
+
+
+
+def get_logger(name: str, level=logging.INFO) -> logging.Logger:
+    """
+    UnifiedRisk 统一 Logger 工厂函数
+    """
+    logger = logging.getLogger(name)
+    if not logger.handlers:
+        logger.setLevel(level)
+
+        # 控制台输出
+        ch = logging.StreamHandler()
+        ch.setLevel(level)
+
+        formatter = logging.Formatter(
+            fmt="%(asctime)s | %(levelname)-7s | %(name)s | %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
+        ch.setFormatter(formatter)
+        logger.addHandler(ch)
+
+    return logger
+
+
+# 兼容旧版本（避免 import 错误）
+log_info = lambda msg: get_logger("UnifiedRisk").info(msg)
+log_warning = lambda msg: get_logger("UnifiedRisk").warning(msg)
+log_error = lambda msg: get_logger("UnifiedRisk").error(msg)

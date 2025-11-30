@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Dict, Any
 
 from unified_risk.common.cache_manager import DayCacheManager
-from unified_risk.common.logger import get_logger
+from unified_risk.common.logging_utils import get_logger
 from unified_risk.core.global_market.fetcher import GlobalMarketFetcher
 
 LOG = get_logger("UnifiedRisk.AShareFetcher")

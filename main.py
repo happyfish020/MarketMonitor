@@ -11,13 +11,22 @@ from pprint import pprint
 
 from unified_risk.core.engines.ashare_daily_engine import run_ashare_daily
 from unified_risk.common.logging_utils import log_info
+from unified_risk.core.report.report_writer import write_ashare_daily_report
+from unified_risk.common.time_utils import now_bj, get_ashare_trade_date
+from unified_risk.core.ashare.factors.factor_history import append_factor_history
 
 
 def run_ashare_daily_mode():
     log_info("[UnifiedRisk] Running ashare_daily (unified_risk.core)…")
+    bj_now = now_bj()
     result = run_ashare_daily()
-
+    append_factor_history(result, bj_now)  # 🔥 加这行
+   
     print("\n=== A股日级风险快照 (UnifiedRisk v9 master) ===")
+    # 写入报告文件
+    write_ashare_daily_report(result, bj_now)
+
+    print(result["summary"])
     print(result["summary"])
 
     print("\n--- 关键数值 ---")

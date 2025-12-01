@@ -23,7 +23,6 @@ def run_ashare_daily(force_refresh=False):
     bj_now=datetime.now(BJ_TZ)
     date_str=bj_now.strftime("%Y%m%d")
     hour=bj_now.hour
-
     log_info(f"[AShareDaily] Run at {bj_now}")
 
     trading=is_trading_day(bj_now)
@@ -43,9 +42,11 @@ def run_ashare_daily(force_refresh=False):
     else:
         if 9 <= hour < 19:
             overwrite_db=True
-        elif hour >= 19:
+        elif hour >= 19 or hour <9:
+            print(">19")
             overwrite_db = bool(force_refresh or auto_force)
         else:
+            print("all else")
             overwrite_db=False
 
     fetcher=AshareDataFetcher()

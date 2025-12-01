@@ -1,52 +1,71 @@
+
 from __future__ import annotations
 
-import logging
-from typing import Dict, Any, Optional
+from typing import Optional
+from datetime import datetime
 
-import yfinance as yf
+from unified_risk.common.logging_utils import log_warning
+from unified_risk.common.yf_fetcher import get_last_valid_bar
 
-logger = logging.getLogger(__name__)
 
-
-def _fetch_yahoo_change_pct(symbol: str) -> Optional[float]:
-    try:
-        tk = yf.Ticker(symbol.upper())
-        hist = tk.history(period="5d", interval="1d")
-        closes = hist["Close"].dropna().tail(2)
-        if len(closes) < 2:
-            return None
-        prev, last = closes.iloc[-2], closes.iloc[-1]
-        if prev == 0:
-            return None
-        return round((last - prev) / prev * 100.0, 4)
-    except Exception as e:
-        logger.warning("yfinance pct fail %s: %s", symbol, e)
+def _fetch_yahoo_last_price(symbol: str, lookback_days: int = 15) -> Optional[float]:
+    """
+    从 yfinance 抓取最近一个有数据的交易日收盘价。
+    自动跳过周末/假日。
+    """
+    bar = get_last_valid_bar(symbol, lookback_days=lookback_days, interval="1d")
+    if bar is None:
+        log_warning(f"[COMMODITY] {symbol}: no valid last bar")
         return None
 
-
-def _fetch_yahoo_last_price(symbol: str) -> Optional[float]:
-    try:
-        tk = yf.Ticker(symbol.upper())
-        hist = tk.history(period="1d", interval="1d")
-        if hist.empty:
-            return None
-        return float(hist["Close"].dropna().iloc[-1])
-    except Exception as e:
-        logger.warning("yfinance last fail %s: %s", symbol, e)
-        return None
+    _, close, _ = bar
+    return float(close)
 
 
-def get_commodity_snapshot() -> Dict[str, Any]:
-    """大宗商品快照：黄金/原油/铜/美元指数，全部基于 yfinance。"""
-    gold_pct = _fetch_yahoo_change_pct("GC=F")
-    gold_usd = _fetch_yahoo_last_price("GC=F")
-    oil_pct = _fetch_yahoo_change_pct("CL=F")
-    copper_pct = _fetch_yahoo_change_pct("HG=F")
-    dxy_pct = _fetch_yahoo_change_pct("DX-Y.NYB")
+class CommodityFetcher:
+    """统一商品行情获取：黄金/白银/原油/铜/美元指数/比特币/VIX/美债收益率。"""
 
+    def get_gold(self) -> Optional[float]:
+        return _fetch_yahoo_last_price("GC=F")
+
+    def get_silver(self) -> Optional[float]:
+        return _fetch_yahoo_last_price("SI=F")
+
+    def get_crude(self) -> Optional[float]:
+        return _fetch_yahoo_last_price("CL=F")
+
+    def get_copper(self) -> Optional[float]:
+        return _fetch_yahoo_last_price("HG=F")
+
+    def get_dxy(self) -> Optional[float]:
+        return _fetch_yahoo_last_price("DX-Y.NYB")
+
+    def get_bitcoin(self) -> Optional[float]:
+        return _fetch_yahoo_last_price("BTC-USD")
+
+    def get_vix(self) -> Optional[float]:
+        return _fetch_yahoo_last_price("^VIX")
+
+    def get_yield_10y(self) -> Optional[float]:
+        val = _fetch_yahoo_last_price("^TNX")
+        return val / 10.0 if val else None
+
+    def get_yield_5y(self) -> Optional[float]:
+        val = _fetch_yahoo_last_price("^FVX")
+        return val / 10.0 if val else None
+
+
+def get_commodity_snapshot() -> dict:
+    """方便 ashare_fetcher 直接获取一份 snapshot 字典。"""
+    f = CommodityFetcher()
     return {
-        "gold": {"pct": gold_pct, "usd": gold_usd},
-        "oil": {"pct": oil_pct},
-        "copper": {"pct": copper_pct},
-        "dxy": {"pct": dxy_pct},
+        "gold": f.get_gold(),
+        "silver": f.get_silver(),
+        "crude": f.get_crude(),
+        "copper": f.get_copper(),
+        "dxy": f.get_dxy(),
+        "bitcoin": f.get_bitcoin(),
+        "vix": f.get_vix(),
+        "ust10y": f.get_yield_10y(),
+        "ust5y": f.get_yield_5y(),
     }

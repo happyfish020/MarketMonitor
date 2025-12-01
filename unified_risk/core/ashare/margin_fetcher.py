@@ -6,8 +6,8 @@ from pathlib import Path
 import requests
 import akshare as ak
 
-from unifiedrisk.common.path_utils import day_cache_path
-from unifiedrisk.common.logger import get_logger
+from unified_risk.common.path_utils import day_cache_path
+from unified_risk.common.logging_utils import get_logger
 
 LOG = get_logger("UnifiedRisk.Margin")
 

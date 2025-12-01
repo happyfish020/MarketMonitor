@@ -1,81 +1,77 @@
-"""US market data fetcher for v5.2."""
+
+"""US market data fetcher (安全版，支持周末/假日)。"""
 
 from __future__ import annotations
-from dataclasses import dataclass
-from typing import Dict, Any
 
-import yfinance as yf
+from dataclasses import dataclass
+from typing import Dict, Any, Optional
 
 from unified_risk.common.logging_utils import log_info, log_warning
+from unified_risk.common.yf_fetcher import get_last_valid_bar, safe_yf_last_bars
+
+
+def map_us_symbol(symbol: str) -> str:
+    s = symbol.upper()
+    mapping = {
+        "SPY": "SPY",
+        "SP500": "^GSPC",
+        "SPX": "^GSPC",
+        "NASDAQ": "^IXIC",
+        "NDX": "^NDX",
+        "DOW": "^DJI",
+        "DJI": "^DJI",
+        "R3000": "^RUA",
+        "R2000": "^RUT",
+        "VIX": "^VIX",
+        "DXY": "DX-Y.NYB",
+    }
+    return mapping.get(s, symbol)
+
+
+def fetch_us_last_price(symbol: str) -> Optional[float]:
+    yf_symbol = map_us_symbol(symbol)
+    bar = get_last_valid_bar(yf_symbol, lookback_days=15, interval="1d")
+    if bar is None:
+        log_warning(f"[US] {symbol}({yf_symbol}): no valid bar")
+        return None
+    _, close, _ = bar
+    return float(close)
+
+
+def fetch_us_change_pct(symbol: str) -> Optional[float]:
+    yf_symbol = map_us_symbol(symbol)
+    rets = safe_yf_last_bars(yf_symbol, lookback_days=20, interval="1d", min_points=2)
+    if not rets:
+        log_warning(f"[US] {symbol}: no change pct")
+        return None
+    return rets[-1]
 
 
 @dataclass
 class USDailySnapshot:
     nasdaq_change: float = 0.0
     spy_change: float = 0.0
-    vix: float = 20.0
+    vix_level: float = 0.0
 
 
-class USDataFetcher:
-    def _fetch_yahoo(self, symbol: str) -> Dict[str, float]:
-        """使用 yfinance 获取最近两天数据，计算当日涨跌幅。"""
-        try:
-            tk = yf.Ticker(symbol)
-            hist = tk.history(period="2d")
-            if hist is None or hist.empty:
-                log_warning(f"Yahoo history empty for {symbol}")
-                return {"price": 0.0, "changePct": 0.0}
-            hist = hist.tail(2)
-            last = float(hist["Close"].iloc[-1])
-            prev = float(hist["Close"].iloc[-2]) if len(hist) >= 2 else last
-            change = (last - prev) / prev * 100.0 if prev else 0.0
-            return {"price": last, "changePct": change}
-        except Exception as e:
-            log_warning(f"Yahoo fetch failed for {symbol}: {e}")
-            return {"price": 0.0, "changePct": 0.0}
+class USFetcher:
+    def get_us_daily_snapshot(self) -> USDailySnapshot:
+        nas = fetch_us_change_pct("NASDAQ") or 0.0
+        spy = fetch_us_change_pct("SPY") or 0.0
+        vix = fetch_us_last_price("VIX") or 0.0
 
-    def _fetch_series(self, symbol: str, period: str = "10d") -> list[float]:
-        """获取某指数最近 N 日涨跌幅序列。"""
-        try:
-            tk = yf.Ticker(symbol)
-            hist = tk.history(period=period)
-            if hist is None or hist.empty or len(hist) < 2:
-                return []
-            closes = hist["Close"]
-            rets = closes.pct_change().dropna() * 100.0
-            return [float(x) for x in rets.tolist()]
-        except Exception as e:
-            log_warning(f"Yahoo series fetch failed for {symbol}: {e}")
-            return []
+        log_info(f"[RAW] ^IXIC | Change%: {nas:.3f}")
+        log_info(f"[RAW] SPY   | Change%: {spy:.3f}")
+        log_info(f"[RAW] ^VIX  | Price  : {vix:.3f}")
 
-    def _fetch_weekly_series(self, symbol: str, period: str = "3mo") -> list[float]:
-        """获取某指数周线涨跌幅序列。"""
-        try:
-            tk = yf.Ticker(symbol)
-            hist = tk.history(period=period)
-            if hist is None or hist.empty or len(hist) < 5:
-                return []
-            # 周线收盘（按周五）
-            weekly = hist["Close"].resample("W-FRI").last().dropna()
-            rets = weekly.pct_change().dropna() * 100.0
-            return [float(x) for x in rets.tolist()]
-        except Exception as e:
-            log_warning(f"Yahoo weekly series failed for {symbol}: {e}")
-            return []
-
-    def get_daily_snapshot(self) -> Dict[str, Any]:
-        nas = self._fetch_yahoo("^IXIC")
-        spy = self._fetch_yahoo("SPY")
-        vix = self._fetch_yahoo("^VIX")
-        log_info(f"[RAW] ^IXIC | Change%: {nas['changePct']:.3f}")
-        log_info(f"[RAW] SPY   | Change%: {spy['changePct']:.3f}")
-        log_info(f"[RAW] ^VIX  | Price  : {vix['price']:.3f}")
-        return {"nasdaq": nas, "spy": spy, "vix": vix}
+        return USDailySnapshot(
+            nasdaq_change=nas,
+            spy_change=spy,
+            vix_level=vix,
+        )
 
     def get_short_term_series(self) -> Dict[str, list[float]]:
-        """美股短期日线序列（纳指）。"""
-        return {"nasdaq": self._fetch_series("^IXIC", period="10d")}
+        return {"nasdaq": safe_yf_last_bars("^IXIC", lookback_days=10, interval="1d")}
 
     def get_weekly_series(self) -> Dict[str, list[float]]:
-        """美股周线序列（SP500）。"""
-        return {"sp500": self._fetch_weekly_series("^GSPC", period="6mo")}
+        return {"sp500": safe_yf_last_bars("^GSPC", lookback_days=180, interval="1wk")}

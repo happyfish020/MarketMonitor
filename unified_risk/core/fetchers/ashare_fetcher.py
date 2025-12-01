@@ -13,6 +13,8 @@ from unified_risk.core.datasources.commodity_fetcher import get_commodity_snapsh
 from unified_risk.core.datasources.index_fetcher import fetch_index_snapshot
 from unified_risk.common.logging_utils import log_info, log_warning, log_error
 from unified_risk.common.cache_manager import get_or_fetch_json
+from unified_risk.core.datasources.sgx_a50_fetcher import fetch_sgx_a50_change_pct
+
 
 BJ_TZ = timezone(timedelta(hours=8))
 
@@ -147,22 +149,25 @@ class AshareDataFetcher:
 
 
     # ---------- 美债 / 欧洲 / 亚洲 / 美股 ----------
-
+    
     def get_treasury_yield(self) -> Dict[str, float]:
         ten_data = self._fetch_yahoo_data("^TNX")
         five_data = self._fetch_yahoo_data("^FVX")
-
-        ten = ten_data.get("price", 0.0)
-        five = five_data.get("price", 0.0)
-        if not ten or not five:
+        ten_price = float((ten_data or {}).get("price", 0.0) or 0.0)
+        five_price = float((five_data or {}).get("price", 0.0) or 0.0)
+        if ten_price == 0.0 or five_price == 0.0:
             self._log_raw_data("Treasury(YF)", "STATUS", "Data Error/Missing")
-            return {"yield_jump": 0.0, "yield_curve_diff": 0.0}
+            return {"yield_10y": 0.0, "yield_5y": 0.0, "yield_curve_diff": 0.0}
 
-        yield_curve_diff = (ten - five) * 100.0
-        self._log_raw_data("Treasury(YF)", "10Y(%)", ten)
-        self._log_raw_data("Treasury(YF)", "5Y(%)", five)
-        self._log_raw_data("Treasury(YF)", "Y.Curve(bps)", yield_curve_diff)
-        return {"yield_jump": 0.0, "yield_curve_diff": yield_curve_diff}
+        yield_10y = ten_price
+        yield_5y = five_price
+        curve_bps = (yield_10y - yield_5y) * 100.0
+
+        self._log_raw_data("Treasury(YF)", "10Y(%)", yield_10y)
+        self._log_raw_data("Treasury(YF)", "5Y(%)", yield_5y)
+        self._log_raw_data("Treasury(YF)", "Y.Curve(bps)", curve_bps)
+
+        return {"yield_10y": yield_10y,"yield_5y": yield_5y,"yield_curve_diff": curve_bps}
 
     def get_us_equity_snapshot(self) -> Dict[str, Any]:
         snap: Dict[str, Any] = {}
@@ -244,35 +249,55 @@ class AshareDataFetcher:
             "proxy_etf_volume": (vol1 + vol2),
         }
 
-    # ---------- A50 夜盘（多重 fallback） ----------
 
+    # Paste this into unified_risk/core/fetchers/ashare_fetcher.py replacing the entire
+    # get_a50_night_session() function.
+        
     def get_a50_night_session(self) -> Dict[str, Any]:
-        def _ret1(symbol: str) -> Optional[float]:
+        """
+        A50 夜盘因子：
+        1) 优先使用 SGX FTSE China A50 CN 合约的涨跌幅
+        2) 失败 → ^FTXIN9 / ^HSI (YF 快照)
+        3) 再失败 → ETF proxy
+        """
+    
+        # ---------- 1) SGX ----------
+        sgx_pct = fetch_sgx_a50_change_pct()
+        if sgx_pct is not None and sgx_pct != 0.0:
+            ret = max(min(sgx_pct / 100.0, 0.08), -0.08)
+            self._log_raw_data("A50Night", "SGX%", ret * 100.0)
+            return {"ret": ret, "source": "SGX"}
+    
+        # ---------- 2) YF fallback ----------
+        def _ret(symbol: str, tag: str) -> Optional[float]:
             try:
                 data = self._fetch_yahoo_data(symbol)
-                return float(data.get("changePct", 0.0)) / 100.0
-            except Exception:
-                return None
-
+                pct = float(data.get("changePct", 0.0))
+                if pct != 0:
+                    return pct / 100.0
+            except:
+                pass
+            return None
+    
         for symbol, tag in (("^FTXIN9", "FTXIN9"), ("^HSI", "HSI")):
-            r = _ret1(symbol)
-            if r is not None and r != 0.0:
+            r = _ret(symbol, tag)
+            if r:
                 r = max(min(r, 0.08), -0.08)
-                self._log_raw_data(tag, "A50Night%", r * 100.0)
+                self._log_raw_data("A50Night", f"{tag}%", r * 100.0)
                 return {"ret": r, "source": tag}
-
+    
+        # ---------- 3) ETF proxy ----------
         proxy = self.get_northbound_etf_proxy()
         flow_yi = float(proxy.get("proxy_etf_flow_yi", 0.0) or 0.0)
         if flow_yi != 0.0:
             approx = max(min(flow_yi / 100.0, 0.03), -0.03)
-            self._log_raw_data("A50Proxy", "FlowYi", flow_yi)
-            self._log_raw_data("A50Proxy", "Approx%", approx * 100.0)
+            self._log_raw_data("A50Night", "ETFProxyFlowYi", flow_yi)
             return {"ret": approx, "source": "ETF_PROXY"}
-
+    
+        # ---------- 4) default ----------
         self._log_raw_data("A50Night", "STATUS", "No valid data, use 0.0")
         return {"ret": 0.0, "source": "NONE"}
-
-    # ---------- 指数涨跌（修复版） ----------
+        # ---------- 指数涨跌（修复版） ----------
 
     def _get_index_change_push2(self, secid: str) -> Optional[float]:
         """
@@ -393,41 +418,29 @@ class AshareDataFetcher:
 
     def get_etf_daily(self, symbol: str):
         """
-        ETF 日线数据：优先用本地缓存，再用 yfinance。
+        ETF 日线数据（统一版）
+        使用统一的 symbol_mapper + safe_fetch_etf
         返回 DataFrame: [date, close, volume]
         """
+        from unified_risk.common.symbol_mapper import map_symbol
+        from unified_risk.core.datasources.yf_etf_fetcher import safe_fetch_etf
+
+        yf_symbol = map_symbol(symbol)
+
         now = time.time()
-        if symbol in self._yf_cache and now < self._yf_cache_expire.get(symbol, 0):
-            return self._yf_cache[symbol]
+        if yf_symbol in self._yf_cache and now < self._yf_cache_expire.get(yf_symbol, 0):
+            return self._yf_cache[yf_symbol]
 
-        try:
-            yf_map = {
-                "510300": "510300.SS",
-                "510050": "510050.SS",
-                "512880": "512880.SS",
-                "159915": "159915.SZ",
-            }
+        df = safe_fetch_etf(yf_symbol)
 
-            yf_symbol = yf_map.get(symbol, f"{symbol}.SS")
-            tk = yf.Ticker(yf_symbol)
-            hist = tk.history(period="90d")
-            if hist is None or hist.empty:
-                log_warning(f"yfinance ETF 返回空数据: {symbol} ({yf_symbol})")
-                return None
-
-            tmp = hist[["Close", "Volume"]].copy()
-            tmp.reset_index(inplace=True)
-            tmp.rename(columns={"Date": "date", "Close": "close", "Volume": "volume"}, inplace=True)
-            df = tmp.sort_values("date").reset_index(drop=True)
-
-            self._yf_cache[symbol] = df
-            self._yf_cache_expire[symbol] = now + self._yf_ttl
-
-            log_info(f"[ETF] {symbol} rows={len(df)} cols={list(df.columns)}")
-            return df
-        except Exception as e:
-            log_warning(f"yfinance ETF 获取失败 {symbol}: {e}")
+        if df is None:
+            log_warning(f"[ETF] get_etf_daily failed for {symbol} (mapped: {yf_symbol})")
             return None
+
+        self._yf_cache[yf_symbol] = df
+        self._yf_cache_expire[yf_symbol] = now + self._yf_ttl
+
+        return df
 
     # ---------- 流动性枯竭信号 ----------
 

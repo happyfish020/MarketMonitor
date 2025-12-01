@@ -54,10 +54,11 @@ def main():
         choices=["ashare_daily"],
         help="目前只支持 ashare_daily 模式",
     )
-    args = parser.parse_args()
+    #args = parser.parse_args()
 
-    if args.mode == "ashare_daily":
-        run_ashare_daily_mode()
+    run_ashare_daily_mode()
+    #if args.mode == "ashare_daily":
+    #    run_ashare_daily_mode()
 
 
 if __name__ == "__main__":

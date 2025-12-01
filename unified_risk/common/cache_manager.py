@@ -1,95 +1,125 @@
 # unified_risk/common/cache_manager.py
 
 from __future__ import annotations
-from dataclasses import dataclass
-from datetime import date
-from pathlib import Path
-from typing import Any, Dict, Optional
-import json
-import os
 
-from unified_risk.common.logging_utils import get_logger
+from dataclasses import dataclass
+from datetime import datetime, date, timezone, timedelta
+from pathlib import Path
+from typing import Any, Callable, Optional, Union
+import json
+
+from .config_loader import get_path
+from .logging_utils import get_logger
 
 LOG = get_logger("UnifiedRisk.Cache")
 
+BJ_TZ = timezone(timedelta(hours=8))
+
+
+def _date_str(d: Union[str, date, datetime]) -> str:
+    """
+    转换为 YYYYMMDD 字符串格式
+    """
+    if isinstance(d, datetime):
+        return d.astimezone(BJ_TZ).strftime("%Y%m%d")
+    if isinstance(d, date):
+        return d.strftime("%Y%m%d")
+    return str(d)
+
+
+# =====================
+# 日级缓存管理器（JSON）
+# =====================
 
 @dataclass
 class DayCacheManager:
-    """
-    简单日级缓存：
-    根目录: data/cache/day_cache/YYYYMMDD/
-    文件名按功能自定义，如 "ashare_index.json", "turnover.json", "northbound_etf.json"
-    """
+    date_str: str
 
-    root: Path = Path("data/cache/day_cache")
+    def __init__(self, d: Union[str, date, datetime]):
+        self.date_str = _date_str(d)
+        self.root = get_path("day_cache_dir") / self.date_str
+        self.root.mkdir(parents=True, exist_ok=True)
 
-    def _day_dir(self, d: date) -> Path:
-        return self.root / d.strftime("%Y%m%d")
+    def path(self, name: str) -> Path:
+        return self.root / name
 
-    def read_json(self, d: date, name: str) -> Optional[Dict[str, Any]]:
-        day_dir = self._day_dir(d)
-        path = day_dir / name
-        if not path.exists():
-            LOG.info(f"[CACHE] miss day {path}, no file.")
+    def load(self, name: str) -> Optional[Any]:
+        p = self.path(name)
+        if not p.exists():
             return None
-        try:
-            text = path.read_text(encoding="utf-8")
-            data = json.loads(text)
-            LOG.info(f"[CACHE] hit day {path}")
-            return data
-        except Exception as e:
-            LOG.warning(f"[CACHE] read error {path}: {e}")
-            return None
-
-    def write_json(self, d: date, name: str, data: Dict[str, Any]) -> Path:
-        day_dir = self._day_dir(d)
-        os.makedirs(day_dir, exist_ok=True)
-        path = day_dir / name
-        text = json.dumps(data, ensure_ascii=False, indent=2)
-        path.write_text(text, encoding="utf-8")
-        LOG.info(f"[CACHE] write day {path}")
-        return path
-
-# ------------------------------------------------------------
-# 超强兼容旧版接口：get_or_fetch_json
-# 支持旧 TRM / v7 / v8 的所有参数：bj_time, cache_minutes, etc.
-# ------------------------------------------------------------
-def get_or_fetch_json(path: str, fetch_func, *args, **kwargs):
-    """
-    兼容旧版 UnifiedRisk / TRM 的万能数据提取函数。
-
-    旧系统有的调用方式：
-        get_or_fetch_json(path, fetch_func)
-        get_or_fetch_json(path, fetch_func, bj_time=bj_time)
-        get_or_fetch_json(path, fetch_func, force=True)
-        get_or_fetch_json(path, fetch_func, cache_minutes=30)
-        ...
-
-    v9.1 只需要 path + fetch_func，其他参数自动忽略。
-    """
-
-    p = Path(path)
-
-    # --------------------------
-    # 1) 如果文件存在 → 直接读取
-    # --------------------------
-    if p.exists() and not kwargs.get("force", False):
         try:
             return json.loads(p.read_text(encoding="utf-8"))
-        except Exception:
-            pass  # 如果文件损坏，fallback 到 fetch_func()
+        except Exception as e:
+            LOG.warning(f"[DayCache] 读取失败 {p}: {e}")
+            return None
 
-    # --------------------------
-    # 2) 文件不存在 → 调用 fetch_func()
-    # --------------------------
-    data = fetch_func()
+    def save(self, name: str, data: Any) -> Path:
+        p = self.path(name)
+        try:
+            p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception as e:
+            LOG.warning(f"[DayCache] 写入失败 {p}: {e}")
+        return p
 
-    # 自动创建目录
-    p.parent.mkdir(parents=True, exist_ok=True)
+    # ⭐⭐ 支持 force_refresh 参数（兼容 fetcher v9.5.1）
+    def get_or_fetch(self, name: str, fetch_func: Callable[[], Any],
+                     force=False, force_refresh=None):
 
-    p.write_text(
-        json.dumps(data, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+        # 兼容 force_refresh 作为最终优先参数
+        if force_refresh is not None:
+            force = force_refresh
 
-    return data
+        if not force:
+            cached = self.load(name)
+            if cached is not None:
+                return cached
+
+        data = fetch_func()
+        self.save(name, data)
+        return data
+
+
+# =====================
+# 全市场行情本地 DB（PARQUET）
+# =====================
+
+class AshareDailyDB:
+    """
+    data/database/ashare_daily/all_stocks_YYYYMMDD.parquet
+    """
+
+    def __init__(self, d: Union[str, date, datetime]):
+        self.date_str = _date_str(d)
+
+        try:
+            root = get_path("ashare_daily_db")
+        except KeyError:
+            root = get_path("data_dir") / "database" / "ashare_daily"
+
+        root.mkdir(parents=True, exist_ok=True)
+        self.root = root
+        self.file = root / f"all_stocks_{self.date_str}.parquet"
+
+    def exists(self) -> bool:
+        return self.file.exists()
+
+    def load(self):
+        import pandas as pd
+        if not self.file.exists():
+            return None
+        try:
+            return pd.read_parquet(self.file)
+        except Exception as e:
+            LOG.warning(f"[DailyDB] 读取失败 {self.file}: {e}")
+            return None
+
+    def save(self, df, overwrite=True):
+        import pandas as pd
+        if self.file.exists() and not overwrite:
+            return self.file
+
+        try:
+            df.to_parquet(self.file, index=False)
+        except Exception as e:
+            LOG.warning(f"[DailyDB] 写入失败 {self.file}: {e}")
+        return self.file

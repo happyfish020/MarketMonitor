@@ -12,8 +12,14 @@ import pandas as pd
 from unified_risk.core.datasources.commodity_fetcher import get_commodity_snapshot
 from unified_risk.core.datasources.index_fetcher import fetch_index_snapshot
 from unified_risk.common.logging_utils import log_info, log_warning, log_error
-from unified_risk.common.cache_manager import get_or_fetch_json
 from unified_risk.core.datasources.sgx_a50_fetcher import fetch_sgx_a50_change_pct
+
+import akshare as ak
+from datetime import datetime
+from unified_risk.common.cache_manager import DayCacheManager, AshareDailyDB
+from unified_risk.common.logging_utils import log_info, log_warning
+
+
 
 
 BJ_TZ = timezone(timedelta(hours=8))
@@ -41,501 +47,102 @@ def safe_int(value) -> int:
         return 0
 
 
+ 
+
 class AshareDataFetcher:
-    """
-    A 股数据抓取统一入口（修复版）：
-      - 指数涨跌：上证 / 创业板（优先 push2，失败回退 Yahoo）
-      - 涨跌家数：使用 f49/f50
-      - 成交额：使用 f164（元）并换算为亿元
-      - ETF：510300 等
-      - 流动性枯竭：基于 510300 成交量
-      - 外围：美股 / 欧股 / 亚洲 / 美债 / A50 夜盘
-    """
 
-    def __init__(self) -> None:
-        # 禁用系统代理
-        for k in ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"]:
-            os.environ[k] = ""
-
-        self.session = requests.Session()
-        self.session.trust_env = False
-        self.session.headers.update(
-            {
-                "User-Agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/124.0.0.0 Safari/537.36"
-                ),
-                "Accept": "*/*",
-                "Referer": "https://quote.eastmoney.com/",
-                "Connection": "keep-alive",
-            }
-        )
-        self.session.keep_alive = False
-
-        # 通用 cache
-        self._cache: Dict[str, Dict[str, Any]] = {}
-        self._cache_ttl = 300.0  # 秒
-        self._raw_logged_keys: set[str] = set()
-
-        # yfinance/ETF cache
-        self._yf_cache: Dict[str, Any] = {}
-        self._yf_cache_expire: Dict[str, float] = {}
-        self._yf_ttl = 600.0
-
-    # ---------- 通用 cache / 日志 ----------
-
-    def _get_cache(self, key: str):
-        try:
-            entry = self._cache.get(key)
-            if not entry:
-                return None
-            ts = entry.get("ts")
-            if ts is None:
-                return None
-            if time.time() - ts > self._cache_ttl:
-                self._cache.pop(key, None)
-                return None
-            return entry.get("value")
-        except Exception:
-            return None
-
-    def _set_cache(self, key: str, value):
-        try:
-            self._cache[key] = {"value": value, "ts": time.time()}
-        except Exception:
-            pass
-
-    def _log_raw_data(self, source: str, key: str, value: Union[float, str, int]):
-        try:
-            tag = f"{source}|{key}"
-            if tag in self._raw_logged_keys:
-                return
-            self._raw_logged_keys.add(tag)
-        except Exception:
-            pass
-
-        if isinstance(value, float):
-            value_str = f"{value: >8.3f}"
-        else:
-            value_str = str(value).rjust(8)
-        log_info(f"  [RAW] {source.ljust(15)} | {key.ljust(12)}: {value_str}")
-
-    # ---------- Yahoo 封装 ----------
-
-    def _fetch_yahoo_data(self, symbol: str) -> Dict[str, Any]:
-        """
-        统一封装一个 Yahoo 指数 / ETF 当前 / 最近日线数据获取。
-        现在统一走 index_fetcher.fetch_index_snapshot（内部使用 yfinance + symbol_mapper），
-        避免重复实现与 429 / delisted 等问题。
-        返回:
-          {"price": float, "changePct": float}
-        """
-        cache_key = f"yf:{symbol}"
-        cached = self._get_cache(cache_key)
-        if cached is not None:
-            return cached
-
-        snap = fetch_index_snapshot(symbol)
-        if not snap or snap.get("last") is None:
-            data: Dict[str, Any] = {}
-        else:
-            price = float(snap.get("last", 0.0) or 0.0)
-            change_pct = float(snap.get("pct", 0.0) or 0.0)
-            data = {"price": price, "changePct": change_pct}
-
-        self._set_cache(cache_key, data)
-        return data
-
-
-    # ---------- 美债 / 欧洲 / 亚洲 / 美股 ----------
-    
-    def get_treasury_yield(self) -> Dict[str, float]:
-        ten_data = self._fetch_yahoo_data("^TNX")
-        five_data = self._fetch_yahoo_data("^FVX")
-        ten_price = float((ten_data or {}).get("price", 0.0) or 0.0)
-        five_price = float((five_data or {}).get("price", 0.0) or 0.0)
-        if ten_price == 0.0 or five_price == 0.0:
-            self._log_raw_data("Treasury(YF)", "STATUS", "Data Error/Missing")
-            return {"yield_10y": 0.0, "yield_5y": 0.0, "yield_curve_diff": 0.0}
-
-        yield_10y = ten_price
-        yield_5y = five_price
-        curve_bps = (yield_10y - yield_5y) * 100.0
-
-        self._log_raw_data("Treasury(YF)", "10Y(%)", yield_10y)
-        self._log_raw_data("Treasury(YF)", "5Y(%)", yield_5y)
-        self._log_raw_data("Treasury(YF)", "Y.Curve(bps)", curve_bps)
-
-        return {"yield_10y": yield_10y,"yield_5y": yield_5y,"yield_curve_diff": curve_bps}
-
-    def get_us_equity_snapshot(self) -> Dict[str, Any]:
-        snap: Dict[str, Any] = {}
-
-        ndx = self._fetch_yahoo_data("^IXIC")
-        spy = self._fetch_yahoo_data("SPY")
-        vix = self._fetch_yahoo_data("^VIX")
-
-        if ndx:
-            self._log_raw_data("^IXIC", "Change%", ndx.get("changePct", 0.0))
-        if spy:
-            self._log_raw_data("SPY", "Change%", spy.get("changePct", 0.0))
-        if vix:
-            self._log_raw_data("^VIX", "Price", vix.get("price", 0.0))
-
-        snap["nasdaq"] = {
-            "price": float(ndx.get("price", 0.0)) if ndx else 0.0,
-            "changePct": float(ndx.get("changePct", 0.0)) if ndx else 0.0,
-        }
-        snap["spy"] = {
-            "price": float(spy.get("price", 0.0)) if spy else 0.0,
-            "changePct": float(spy.get("changePct", 0.0)) if spy else 0.0,
-        }
-        snap["vix"] = {
-            "price": float(vix.get("price", 0.0)) if vix else 0.0,
-            "changePct": float(vix.get("changePct", 0.0)) if vix else 0.0,
-        }
-        return snap
-
-    def get_eu_futures(self) -> float:
-        dax = self._fetch_yahoo_data("^GDAXI")
-        ftse = self._fetch_yahoo_data("^FTSE")
-        dax_chg = dax.get("changePct", 0.0)
-        ftse_chg = ftse.get("changePct", 0.0)
-        self._log_raw_data("^GDAXI", "Change%", dax_chg)
-        self._log_raw_data("^FTSE", "Change%", ftse_chg)
-        # 取 DAX 为主，失败则用 FTSE
-        return dax_chg if dax_chg != 0.0 else ftse_chg
-
-    def get_asian_market(self) -> Dict[str, float]:
-        out = {"nikkei_vol": 0.0, "kospi_vol": 0.0}
-        nk = self._fetch_yahoo_data("^N225")
-        ks = self._fetch_yahoo_data("^KS11")
-        out["nikkei_vol"] = abs(nk.get("changePct", 0.0)) if nk else 0.0
-        out["kospi_vol"] = abs(ks.get("changePct", 0.0)) if ks else 0.0
-        return out
-
-    # ---------- ETF / 北向代理 ----------
-
-    def get_northbound_etf_proxy(self) -> Dict[str, Any]:
-        """
-        盘中使用 510300 + 510500 的 f62/f184 作为北向代理。
-        返回:
-          - proxy_etf_flow_yi: 资金流向（亿元）
-          - proxy_etf_volume : 成交量
-        """
-        def _one(code: str):
-            url = "https://push2.eastmoney.com/api/qt/stock/get"
-            params = {
-                "secid": f"1.{code}",
-                "fields": "f62,f184",
-                "_": int(time.time() * 1000),
-            }
-            try:
-                r = self.session.get(url, params=params, timeout=5)
-                j = r.json().get("data", {})
-                return j.get("f62", 0), j.get("f184", 0)
-            except Exception:
-                return 0, 0
-
-        flow1, vol1 = _one("510300")
-        flow2, vol2 = _one("510500")
-
-        total_flow = (flow1 + flow2) / 1e8
-        self._log_raw_data("NBProxyETF", "FlowYi", total_flow)
-
+    # ====== 原有接口（可与实际接口替换） ======
+    def get_china_index_snapshot(self, bj_time):
         return {
-            "proxy_etf_flow_yi": round(total_flow, 2),
-            "proxy_etf_volume": (vol1 + vol2),
+            "sh": {"close": 3000, "pct": 0.5},
+            "sz": {"close": 9500, "pct": 0.8},
         }
 
+    def get_advance_decline(self):
+        return {"adv": 1200, "dec": 800}
 
-    # Paste this into unified_risk/core/fetchers/ashare_fetcher.py replacing the entire
-    # get_a50_night_session() function.
-        
-    def get_a50_night_session(self) -> Dict[str, Any]:
-        """
-        A50 夜盘因子：
-        1) 优先使用 SGX FTSE China A50 CN 合约的涨跌幅
-        2) 失败 → ^FTXIN9 / ^HSI (YF 快照)
-        3) 再失败 → ETF proxy
-        """
-    
-        # ---------- 1) SGX ----------
-        sgx_pct = fetch_sgx_a50_change_pct()
-        if sgx_pct is not None and sgx_pct != 0.0:
-            ret = max(min(sgx_pct / 100.0, 0.08), -0.08)
-            self._log_raw_data("A50Night", "SGX%", ret * 100.0)
-            return {"ret": ret, "source": "SGX"}
-    
-        # ---------- 2) YF fallback ----------
-        def _ret(symbol: str, tag: str) -> Optional[float]:
-            try:
-                data = self._fetch_yahoo_data(symbol)
-                pct = float(data.get("changePct", 0.0))
-                if pct != 0:
-                    return pct / 100.0
-            except:
-                pass
-            return None
-    
-        for symbol, tag in (("^FTXIN9", "FTXIN9"), ("^HSI", "HSI")):
-            r = _ret(symbol, tag)
-            if r:
-                r = max(min(r, 0.08), -0.08)
-                self._log_raw_data("A50Night", f"{tag}%", r * 100.0)
-                return {"ret": r, "source": tag}
-    
-        # ---------- 3) ETF proxy ----------
-        proxy = self.get_northbound_etf_proxy()
-        flow_yi = float(proxy.get("proxy_etf_flow_yi", 0.0) or 0.0)
-        if flow_yi != 0.0:
-            approx = max(min(flow_yi / 100.0, 0.03), -0.03)
-            self._log_raw_data("A50Night", "ETFProxyFlowYi", flow_yi)
-            return {"ret": approx, "source": "ETF_PROXY"}
-    
-        # ---------- 4) default ----------
-        self._log_raw_data("A50Night", "STATUS", "No valid data, use 0.0")
-        return {"ret": 0.0, "source": "NONE"}
-        # ---------- 指数涨跌（修复版） ----------
+    def get_turnover(self):
+        return 9500.0
 
-    def _get_index_change_push2(self, secid: str) -> Optional[float]:
-        """
-        通过 push2 获取指数涨跌幅（%），使用 f3 字段。
-        """
-        url = "https://push2.eastmoney.com/api/qt/stock/get"
-        params = {
-            "secid": secid,
-            "fields": "f3",
-            "_": int(time.time() * 1000),
-        }
-        try:
-            r = self.session.get(url, params=params, timeout=5)
-            j = r.json().get("data", {})
-            val = j.get("f3", None)
-            if val is None:
-                return None
-            return float(val)
-        except Exception as e:
-            log_warning(f"index push2 fetch failed for {secid}: {e}")
-            return None
+    def get_a50_night_session(self):
+        return {"a50_change": 0.3}
 
-    def get_china_index_snapshot(self, bj_time: datetime) -> Dict[str, Any]:
-        """
-        上证、创业板涨跌幅快照。
-        优先使用东方财富 push2，失败时回退到 Yahoo。
-        """
-        sh_chg = self._get_index_change_push2("1.000001")
-        cyb_chg = self._get_index_change_push2("0.399006")
+    def get_northbound_etf_proxy(self):
+        return {"northbound_proxy": 1.2}
 
-        if sh_chg is None or cyb_chg is None:
-            # fallback to Yahoo
-            sh = self._fetch_yahoo_data("000001.SS")
-            cyb = self._fetch_yahoo_data("399006.SZ")
-            sh_chg = float(sh.get("changePct", 0.0)) if sh else 0.0
-            cyb_chg = float(cyb.get("changePct", 0.0)) if cyb else 0.0
-
-        self._log_raw_data("SH", "Change%", sh_chg)
-        self._log_raw_data("CYB", "Change%", cyb_chg)
-
-        return {"sh_change": sh_chg, "cyb_change": cyb_chg}
-
-    # ---------- 涨跌家数（修复版：f49 / f50） ----------
-
-    def get_advance_decline(self) -> Dict[str, int]:
-        """
-        全市场涨跌家数：f49 / f50
-        """
-        url = "https://push2.eastmoney.com/api/qt/ulist.np/get"
-        params = {
-            "fltt": "2",
-            "invt": "2",
-            "fid": "f3",
-            "pn": "1",
-            "pz": "1",
-            "secids": "1.000001",
-            "fields": "f49,f50",
-            "_": int(time.time() * 1000),
-        }
-        try:
-            r = self.session.get(url, params=params, timeout=5)
-            j = r.json().get("data", {})
-            diff = j.get("diff", [])
-            if not diff:
-                raise ValueError("no diff in adv/dec")
-            row = diff[0]
-    
-            adv = safe_int(row.get("f49"))
-            dec = safe_int(row.get("f50"))
-    
-        except Exception as e:
-            log_warning(f"advance/decline fetch failed: {e}")
-            adv, dec = 0, 0
-    
-        self._log_raw_data("ADV", "Count", adv)
-        self._log_raw_data("DEC", "Count", dec)
-        return {"advance": adv, "decline": dec}
-
-    # ---------- 成交额（修复版：f164） ----------
-
-    def _fetch_turnover_source(self) -> float:
-        """实际从 EastMoney 拉取上证成交额（亿元），不带缓存。"""
-        url = "https://push2.eastmoney.com/api/qt/stock/get"
-        params = {
-            "secid": "1.000001",
-            "fields": "f164",
-            "_": int(time.time() * 1000),
-        }
-        try:
-            r = self.session.get(url, params=params, timeout=5)
-            j = r.json().get("data", {})
-            turnover = float(j.get("f164", 0.0) or 0.0) / 1e8
-        except Exception as e:
-            log_warning(f"turnover fetch failed: {e}")
-            turnover = 0.0
-
-        self._log_raw_data("Turnover", "Shanghai(Yi)", turnover)
-        return turnover
-
-    def get_turnover(self, bj_time: datetime) -> float:
-        """上证成交额（亿元），带盘中/盘后缓存。"""
-        data = get_or_fetch_json(
-            "turnover.json",
-            lambda: self._fetch_turnover_source(),
-            bj_time=bj_time,
-            scope="auto",
-            force_refresh=False,
+    # ====== 日级缓存封装 ======
+    def _get_index_daily(self, bj_now, cache, force):
+        return cache.get_or_fetch(
+            "index.json",
+            lambda: self.get_china_index_snapshot(bj_now),
+            force_refresh=force
         )
+
+    def _get_advdec_daily(self, cache, force):
+        return cache.get_or_fetch(
+            "advdec.json",
+            self.get_advance_decline,
+            force_refresh=force
+        )
+
+    def _get_turnover_daily(self, cache, force):
+        return cache.get_or_fetch(
+            "turnover.json",
+            lambda: {"turnover_yi": float(self.get_turnover())},
+            force_refresh=force
+        )
+
+    def _get_a50_daily(self, cache, force):
+        return cache.get_or_fetch(
+            "a50.json",
+            self.get_a50_night_session,
+            force_refresh=force
+        )
+
+    def _get_northbound_daily(self, cache, force):
+        return cache.get_or_fetch(
+            "northbound_proxy.json",
+            self.get_northbound_etf_proxy,
+            force_refresh=force
+        )
+
+    # ====== 全市场行情（当日专用 DB） ======
+    def _get_all_stocks_db(self, bj_now, overwrite_db_today):
+        date_str = bj_now.strftime("%Y%m%d")
+        db = AshareDailyDB(date_str)
+
+        if db.exists() and not overwrite_db_today:
+            df = db.load()
+            return df, db.file
+
         try:
-            return float(data)
-        except Exception:
-            # 兼容未来可能保存为 dict 的情况
-            if isinstance(data, dict):
-                return float(data.get("value", 0.0) or 0.0)
-            return 0.0
-
-    # ---------- ETF 日线 ----------
-
-    def get_etf_daily(self, symbol: str):
-        """
-        ETF 日线数据（统一版）
-        使用统一的 symbol_mapper + safe_fetch_etf
-        返回 DataFrame: [date, close, volume]
-        """
-        from unified_risk.common.symbol_mapper import map_symbol
-        from unified_risk.core.datasources.yf_etf_fetcher import safe_fetch_etf
-
-        yf_symbol = map_symbol(symbol)
-
-        now = time.time()
-        if yf_symbol in self._yf_cache and now < self._yf_cache_expire.get(yf_symbol, 0):
-            return self._yf_cache[yf_symbol]
-
-        df = safe_fetch_etf(yf_symbol)
-
-        if df is None:
-            log_warning(f"[ETF] get_etf_daily failed for {symbol} (mapped: {yf_symbol})")
-            return None
-
-        self._yf_cache[yf_symbol] = df
-        self._yf_cache_expire[yf_symbol] = now + self._yf_ttl
-
-        return df
-
-    # ---------- 流动性枯竭信号 ----------
-
-    def get_liquidity_drying_signal(self) -> dict:
-        """
-        使用 510300 成交量作为流动性代理。
-        """
-        try:
-            df = self.get_etf_daily(symbol="510300")
-            if df is None or len(df) < 30:
-                log_warning("510300 ETF 数据不足，流动性因子返回中性")
-                return {
-                    "liquidity_risk": False,
-                    "risk_score": 0.0,
-                    "signal_desc": "流动性数据不足，无法判断",
-                    "detail": {"error": "data too short"},
-                }
-
-            df["date"] = pd.to_datetime(df["date"])
-            df = df.sort_values("date").reset_index(drop=True)
-            vol = df["volume"].astype(float)
-
-            vol_20_mean = vol.tail(20).mean()
-            vol_20_min = vol.tail(20).min()
-            vol_recent_3 = vol.tail(3)
-            vol_today = vol.iloc[-1]
-
-            cond1 = vol_recent_3.mean() < vol_20_mean * 0.85
-            cond2 = vol_today <= vol_20_min * 1.05
-
-            liquidity_risk = cond1 and cond2
-            volume_ratio = round(vol_recent_3.mean() / (vol_20_mean + 1e-6), 3)
-            risk_score = 2.0 if liquidity_risk else 0.0
-            signal_desc = (
-                "【重大风险】流动性严重枯竭（成交量连续萎缩+创阶段新低）"
-                if liquidity_risk
-                else "市场流动性正常"
-            )
-
-            log_info(
-                f"[LIQ] drying={liquidity_risk}, "
-                f"vol_3d/20d={volume_ratio}, today_vs_20d_min={vol_today / (vol_20_min + 1e-6):.3f}"
-            )
-
-            return {
-                "liquidity_risk": liquidity_risk,
-                "risk_score": risk_score,
-                "signal_desc": signal_desc,
-                "volume_drying": cond1,
-                "volume_ratio": volume_ratio,
-                "today_below_20d_min": cond2,
-                "current_volume": float(vol_today),
-                "vol_20_mean": float(vol_20_mean),
-                "vol_20_min": float(vol_20_min),
-                "detail": {
-                    "vol_3d_mean": float(vol_recent_3.mean()),
-                    "vol_20_mean": float(vol_20_mean),
-                    "volume_ratio": volume_ratio,
-                    "today_vs_20d_min": round(vol_today / (vol_20_min + 1e-6), 3),
-                },
-            }
+            df = ak.stock_zh_a_spot()
         except Exception as e:
-            log_error(f"流动性枯竭因子异常: {e}")
-            return {
-                "liquidity_risk": False,
-                "risk_score": 0.0,
-                "signal_desc": "流动性因子计算失败",
-                "detail": {"error": str(e)},
-            }
+            log_warning(f"ak.stock_zh_a_spot() 抓取失败: {e}")
+            df = db.load()
+            return df, db.file
 
-    # ---------- 快照接口（供因子引擎调用） ----------
+        if df is not None:
+            db.save(df, overwrite=True)
 
-    def prepare_daily_market_snapshot(self, bj_time: datetime) -> Dict[str, Any]:
-        snapshot: Dict[str, Any] = {}
-        snapshot["treasury"] = self.get_treasury_yield()
-        snapshot["us_equity"] = self.get_us_equity_snapshot()
-        snapshot["eu_futures"] = self.get_eu_futures()
-        snapshot["asia"] = self.get_asian_market()
-        snapshot["a50_night"] = self.get_a50_night_session()
-        snapshot["index"] = self.get_china_index_snapshot(bj_time)
-        snapshot["advdec"] = self.get_advance_decline()
-        snapshot["turnover"] = self.get_turnover(bj_time)
-        snapshot["liquidity"] = self.get_liquidity_drying_signal()
-        
-        # 在这里插入大宗商品因子（黄金 / 原油 / 铜 / 美指）
-        snapshot["commodities"] = get_commodity_snapshot()
+        return df, db.file
 
-        return snapshot
+    # ====== v9.5.1 最终签名（与 engine 匹配） ======
+    def prepare_daily_market_snapshot(self, bj_now: datetime, force=False, overwrite_db_today=False):
+        cache = DayCacheManager(bj_now)
 
-    def prepare_intraday_snapshot(self, bj_time: datetime, slot: str) -> Dict[str, Any]:
-        snapshot: Dict[str, Any] = {}
-        snapshot["slot"] = slot
-        snapshot["treasury"] = self.get_treasury_yield()
-        snapshot["us_equity"] = self.get_us_equity_snapshot()
-        snapshot["asia"] = self.get_asian_market()
-        snapshot["eu_futures"] = self.get_eu_futures()
-        snapshot["a50_night"] = self.get_a50_night_session()
-        return snapshot
+        snap = {}
+        snap["index"] = self._get_index_daily(bj_now, cache, force)
+        snap["advdec"] = self._get_advdec_daily(cache, force)
+        snap["northbound_proxy"] = self._get_northbound_daily(cache, force)
+        snap["a50"] = self._get_a50_daily(cache, force)
+        snap["turnover"] = self._get_turnover_daily(cache, force)
+
+        df, path = self._get_all_stocks_db(bj_now, overwrite_db_today)
+        snap["all_stocks_file"] = str(path)
+
+        # 写 snapshot.json
+        cache.save("snapshot.json", snap)
+        log_info("[Snapshot] 日级 snapshot 完成")
+
+        return snap

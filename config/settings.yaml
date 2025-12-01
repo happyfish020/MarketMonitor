@@ -1,7 +1,5 @@
-# settings
-
 logging:
-  level: INFO     # 日志等级，日志文件名由 logging_utils 自动生成
+  level: INFO
 
 market_hours:
   ashare:
@@ -17,6 +15,17 @@ paths:
   data_dir: data
   cache_dir: data/cache
   raw_dir: data/raw
+
+  # === 完整缓存体系（B 方案） ===
+  day_cache_dir: data/cache/day_cache
+  intraday_cache_dir: data/cache/intraday
+
+  # === 本地数据库 ===
+  database_dir: data/database
+  ashare_daily_db: data/database/ashare_daily
+
+  # === 日级 snapshot（可查看每日数据）===
+  snapshot_dir: data/snapshot/ashare_daily
 
 runtime:
   mode: ashare_daily

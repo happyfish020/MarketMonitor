@@ -17,9 +17,7 @@ BJ_TZ = timezone(timedelta(hours=8))
 
 
 def _date_str(d: Union[str, date, datetime]) -> str:
-    """
-    转换为 YYYYMMDD 字符串格式
-    """
+    """Convert date/datetime to YYYYMMDD string."""
     if isinstance(d, datetime):
         return d.astimezone(BJ_TZ).strftime("%Y%m%d")
     if isinstance(d, date):
@@ -27,9 +25,9 @@ def _date_str(d: Union[str, date, datetime]) -> str:
     return str(d)
 
 
-# =====================
-# 日级缓存管理器（JSON）
-# =====================
+# ============================================================
+# 日级缓存管理（cache/day_cache/YYYYMMDD/*.json）
+# ============================================================
 
 @dataclass
 class DayCacheManager:
@@ -50,7 +48,7 @@ class DayCacheManager:
         try:
             return json.loads(p.read_text(encoding="utf-8"))
         except Exception as e:
-            LOG.warning(f"[DayCache] 读取失败 {p}: {e}")
+            LOG.warning(f"[DayCache] read failed {p}: {e}")
             return None
 
     def save(self, name: str, data: Any) -> Path:
@@ -58,14 +56,12 @@ class DayCacheManager:
         try:
             p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
         except Exception as e:
-            LOG.warning(f"[DayCache] 写入失败 {p}: {e}")
+            LOG.warning(f"[DayCache] write failed {p}: {e}")
         return p
 
-    # ⭐⭐ 支持 force_refresh 参数（兼容 fetcher v9.5.1）
+    # ⭐⭐ fetcher 依赖此函数（必须支持 force_refresh）
     def get_or_fetch(self, name: str, fetch_func: Callable[[], Any],
                      force=False, force_refresh=None):
-
-        # 兼容 force_refresh 作为最终优先参数
         if force_refresh is not None:
             force = force_refresh
 
@@ -79,14 +75,13 @@ class DayCacheManager:
         return data
 
 
-# =====================
-# 全市场行情本地 DB（PARQUET）
-# =====================
+# ============================================================
+#   全市场行情本地数据库（parquet 持久化）
+#   data/database/ashare_daily/all_stocks_YYYYMMDD.parquet
+# ============================================================
 
 class AshareDailyDB:
-    """
-    data/database/ashare_daily/all_stocks_YYYYMMDD.parquet
-    """
+    """Local A-share daily market database."""
 
     def __init__(self, d: Union[str, date, datetime]):
         self.date_str = _date_str(d)
@@ -110,7 +105,7 @@ class AshareDailyDB:
         try:
             return pd.read_parquet(self.file)
         except Exception as e:
-            LOG.warning(f"[DailyDB] 读取失败 {self.file}: {e}")
+            LOG.warning(f"[DailyDB] read failed {self.file}: {e}")
             return None
 
     def save(self, df, overwrite=True):
@@ -121,5 +116,6 @@ class AshareDailyDB:
         try:
             df.to_parquet(self.file, index=False)
         except Exception as e:
-            LOG.warning(f"[DailyDB] 写入失败 {self.file}: {e}")
+            LOG.warning(f"[DailyDB] write failed {self.file}: {e}")
+
         return self.file

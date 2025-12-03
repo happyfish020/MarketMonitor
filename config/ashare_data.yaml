@@ -1,0 +1,3 @@
+ashare_data_source:
+  spot_mode: "fallback_once"   # strict / fallback_once / dev_debug
+  spot_root: "data/ashare"     # 你的 zh_spot.parquet 根目录

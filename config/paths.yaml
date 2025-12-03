@@ -1,0 +1,4 @@
+data_dir: "data/"
+cache_dir: "data/cache/"
+log_dir: "data/logs/"
+output_dir: "data/output/"

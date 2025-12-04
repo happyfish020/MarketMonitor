@@ -10,23 +10,16 @@ from core.adapters.fetchers.cn.ashare_fetcher import (
 )
 from core.processing.cn.ashare_processor import AshareProcessor
 
-# === 三大因子 ===
 from core.factors.cn.north_nps_factor import NorthNPSFactor
 from core.factors.cn.turnover_factor import TurnoverFactor
 from core.factors.cn.market_sentiment_factor import MarketSentimentFactor
+from core.factors.cn.margin_factor import MarginFactor
 
-# === 统一得分 ===
 from core.factors.score_unified import UnifiedScoreBuilder
-
-# === 报告输出 ===
-from core.report.cn.ashare_report_cn import (
-    build_daily_report_text,
-    save_daily_report,
-)
-
 from core.engines.cn.refresh_controller_cn import RefreshControllerCN, RefreshPlanCN
 from core.models.factor_result import FactorResult
 from core.utils.logger import log
+from core.report.cn.ashare_report_cn import build_daily_report_text, save_daily_report
 
 _paths = load_paths()
 DATA_CACHE_DIR = _paths.get("cache_dir", "data/cache/")
@@ -43,21 +36,20 @@ def _intraday_cache_exists() -> bool:
 
 
 # ======================================================
-#  A股日级引擎 V11 FULL（3 因子 + 报告输出）
+#  A股日级引擎 V11.4.1（4 因子 + 报告输出）
 # ======================================================
 def run_cn_ashare_daily(force_daily_refresh: bool = False) -> Dict[str, Any]:
     bj_now = now_bj()
     controller = RefreshControllerCN(bj_now)
     trade_date = controller.trade_date
 
-    # === 刷新计划 ===
     has_daily_cache = _daily_cache_exists(trade_date)
     plan: RefreshPlanCN = controller.build_refresh_plan(
         force_daily=force_daily_refresh,
         has_daily_cache=has_daily_cache,
     )
 
-    # === 1) 取原始 snapshot（含北代 + 成交额 + 市场情绪） ===
+    # === 1) 取原始 snapshot ===
     fetcher = AshareFetcher()
     daily_snapshot = fetcher.get_daily_snapshot(
         trade_date=trade_date,
@@ -68,16 +60,18 @@ def run_cn_ashare_daily(force_daily_refresh: bool = False) -> Dict[str, Any]:
     processor = AshareProcessor()
     processed = processor.build_from_daily(daily_snapshot)
 
-    # === 3) 运行三个因子 ===
+    # === 3) 运行四个因子 ===
     factors: List[FactorResult] = []
 
-    north = NorthNPSFactor()
-    turnover = TurnoverFactor()
-    emotion = MarketSentimentFactor()
+    f_north = NorthNPSFactor()
+    f_turnover = TurnoverFactor()
+    f_emotion = MarketSentimentFactor()
+    f_margin = MarginFactor()
 
-    factors.append(north.compute_from_daily(processed))
-    factors.append(turnover.compute_from_daily(processed))
-    factors.append(emotion.compute_from_daily(processed))
+    factors.append(f_north.compute_from_daily(processed))
+    factors.append(f_turnover.compute_from_daily(processed))
+    factors.append(f_emotion.compute_from_daily(processed))
+    factors.append(f_margin.compute_from_daily(processed))
 
     # === 4) 统一打分 ===
     usb = UnifiedScoreBuilder()
@@ -95,7 +89,6 @@ def run_cn_ashare_daily(force_daily_refresh: bool = False) -> Dict[str, Any]:
     report_path = save_daily_report("cn", trade_date_str, report_text)
     log(f"[CN Report] 报告已保存: {report_path}")
 
-    # === 返回整体结构（给 main.py 使用） ===
     return {
         "meta": {
             "market": "cn",
@@ -112,7 +105,7 @@ def run_cn_ashare_daily(force_daily_refresh: bool = False) -> Dict[str, Any]:
 
 
 # ======================================================
-#  原盘中引擎保持不动（你没有要求）
+#  A股盘中引擎（保持原有逻辑，仅示例保留 north 因子）
 # ======================================================
 def run_cn_ashare_intraday(force_intraday_refresh: bool = False) -> Dict[str, Any]:
     bj_now = now_bj()
@@ -134,22 +127,21 @@ def run_cn_ashare_intraday(force_intraday_refresh: bool = False) -> Dict[str, An
     processed = processor.build_from_intraday(intraday_snapshot)
 
     factors: List[FactorResult] = []
-    north = NorthNPSFactor()
-    factors.append(north.compute_from_intraday(processed))
+    f_north = NorthNPSFactor()
+    factors.append(f_north.compute_from_intraday(processed))
 
-    total_score = sum(f.score for f in factors)
+    total_score = sum(f.score for f in factors) / len(factors) if factors else 50.0
     if total_score >= 60:
         level = "偏多"
     elif total_score <= 40:
-        level = "偏空"
         level = "偏空"
     else:
         level = "中性"
 
     unified = {
-        "total": total_score,
-        "level": level,
-        "components": {f.name: f.score for f in factors},
+        "total_score": round(total_score, 2),
+        "risk_level": level,
+        "factor_scores": {f.name: f.score for f in factors},
     }
 
     log(
@@ -167,6 +159,6 @@ def run_cn_ashare_intraday(force_intraday_refresh: bool = False) -> Dict[str, An
         },
         "snapshot": intraday_snapshot,
         "processed": processed,
-        "factors": factors,
-        "unified": unified,
+        "factors": {f.name: f for f in factors},
+        "summary": unified,
     }

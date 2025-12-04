@@ -48,9 +48,19 @@ class NorthNPSFactor:
         return "极弱"
 
     def compute_from_daily(self, processed):
-        raw=processed.get("raw",{})
-        f=processed.get("features",{})
-        trade_date=Date.fromisoformat(raw.get("trade_date"))
+        raw = processed.get("raw", {}) or {}
+        f = processed.get("features", {}) or {}
+
+        td = raw.get("trade_date")
+        if isinstance(td, Date):
+            trade_date = td
+        elif isinstance(td, str):
+            try:
+                trade_date = Date.fromisoformat(td)
+            except Exception:
+                trade_date = Date.today()
+        else:
+            trade_date = Date.today()
         flow=self._safe_float(f.get("etf_flow_e9"))
         turnover=self._safe_float(f.get("etf_turnover_e9"))
         hs=self._safe_float(f.get("hs300_proxy_pct"))

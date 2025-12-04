@@ -7,7 +7,7 @@ from typing import Dict, Any, Optional
 import pandas as pd
 
 from core.utils.logger import log
-
+from core.adapters.datasources.cn.zh_spot_utils import normalize_zh_spot_columns
 
 class MarketDataReaderCN:
     """
@@ -44,12 +44,16 @@ class MarketDataReaderCN:
         try:
             log(f"[MarketDataReaderCN] 调用 ak.stock_zh_a_spot 抓取全市场行情 (mode={self.spot_mode})")
             df = ak.stock_zh_a_spot()
+            from core.adapters.datasources.cn.zh_spot_utils import normalize_zh_spot_columns
+            df = normalize_zh_spot_columns(df)
+            
             if df is None or df.empty:
                 log("[MarketDataReaderCN] ak.stock_zh_a_spot 返回空 DataFrame")
                 return False
 
             os.makedirs(os.path.dirname(path), exist_ok=True)
             df.to_parquet(path, index=False)
+
             log(f"[MarketDataReaderCN] zh_spot parquet 已写入: {path} (rows={len(df)})")
             return True
         except Exception as e:
@@ -89,6 +93,7 @@ class MarketDataReaderCN:
 
         try:
             df = pd.read_parquet(path)
+            df = normalize_zh_spot_columns(df)
             if df is None or df.empty:
                 log(f"[MarketDataReaderCN] parquet 为空: {path}")
                 return None
@@ -135,7 +140,8 @@ class MarketDataReaderCN:
             "total_turnover_e9": total,
         }
 
-    # ----------- 市场情绪（Breadth） -----------
+
+# ----------- 市场情绪（Breadth） -----------
 
     def get_breadth_summary(self) -> Dict[str, Any]:
         df = self.load_zh_spot()
@@ -147,12 +153,19 @@ class MarketDataReaderCN:
                 "limit_down": 0,
                 "total": 0,
             }
-
-        price_col = "close" if "close" in df.columns else ("最新价" if "最新价" in df.columns else None)
-        prev_col = "pre_close" if "pre_close" in df.columns else ("昨收" if "昨收" in df.columns else None)
-
+    
+        # 优先使用标准化后的英文字段
+        price_col = "price" if "price" in df.columns else None
+        prev_col = "pre_close" if "pre_close" in df.columns else None
+    
+        # 兼容旧 parquet：如果还保留中文列，则回退
+        if price_col is None and "最新价" in df.columns:
+            price_col = "最新价"
+        if prev_col is None and "昨收" in df.columns:
+            prev_col = "昨收"
+    
         if price_col is None or prev_col is None:
-            log("[MarketDataReaderCN] parquet 缺少 close / pre_close（或对应中文列），无法统计涨跌")
+            log("[MarketDataReaderCN] parquet 缺少 price/pre_close（或对应中文列），无法统计涨跌")
             return {
                 "adv": 0,
                 "dec": 0,
@@ -160,27 +173,24 @@ class MarketDataReaderCN:
                 "limit_down": 0,
                 "total": len(df),
             }
-
+    
         diff = df[price_col] - df[prev_col]
         adv = int((diff > 0).sum())
         dec = int((diff < 0).sum())
-
-        df_valid = df[df[prev_col] > 0]
-        if df_valid.empty:
-            return {
-                "adv": adv,
-                "dec": dec,
-                "limit_up": 0,
-                "limit_down": 0,
-                "total": len(df),
-            }
-
-        pct = (df_valid[price_col] - df_valid[prev_col]) / df_valid[prev_col]
+    
+        # 涨跌停，使用统一 pct，如果不存在则用价差粗略估算
+        if "pct" in df.columns:
+            pct = df["pct"]
+        else:
+            # 兜底：按价差 / 昨收 估算
+            base = df[prev_col].replace(0, None)
+            pct = diff / base
+    
         limit_up = int((pct > 0.098).sum())
         limit_down = int((pct < -0.098).sum())
-
+    
         total = int(len(df))
-
+    
         return {
             "adv": adv,
             "dec": dec,
@@ -188,3 +198,4 @@ class MarketDataReaderCN:
             "limit_down": limit_down,
             "total": total,
         }
+    

@@ -1,34 +1,37 @@
 from __future__ import annotations
 
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 from core.models.factor_result import FactorResult
 
 
 class TurnoverFactor:
-    """A股市场成交额因子（唯一数据源：zh_spot.amount 汇总）"""
+    """
+    A股市场成交额因子（流动性 / 动能 / 宽基吸金）
+
+    ✅ 成交额唯一来源：snapshot["zh_spot"].amount 汇总
+    """
 
     name = "turnover"
 
-    def compute_from_daily(
-        self,
-        processed: Dict[str, Any],
-        snapshot: Optional[Dict[str, Any]] = None,
-    ) -> FactorResult:
-        f = processed.get("features", {}) or {}
+    def compute_from_daily(self, processed: Dict[str, Any], snapshot: Dict[str, Any] | None = None) -> FactorResult:
+        features = processed.get("features", {}) or {}
 
-        # ---- 1. 从 snapshot.zh_spot 计算成交额（唯一来源） ----
+        # =============== 1. 从 zh_spot 计算成交额（唯一来源） ===============
+        sh = sz = total = 0.0
+
         df = None
         if snapshot is not None:
             df = snapshot.get("zh_spot")
 
-        sh = sz = total = 0.0
-
         if df is not None and hasattr(df, "empty") and (not df.empty) and ("amount" in df.columns):
             # 总成交额（亿元）
-            total = float(df["amount"].sum()) / 1e9
+            try:
+                total = float(df["amount"].sum()) / 1e9
+            except Exception:
+                total = 0.0
 
-            # 尝试按市场拆分：优先用 market 字段，其次用 code 规则
+            # 按市场拆分：优先用 market 字段，其次用 code 规则
             sh_amt = sz_amt = 0.0
             try:
                 if "market" in df.columns:
@@ -50,13 +53,13 @@ class TurnoverFactor:
             sh = sh_amt
             sz = sz_amt
         else:
-            # 如果 zh_spot 异常，作为兜底：从 features 里拿已有的（一般为 0）
-            sh = float(f.get("turnover_sh", 0.0) or 0.0)
-            sz = float(f.get("turnover_sz", 0.0) or 0.0)
-            total = float(f.get("turnover_total", 0.0) or 0.0)
+            # 如果 zh_spot 本身出问题，才退回到 features 里的旧字段
+            sh = float(features.get("turnover_sh", 0.0) or 0.0)
+            sz = float(features.get("turnover_sz", 0.0) or 0.0)
+            total = float(features.get("turnover_total", 0.0) or 0.0)
 
-        # 宽基 ETF 成交额（来自 etf_proxy）
-        etf_turnover = float(f.get("turnover_etf", 0.0) or 0.0)
+        # =============== 2. 宽基 ETF 成交额（来自 etf_proxy -> features） ===============
+        etf_turnover = float(features.get("turnover_etf", 0.0) or 0.0)
 
         if total <= 0:
             score = 50.0
@@ -70,8 +73,7 @@ class TurnoverFactor:
             }
             return FactorResult(name=self.name, score=score, signal=signal, raw=raw)
 
-        # ---- 2. 成交额绝对强度打分 ----
-        # 这里区间只是一个软参考，你后面可以按实际成交额分布调参数
+        # =============== 3. 成交额绝对强度打分 ===============
         if total >= 4000:
             base = 1.0   # 极度放量
         elif total >= 2500:
@@ -85,7 +87,7 @@ class TurnoverFactor:
         else:
             base = -0.5  # 极度缩量
 
-        # ---- 3. 宽基 ETF 吸金度 ----
+        # =============== 4. ETF 吸金度 ===============
         etf_ratio = etf_turnover / total if total > 0 else 0.0
         if etf_ratio >= 0.25:
             etf_score = 0.6
@@ -100,7 +102,6 @@ class TurnoverFactor:
             etf_score = -0.2
             etf_desc = "宽基ETF参与度较低"
 
-        # ---- 4. 综合原始分数 & 映射到 0–100 ----
         raw_combined = 0.8 * base + 0.2 * etf_score
         score = self._map_to_0_100(raw_combined)
 
@@ -137,6 +138,6 @@ class TurnoverFactor:
 
     @staticmethod
     def _map_to_0_100(raw: float) -> float:
-        # 将 [-1, 1] 映射到 [0, 100]
+        """将 [-1, 1] 映射到 [0, 100]。"""
         raw_clamped = max(-1.0, min(1.0, raw))
         return round(50.0 + raw_clamped * 50.0, 2)

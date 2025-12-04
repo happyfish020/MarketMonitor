@@ -23,9 +23,9 @@ class NorthNPSFactor:
         snap=load_json(path)
         if not snap: return False,0.0
         p=snap.get("etf_proxy",{})
-        f=self._safe_float(p.get("etf_flow_e9"))
-        t=self._safe_float(p.get("total_turnover_e9"))
-        hs=self._safe_float(p.get("hs300_proxy_pct"))
+        f=self._safe_float(p.get("net_etf_flow"))
+        t=self._safe_float(p.get("turnover_etf"))
+        hs=self._safe_float(p.get("hs300_pct"))
         return True, self._calc_strength(f,t,hs)
 
     def _series(self, trade_date:Date, today_strength:float):
@@ -61,9 +61,9 @@ class NorthNPSFactor:
                 trade_date = Date.today()
         else:
             trade_date = Date.today()
-        flow=self._safe_float(f.get("etf_flow_e9"))
-        turnover=self._safe_float(f.get("etf_turnover_e9"))
-        hs=self._safe_float(f.get("hs300_proxy_pct"))
+        flow=self._safe_float(f.get("net_etf_flow"))
+        turnover=self._safe_float(f.get("turnover_etf"))
+        hs=self._safe_float(f.get("hs300_pct"))
 
         strength_today=self._calc_strength(flow,turnover,hs)
         series=self._series(trade_date,strength_today)

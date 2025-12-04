@@ -108,17 +108,17 @@ class MarketDataReaderCN:
         df = self.load_zh_spot()
         if df is None or df.empty:
             return {
-                "sh_turnover_e9": 0.0,
-                "sz_turnover_e9": 0.0,
-                "total_turnover_e9": 0.0,
+                "turnover_sh": 0.0,
+                "turnover_sz": 0.0,
+                "turnover_total": 0.0,
             }
 
         if "amount" not in df.columns:
             log("[MarketDataReaderCN] parquet 缺少 amount 列，请检查 zh_spot 字段")
             return {
-                "sh_turnover_e9": 0.0,
-                "sz_turnover_e9": 0.0,
-                "total_turnover_e9": 0.0,
+                "turnover_sh": 0.0,
+                "turnover_sz": 0.0,
+                "turnover_total": 0.0,
             }
 
         if "market" in df.columns:
@@ -130,14 +130,14 @@ class MarketDataReaderCN:
             df_sh = df[sym_series.str.endswith("SH")]
             df_sz = df[sym_series.str.endswith("SZ")]
 
-        sh_turnover_e9 = float(df_sh["amount"].sum()) / 1e9
-        sz_turnover_e9 = float(df_sz["amount"].sum()) / 1e9
-        total = sh_turnover_e9 + sz_turnover_e9
+        sh_turnover = float(df_sh["amount"].sum()) / 1e9
+        sz_turnover = float(df_sz["amount"].sum()) / 1e9
+        total = sh_turnover + sz_turnover
 
         return {
-            "sh_turnover_e9": sh_turnover_e9,
-            "sz_turnover_e9": sz_turnover_e9,
-            "total_turnover_e9": total,
+            "turnover_sh": sh_turnover,
+            "turnover_sz": sz_turnover,
+            "turnover_total": total,
         }
 
 

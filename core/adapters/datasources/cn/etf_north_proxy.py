@@ -31,15 +31,15 @@ def get_etf_north_proxy(trade_date: Date) -> Dict[str, Any]:
     if not items:
         log(f"[ETF Proxy] {trade_date} 无 ETF 数据，返回空代理。")
         return {
-            "etf_flow_e9": 0.0,
-            "total_turnover_e9": 0.0,
-            "hs300_proxy_pct": 0.0,
+            "net_etf_flow": 0.0,
+            "turnover_etf": 0.0,
+            "hs300_pct": 0.0,
             "details": [],
         }
 
-    total_turnover_e9 = 0.0
-    total_flow_e9 = 0.0
-    hs300_proxy_pct = 0.0
+    total_turnover_etf = 0.0
+    total_net_flow = 0.0
+    hs300_pct = 0.0
     details: List[Dict[str, Any]] = []
 
     for sym, etf in items:
@@ -47,37 +47,37 @@ def get_etf_north_proxy(trade_date: Date) -> Dict[str, Any]:
         close = float(etf.get("close", 0.0) or 0.0)
         vol = float(etf.get("volume", 0.0) or 0.0)
 
-        turnover_e9 = (close * vol) / 1e8  # 单位：亿元
-        flow_e9 = (pct / 100.0) * turnover_e9
+        turnover_val = (close * vol) / 1e8  # 单位：亿元
+        flow_val = (pct / 100.0) * turnover_val
 
-        total_turnover_e9 += turnover_e9
-        total_flow_e9 += flow_e9
+        total_turnover_etf += turnover_val
+        total_net_flow += flow_val
 
         if "510300" in sym:
-            hs300_proxy_pct = pct
+            hs300_pct = pct
 
         details.append(
             {
                 "symbol": sym,
                 "pct_change": pct,
-                "turnover_e9": turnover_e9,
-                "flow_e9": flow_e9,
+                "turnover": turnover_val,
+                "flow": flow_val,
             }
         )
 
-    if hs300_proxy_pct == 0.0 and items:
-        hs300_proxy_pct = (
+    if hs300_pct == 0.0 and items:
+        hs300_pct = (
             sum(float(etf.get("pct_change", 0.0) or 0.0) for _, etf in items) / len(items)
         )
 
     log(
-        f"[ETF Proxy] {trade_date} etf_flow_e9={total_flow_e9:.2f}, "
-        f"turnover_e9={total_turnover_e9:.2f}, hs300_proxy_pct={hs300_proxy_pct:.2f}"
+        f"[ETF Proxy] {trade_date} net_etf_flow={total_net_flow:.2f}, "
+        f"turnover_etf={total_turnover_etf:.2f}, hs300_pct={hs300_pct:.2f}"
     )
 
     return {
-        "etf_flow_e9": total_flow_e9,
-        "total_turnover_e9": total_turnover_e9,
-        "hs300_proxy_pct": hs300_proxy_pct,
+        "net_etf_flow": total_net_flow,
+        "turnover_etf": total_turnover_etf,
+        "hs300_pct": hs300_pct,
         "details": details,
     }

@@ -1,5 +1,5 @@
 from core.utils.logger import log
-from core.report.cn.ashare_report_cn import save_daily_report
+from core.reporters.cn.ashare_daily_reporter import save_daily_report
 
 class AshareDailyEngine:
     def run(self, snapshot, summary):

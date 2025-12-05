@@ -1,136 +1,92 @@
 # -*- coding: utf-8 -*-
 """
-UnifiedRisk v11.7 — NorthNPS 因子
-统一单位：亿元（e9）
-结构与 margin 因子一致（金额 / 趋势 / 加速度 / 区间）
+UnifiedRisk v11.7 — NorthNPS 因子（详细量化版 B）
 """
 
 from __future__ import annotations
-
-import numpy as np
 from typing import Dict, Any
 from core.models.factor_result import FactorResult
-
 
 class NorthNPSFactor:
     name = "north_nps"
 
-    # ======================================================================
-    # 主入口
-    # ======================================================================
     def compute_from_daily(self, processed: Dict[str, Any]) -> FactorResult:
+        data = processed or {}
 
-        f = processed["features"]
+        block = (
+            data.get("north_nps")
+            or data.get("north")
+            or data.get("etf_proxy")
+            or {}
+        )
 
-        # -------------------------------------------------------------
-        # 一、读取当日北向代理资金（ETF Proxy）
-        # etf_flow_e9 单位本身就是“亿”
-        # -------------------------------------------------------------
-        flow_now = float(f.get("etf_flow_e9") or 0.0)       # 如 -0.10 亿
-        turnover_now = float(f.get("etf_turnover_e9") or 0.0)
-        hs300_pct = float(f.get("hs300_proxy_pct") or 0.0)
+        now = float(
+            block.get("north_flow_e9")
+            or block.get("net_etf_flow_e9")
+            or block.get("etf_flow_e9")
+            or 0.0
+        )
 
-        # -------------------------------------------------------------
-        # 二、构造历史序列（占位：10 天相同值）
-        # 未来接入东财北向真实序列后即可替换
-        # -------------------------------------------------------------
-        series = np.array([flow_now] * 10, dtype=float)
+        trend_10d = float(block.get("trend_10d") or 0.0)
+        acc_3d = float(block.get("acc_3d") or 0.0)
 
-        now = series[-1]
-        prev = series[-2]
-
-        # =============================================================
-        # 三、趋势（10 日变化）
-        # =============================================================
-        slope_10 = series[-1] - series[0]
-        if slope_10 > 0:
-            trend_label = "资金持续流入（偏多）"
-        elif slope_10 < 0:
-            trend_label = "资金持续流出（偏空）"
+        # ------------------- 区间标签 ---------------------
+        if now >= 30:
+            zone = "超强流入"
+        elif now >= 15:
+            zone = "强流入"
+        elif now >= 5:
+            zone = "温和流入"
+        elif now <= -30:
+            zone = "超强流出"
+        elif now <= -15:
+            zone = "强流出"
+        elif now <= -5:
+            zone = "温和流出"
         else:
-            trend_label = "历史数据有限，趋势中性"
+            zone = "中性"
 
-        # =============================================================
-        # 四、3 日加速度
-        # =============================================================
-        acc_3d = series[-1] - series[-3]
-        if acc_3d > 0:
-            acc_label = "加速流入（偏多）"
-        elif acc_3d < 0:
-            acc_label = "流入减速（偏空）"
+        # ------------------- 得分 -------------------------
+        clipped = max(-40.0, min(40.0, now))
+        score = 50.0 + (clipped / 40.0) * 40.0
+        score = max(0.0, min(100.0, score))
+
+        if score >= 70:
+            level = "偏多（净流入）"
+        elif score >= 55:
+            level = "略偏多"
+        elif score >= 45:
+            level = "中性"
+        elif score >= 30:
+            level = "偏空（净流出）"
         else:
-            acc_label = "中性（历史数据有限）"
+            level = "显著偏空（强流出）"
 
-        # =============================================================
-        # 五、北向区间判断（方向 + 规模）
-        # 逻辑与 margin 风格一致，更贴近交易直觉
-        # =============================================================
-        abs_now = abs(now)
+        signal = f"{zone}，当日净流入 {now:.2f} 亿"
 
-        if abs_now < 2:
-            zone_label = "观望区（当日流入流出有限）"
-        elif now > 0:
-            zone_label = "偏强区（温和净流入）"
-        else:
-            zone_label = "偏弱区（温和净流出）"
+        # ------------------- 报告块（详细 B 版） -----------------------
+        report_block = (
+            f"  - north_nps: {score:.2f}（{level}）\n"
+            f"      · 当日北向代理净流入：{now:.2f} 亿（{zone}）\n"
+            f"      · 10日趋势（斜率）：{trend_10d:.2f}（趋势 {'上行' if trend_10d>0 else '下行' if trend_10d<0 else '中性'}）\n"
+            f"      · 3日加速度：{acc_3d:.2f} 亿（{'加速流入' if acc_3d>0 else '加速流出' if acc_3d<0 else '中性'}）\n"
+            f"      · 北向强弱区间判断：{zone}\n"
+        )
 
-        # =============================================================
-        # 六、得分（结合方向 + 规模 + 趋势 + 加速度）
-        # =============================================================
-        score = 50
-
-        # --- 规模决定方向力度 ---
-        if now > 10:
-            score += 10
-        elif now > 2:
-            score += 5
-        elif now < -10:
-            score -= 10
-        elif now < -2:
-            score -= 5
-
-        # --- 趋势 ---
-        if slope_10 > 0:
-            score += 5
-        elif slope_10 < 0:
-            score -= 5
-
-        # --- 加速度 ---
-        if acc_3d > 0:
-            score += 3
-        elif acc_3d < 0:
-            score -= 3
-
-        # 限制范围
-        score = max(0, min(100, score))
-
-        # 信号
-        if score >= 60:
-            signal = "偏多"
-        elif score <= 40:
-            signal = "偏空"
-        else:
-            signal = "中性"
-
-        # =============================================================
-        # 七、报告文本（完全对齐 margin 风格）
-        # =============================================================
-        report_block = f"""  - {self.name}: {score:.2f}（{signal}）
-        · 当日北向代理流入：{now:.2f} 亿
-        · 10日趋势：{trend_label}
-        · 3日加速度：{acc_3d:.2f} 亿（{acc_label}）
-        · 北向资金区间：{zone_label}
-"""
+        details = {
+            "north_flow_e9": now,
+            "trend_10d": trend_10d,
+            "acc_3d": acc_3d,
+            "zone": zone,
+            "level": level,
+        }
 
         return FactorResult(
             name=self.name,
             score=score,
+            details=details,
+            level=level,
             signal=signal,
-            raw={
-                "north_flow_e9": now,
-                "trend_10d": slope_10,
-                "acc_3d": acc_3d,
-                "zone": zone_label,
-            },
+            raw=details,
             report_block=report_block,
         )

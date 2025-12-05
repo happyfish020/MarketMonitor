@@ -1,12 +1,10 @@
 from datetime import date, datetime, timedelta
 from typing import Set
 
-# 简化：只排除周末，节假日后续从外部配置注入
 HOLIDAYS: Set[date] = set()
 
 
 def is_trading_day(d: date) -> bool:
-    """判断是否为交易日：当前版本 = 工作日且不在假日列表。"""
     if d.weekday() >= 5:
         return False
     if d in HOLIDAYS:
@@ -17,7 +15,6 @@ def is_trading_day(d: date) -> bool:
 def get_last_trade_date(ref: datetime) -> date:
     """
     返回 ref 之前最近的一个“交易日”（含当天）。
-    （这个函数现在主要留给其他用途，日级入口改用 get_trade_date_daily）
     """
     d = ref.date()
     while not is_trading_day(d):
@@ -25,31 +22,35 @@ def get_last_trade_date(ref: datetime) -> date:
     return d
 
 
+def _prev_trading_day(d: date) -> date:
+    """严格意义上的 T-1：返回 d 之前的最近一个交易日（不含当天）。"""
+    cur = d - timedelta(days=1)
+    while not is_trading_day(cur):
+        cur = cur - timedelta(days=1)
+    return cur
+
+
 def get_trade_date_daily(bj_now: datetime) -> date:
     """
-    日级 trade_date 规则（方案 B）：
+    日级 trade_date 规则（修正版）：
 
-    - 北京时间 < 15:00 → 使用上一个交易日 (T-1)
-    - 北京时间 ≥ 15:00 → 如果今天是交易日，用今天；否则用上一个交易日
-
-    始终保证 trade_date 不会是未来日期。
+    - 如果 today 是交易日：
+        * bj_now.hour < 15:00 → 使用上一交易日 (T-1)
+        * bj_now.hour >= 15:00 → 使用今天 (T)
+    - 如果 today 不是交易日（周末/节假日）：
+        * 始终使用最近一个过去的交易日（例如周六/周日 → 周五）
     """
     today = bj_now.date()
     hour = bj_now.hour
 
-    # 找到 <= today 的最近一个交易日
-    last_trade = today
-    while not is_trading_day(last_trade):
-        last_trade = last_trade - timedelta(days=1)
-
-    if hour < 15:
-        # 盘前/盘中：使用 T-1
-        prev_trade = last_trade - timedelta(days=1)
-        while not is_trading_day(prev_trade):
-            prev_trade = prev_trade - timedelta(days=1)
-        return prev_trade
-
-    # 15:00 之后：如果今天本身是交易日，就用今天；否则用最近一个交易日
     if is_trading_day(today):
-        return today
-    return last_trade
+        # 交易日：区分盘前/盘中 vs 收盘后
+        if hour < 15:
+            # 盘前/盘中：看 T-1
+            return _prev_trading_day(today)
+        else:
+            # 收盘后：今天就可以作为 trade_date
+            return today
+    else:
+        # 非交易日：一律用最近一个过去的交易日
+        return get_last_trade_date(bj_now)

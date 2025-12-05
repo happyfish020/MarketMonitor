@@ -12,7 +12,7 @@ from core.utils.logger import init_run_logger, log
 from core.engines.cn.ashare_daily_engine import run_cn_ashare_daily
 
 # 松耦合因子报告
-from core.report.cn.ashare_report_cn import build_daily_report_text, save_daily_report
+from core.reporters.cn.ashare_daily_reporter import build_daily_report_text, save_daily_report
 
 
 def main() -> None:

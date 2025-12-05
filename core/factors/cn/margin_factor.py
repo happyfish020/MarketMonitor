@@ -1,114 +1,179 @@
 # -*- coding: utf-8 -*-
 """
-UnifiedRisk v11.7
-margin_factor.py — 全系统统一单位版（内部全部使用“亿元(e9)”）
+UnifiedRisk v11.7.2 — MarginFactor（两融因子）
+修复：
+- 东财 RZRQ 数据为 T-1（非今日）
+- 字段名兼容 rz/rz_e9, rq/rq_e9, rzrq/total_e9
+- 非 T 当日 → 自动向后回退 + 报告中标注日期
 """
 
 from __future__ import annotations
-
 import numpy as np
-from typing import Dict, Any
+from typing import Dict, Any, List
 from core.models.factor_result import FactorResult
-from core.adapters.datasources.cn.em_margin_client import EastmoneyMarginClientCN
 
 
 class MarginFactor:
     name = "margin"
 
-    def compute_from_daily(self, processed: Dict[str, Any]) -> FactorResult:
-        # 获取最近 20~60 日两融数据（单位已经在 client 中转换为“亿”）
-        client = EastmoneyMarginClientCN()
-        series = client.get_recent_series(max_days=60)
+    def compute_from_daily(self, processed: Dict[str, Any], trade_date=None) -> FactorResult:
+        data = processed or {}
+        margin_block = data.get("margin") or {}
+        series: List[Dict[str, Any]] = margin_block.get("series") or []
 
-        if not series or len(series) < 5:
+        # ===== 无序列：完全缺失 =====
+        if not series:
             return FactorResult(
                 name=self.name,
-                score=50,
-                signal="数据不足",
+                score=50.0,
+                level="中性",
+                signal="两融数据缺失",
+                details={},
                 raw={},
-                report_block=f"  - {self.name}: 50.00（数据不足）\n",
+                report_block=(
+                    "  - margin: 50.00（中性）\n"
+                    "      · 两融数据缺失，无法评估杠杆风险\n"
+                ),
             )
 
-        # 直接使用“亿”单位
-        rz = np.array([float(x["rz"]) for x in series], dtype=float)
-        rq = np.array([float(x["rq"]) for x in series], dtype=float)
-        total = rz + rq
-        dates = [x["date"] for x in series]
+        # ===== 识别 T-1 数据 =====
+        last_item = series[-1]
+        series_last_date = str(last_item.get("date"))
 
-        rz_now, rz_prev = rz[-1], rz[-2]
-        rq_now, rq_prev = rq[-1], rq[-2]
-        total_now, total_prev = total[-1], total[-2]
+        is_t_minus_one = (trade_date and series_last_date < str(trade_date))
 
-        # 涨跌幅（比例）
-        rz_chg = (rz_now - rz_prev) / rz_prev if rz_prev != 0 else 0
-        rq_chg = (rq_now - rq_prev) / rq_prev if rq_prev != 0 else 0
-        total_chg_pct = (total_now - total_prev) / total_prev if total_prev != 0 else 0
+        # ===== 字段名称兼容（东财：rz, rq, rzrq） =====
+        def _get_value(item, *keys):
+            for k in keys:
+                if k in item:
+                    return float(item[k] or 0.0)
+            return 0.0
 
-        # 10 日趋势
-        slope_10 = rz[-1] - rz[-10]
-        if slope_10 > 0:
-            trend_label = "融资持续增加（偏多）"
-        elif slope_10 < 0:
-            trend_label = "融资持续减少（偏空）"
+        rz = np.array([_get_value(x, "rz_e9", "rz") for x in series], dtype=float)
+        rq = np.array([_get_value(x, "rq_e9", "rq") for x in series], dtype=float)
+        total = np.array(
+            [
+                _get_value(x, "total_e9", "rzrq", "rz+rq") or (rz_i + rq_i)
+                for x, rz_i, rq_i in zip(series, rz, rq)
+            ],
+            dtype=float,
+        )
+
+        dates = [str(x.get("date")) for x in series]
+        n = len(total)
+
+        rz_last = rz[-1]
+        rq_last = rq[-1]
+        total_last = total[-1]
+
+        # ===== 特殊：若真实只有某天没有数据，而不是全 0，则不判为缺失 =====
+        if np.sum(total) == 0:
+            return FactorResult(
+                name=self.name,
+                score=50.0,
+                level="中性",
+                signal="两融数据可能接口异常（全为 0）",
+                details={},
+                raw={"series": series},
+                report_block=(
+                    "  - margin: 50.00（中性）\n"
+                    "      · 警告：两融序列全部为 0，推测为接口异常，暂不解读\n"
+                ),
+            )
+
+        # ===== 10日趋势回归（斜率） =====
+        if n >= 10:
+            y = total[-10:]
+            x = np.arange(len(y))
+            A = np.vstack([x, np.ones_like(x)]).T
+            slope_10, _ = np.linalg.lstsq(A, y, rcond=None)[0]
         else:
-            trend_label = "趋势中性"
+            slope_10 = 0.0
 
-        # 3 日加速度
-        acc_3d = rz[-1] - rz[-3]
-        if acc_3d > 0:
-            acc_label = "加速流入（偏多）"
-        elif acc_3d < 0:
-            acc_label = "明显减速（偏空）"
+        # ===== 3 日加速度 =====
+        acc_3d = float(total[-1] - total[-3]) if n >= 3 else 0.0
+
+        # ===== 杠杆区间判定 =====
+        if total_last >= 20000:
+            zone = "极高杠杆"
+            base_score = 30
+        elif total_last >= 16000:
+            zone = "高杠杆"
+            base_score = 40
+        elif total_last >= 12000:
+            zone = "中等偏高杠杆"
+            base_score = 50
+        elif total_last >= 8000:
+            zone = "中性杠杆"
+            base_score = 60
         else:
-            acc_label = "中性"
+            zone = "低杠杆"
+            base_score = 70
 
-        # 杠杆区间（真实 A 股两融余额 ≈ 15000–18000 亿）
-        if total_now >= 18000:
-            zone_label = "高杠杆区（需警惕系统性风险）"
-        elif total_now >= 15000:
-            zone_label = "正常偏高"
+        # 趋势修正
+        trend_adj = -5 if slope_10 > 50 else (5 if slope_10 < -50 else 0)
+        score = max(0.0, min(100.0, base_score + trend_adj))
+
+        if score >= 70:
+            level = "杠杆偏低（有弹药）"
+        elif score >= 55:
+            level = "杠杆中性"
+        elif score >= 40:
+            level = "杠杆偏高（需谨慎）"
         else:
-            zone_label = "正常区间"
+            level = "杠杆显著偏高（风险区）"
 
-        # 得分
-        score = 50
-        score += 10 if slope_10 > 0 else -10 if slope_10 < 0 else 0
-        score += 5 if acc_3d > 0 else -5 if acc_3d < 0 else 0
-        if total_now >= 18000:
-            score -= 10
+        # ===== 报告文本（新增 T-1 提示） =====
+        date_note = (
+            f"（数据日期：{series_last_date}，非今日；东财官方为 T-1 更新）"
+            if is_t_minus_one else ""
+        )
 
-        score = max(0, min(100, score))
+        trend_label = (
+            "快速上升（风险抬升）" if slope_10 > 50 else
+            "缓慢上升" if slope_10 > 0 else
+            "缓慢下降（去杠杆）" if slope_10 < -50 else
+            "震荡/中性"
+        )
 
-        # 信号
-        if score >= 60:
-            signal = "偏多"
-        elif score <= 40:
-            signal = "偏空"
-        else:
-            signal = "中性"
+        acc_label = (
+            "近期明显加杠杆" if acc_3d > 50 else
+            "略有加杠杆" if acc_3d > 0 else
+            "略有去杠杆" if acc_3d < 0 else
+            "中性"
+        )
 
-        # 报告块
-        report_block = f"""  - {self.name}: {score:.2f}（{signal}）
-        · 当日融资余额：{rz_now:.2f} 亿（{rz_chg*100:.2f}%）
-        · 当日融券余额：{rq_now:.2f} 亿（{rq_chg*100:.2f}%）
-        · 两融总余额：{total_now:.2f} 亿（{total_chg_pct*100:.2f}%）
-        · 10日趋势：{trend_label}
-        · 3日加速度：{acc_3d:.2f} 亿（{acc_label}）
-        · 杠杆风险区间：{zone_label}
-"""
+        report_block = (
+            f"  - margin: {score:.2f}（{level}）\n"
+            f"      · 当日两融（T-1）数据：融资 {rz_last:.0f} 亿；融券 {rq_last:.0f} 亿；总额 {total_last:.0f} 亿（{zone}）{date_note}\n"
+            f"      · 10日趋势（回归斜率）：{slope_10:.2f}（{trend_label}）\n"
+            f"      · 3日加速度：{acc_3d:.2f} 亿（{acc_label}）\n"
+        )
+
+        details = {
+            "rz_last_e9": rz_last,
+            "rq_last_e9": rq_last,
+            "total_last_e9": total_last,
+            "trend_10d": slope_10,
+            "acc_3d": acc_3d,
+            "zone_label": zone,
+            "series_last_date": series_last_date,
+            "is_t_minus_one": is_t_minus_one,
+        }
+
+        raw = {
+            "dates": dates,
+            "rz": rz.tolist(),
+            "rq": rq.tolist(),
+            "total": total.tolist(),
+        }
 
         return FactorResult(
             name=self.name,
             score=score,
-            signal=signal,
-            raw={
-                "dates": dates,
-                "rz": rz.tolist(),
-                "rq": rq.tolist(),
-                "total": total.tolist(),
-                "trend_label": trend_label,
-                "acc_3d": acc_3d,
-                "zone_label": zone_label,
-            },
+            level=level,
+            signal=f"{zone}，T-1 总额 {total_last:.0f} 亿",
+            details=details,
+            raw=raw,
             report_block=report_block,
         )

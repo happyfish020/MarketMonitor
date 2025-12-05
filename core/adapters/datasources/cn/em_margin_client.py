@@ -1,14 +1,16 @@
 # -*- coding: utf-8 -*-
 """
-Eastmoney Margin Client — 统一单位版
+Eastmoney Margin Client — 统一单位版 + 3次重试机制
 外部：元
 内部：统一转换为 亿元(e9)
 """
 
+import time
 import requests
 from typing import List, Dict, Any
+
 from core.utils.logger import log
-from core.utils.units import yuan_to_e9   # ← 必须引用这个！
+from core.utils.units import yuan_to_e9   # 必须引用这个！
 
 
 class EastmoneyMarginClientCN:
@@ -17,6 +19,40 @@ class EastmoneyMarginClientCN:
     def __init__(self) -> None:
         log("[IO] EastmoneyMarginClientCN init (no local cache)")
 
+    # =====================================================================
+    # 加强版：含 retry=3 + sleep(10) + timeout=20
+    # =====================================================================
+    def _request_with_retry(self, params: Dict[str, Any], headers: Dict[str, str]):
+        """封装统一的网络请求 + 重试机制"""
+        RETRY = 3
+        SLEEP_SEC = 10
+
+        for i in range(1, RETRY + 1):
+            try:
+                log(f"[IO] FETCH → Eastmoney RZRQ_LSDB (try {i}/{RETRY})")
+                resp = requests.get(
+                    self.BASE_URL,
+                    params=params,
+                    headers=headers,
+                    timeout=20  # ★ read_timeout = 20
+                )
+                resp.raise_for_status()
+
+                js = resp.json()
+                return js
+
+            except Exception as e:
+                log(f"[IO] FAIL (try {i}/{RETRY}) ← {e}")
+                if i < RETRY:
+                    log(f"[IO] RETRY in {SLEEP_SEC}s...")
+                    time.sleep(SLEEP_SEC)
+                else:
+                    log("[IO] GIVE UP after 3 retries.")
+                    return None
+
+    # =====================================================================
+    # 主函数：获取近期 RZRQ 序列
+    # =====================================================================
     def get_recent_series(self, max_days: int = 20) -> List[Dict[str, Any]]:
         params = {
             "reportName": "RPTA_RZRQ_LSDB",
@@ -38,13 +74,9 @@ class EastmoneyMarginClientCN:
             "Referer": "https://data.eastmoney.com/rzrq/",
         }
 
-        try:
-            log("[IO] FETCH → Eastmoney RZRQ_LSDB")
-            resp = requests.get(self.BASE_URL, params=params, headers=headers, timeout=8)
-            resp.raise_for_status()
-            js = resp.json()
-        except Exception as e:
-            log(f"[IO] FETCH FAIL ← Eastmoney RZRQ_LSDB: {e}")
+        js = self._request_with_retry(params, headers)
+        if js is None:
+            log("[IO] FETCH FAIL ← Eastmoney RZRQ_LSDB (all retries failed)")
             return []
 
         result = js.get("result") or {}
@@ -55,12 +87,11 @@ class EastmoneyMarginClientCN:
             try:
                 date = str(row.get("DIM_DATE") or "")[:10]
 
-                # ---- 原始为“元”，必须转换为“亿” ----
-                rz_raw = float(row.get("RZYE") or 0.0)       # 元
-                rq_raw = float(row.get("RQYE") or 0.0)       # 元
-                rzrq_raw = float(row.get("RZRQYE") or (rz_raw + rq_raw))  # 元
+                # 原始为元 → 必须转换为 亿(e9)
+                rz_raw = float(row.get("RZYE") or 0.0)
+                rq_raw = float(row.get("RQYE") or 0.0)
+                rzrq_raw = float(row.get("RZRQYE") or (rz_raw + rq_raw))
 
-                # ---- 统一转换为“亿(e9)” ----
                 rz = yuan_to_e9(rz_raw)
                 rq = yuan_to_e9(rq_raw)
                 rzrq = yuan_to_e9(rzrq_raw)
@@ -71,7 +102,6 @@ class EastmoneyMarginClientCN:
                     "rq": rq,
                     "rzrq": rzrq,
                 })
-
             except Exception:
                 continue
 

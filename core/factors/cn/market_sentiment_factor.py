@@ -1,7 +1,18 @@
 # -*- coding: utf-8 -*-
 """
-UnifiedRisk v11.7
-MarketSentimentFactor — 市场宽度 + 涨跌停 + HS300 代理
+UnifiedRisk v11.7 — MarketSentiment 因子（宽度 + 涨跌停 + HS300 代理，详细版 B）
+
+依赖 processed["breadth"]：
+  {
+    "adv":        上涨家数,
+    "dec":        下跌家数,
+    "total":      总家数,
+    "limit_up":   涨停数,
+    "limit_down": 跌停数,
+    "adv_ratio":  上涨占比（可选，缺失时由 adv/total 计算）
+  }
+以及可选 HS300 代理涨跌：
+  processed["hs300_pct"] 或 processed["etf_proxy"]["hs300_pct"]
 """
 
 from __future__ import annotations
@@ -14,92 +25,137 @@ class MarketSentimentFactor:
     name = "market_sentiment"
 
     def compute_from_daily(self, processed: Dict[str, Any]) -> FactorResult:
-        f = processed["features"]
+        data = processed or {}
+        b = data.get("breadth") or {}
 
-        adv = int(f.get("adv") or 0)
-        dec = int(f.get("dec") or 0)
-        total = int(f.get("total_stocks") or (adv + dec))
-        limit_up = int(f.get("limit_up") or 0)
-        limit_down = int(f.get("limit_down") or 0)
-        hs300_pct = float(f.get("hs300_proxy_pct") or 0.0)  # %
+        adv = float(b.get("adv") or 0)
+        dec = float(b.get("dec") or 0)
+        total = float(b.get("total") or (adv + dec) or 1)
+        lu = float(b.get("limit_up") or 0)
+        ld = float(b.get("limit_down") or 0)
 
-        total = max(total, 1)
-        adv_ratio = adv / total
+        adv_ratio = float(b.get("adv_ratio") or (adv / total if total > 0 else 0))
 
-        # === 1. 宽度评分（以 adv_ratio 为主） ===
-        score = 50.0
-        width_comment = ""
+        # HS300 代理涨跌
+        hs300_pct = 0.0
+        if "hs300_pct" in data:
+            hs300_pct = float(data.get("hs300_pct") or 0.0)
+        else:
+            etf_proxy = data.get("etf_proxy") or {}
+            hs300_pct = float(etf_proxy.get("hs300_pct") or 0.0)
 
-        if adv_ratio >= 0.65:
-            score += 15
-            width_comment = "多头占绝对优势，情绪偏亢奋"
+        # ----------------- 1）宽度评分 -----------------
+        if adv_ratio >= 0.7:
+            width_label = "普涨"
+            width_score = 85
         elif adv_ratio >= 0.55:
-            score += 7
-            width_comment = "多头略占优，情绪偏乐观"
+            width_label = "涨多跌少"
+            width_score = 70
         elif adv_ratio >= 0.45:
-            width_comment = "多空均衡，情绪中性"
-        elif adv_ratio >= 0.35:
-            score -= 7
-            width_comment = "空头略占优，情绪偏谨慎"
+            width_label = "震荡"
+            width_score = 55
+        elif adv_ratio >= 0.3:
+            width_label = "跌多涨少"
+            width_score = 40
         else:
-            score -= 15
-            width_comment = "空头主导，情绪偏悲观"
+            width_label = "普跌"
+            width_score = 25
 
-        # === 2. 涨跌停结构评分 ===
-        lmt_comment = ""
-        if limit_up >= 80 and limit_down <= 10:
-            score += 8
-            lmt_comment = "涨停家数较多，强势股活跃"
-        elif limit_up >= 40 and limit_down <= 20:
-            score += 3
-            lmt_comment = "涨停活跃度尚可"
-        elif limit_down >= 30 and limit_up <= 10:
-            score -= 8
-            lmt_comment = "跌停家数偏多，恐慌盘较重"
+        # ----------------- 2）涨跌停氛围 -----------------
+        if lu >= 100 and ld <= 10:
+            lmt_label = "强势涨停潮"
+            lmt_score = 85
+        elif lu >= 50 and ld <= 20:
+            lmt_label = "较强涨停氛围"
+            lmt_score = 70
+        elif ld >= 50 and lu <= 10:
+            lmt_label = "强势杀跌氛围"
+            lmt_score = 25
+        elif ld >= 30 and lu <= 20:
+            lmt_label = "偏空杀跌"
+            lmt_score = 40
         else:
-            if not lmt_comment:
-                lmt_comment = "涨跌停结构中性"
+            lmt_label = "中性"
+            lmt_score = 55
 
-        # === 3. HS300 方向修正 ===
-        if hs300_pct >= 1.5:
-            score += 5
-        elif hs300_pct <= -1.5:
-            score -= 5
-
-        # 限制 0~100
-        score = max(0.0, min(100.0, score))
-
-        if score >= 60:
-            signal = "偏多"
-        elif score <= 40:
-            signal = "偏空"
+        # ----------------- 3）HS300 方向评分 -----------------
+        if hs300_pct >= 2.0:
+            idx_label = "大盘强势上攻"
+            idx_score = 85
+        elif hs300_pct >= 0.5:
+            idx_label = "大盘温和上涨"
+            idx_score = 70
+        elif hs300_pct > -0.5:
+            idx_label = "大盘震荡"
+            idx_score = 55
+        elif hs300_pct > -2.0:
+            idx_label = "大盘回调"
+            idx_score = 40
         else:
-            signal = "中性"
+            idx_label = "大盘大幅下跌"
+            idx_score = 25
 
-        # === 4. 报告文本 ===
-        report_block = f"""  - {self.name}: {score:.2f}（{signal}）
-        · 涨跌：上涨 {adv} ；下跌 {dec} ；总数 {total}
-        · 涨停：{limit_up} ；跌停：{limit_down}
-        · adv_ratio：{adv_ratio:.2f}
-        · HS300 代理涨跌：{hs300_pct:.2f}%
-        · 宽度点评：{width_comment}
-        · 涨跌停结构：{lmt_comment}
-"""
+        # ----------------- 综合情绪评分 -----------------
+        score = float((width_score + lmt_score + idx_score) / 3.0)
+
+        if score >= 75:
+            level = "情绪亢奋偏多"
+        elif score >= 60:
+            level = "情绪偏多"
+        elif score >= 45:
+            level = "情绪中性"
+        elif score >= 30:
+            level = "情绪偏空"
+        else:
+            level = "情绪恐慌偏空"
+
+        signal = f"{width_label}，{idx_label}，{lmt_label}"
+
+        raw = {
+            "adv": adv,
+            "dec": dec,
+            "total": total,
+            "adv_ratio": adv_ratio,
+            "limit_up": lu,
+            "limit_down": ld,
+            "hs300_pct": hs300_pct,
+            "width_label": width_label,
+            "lmt_label": lmt_label,
+            "idx_label": idx_label,
+        }
+
+        details = {
+            "level": level,
+            "adv": adv,
+            "dec": dec,
+            "total": total,
+            "adv_ratio": adv_ratio,
+            "limit_up": lu,
+            "limit_down": ld,
+            "hs300_pct": hs300_pct,
+            "width_label": width_label,
+            "lmt_label": lmt_label,
+            "idx_label": idx_label,
+            "width_score": width_score,
+            "lmt_score": lmt_score,
+            "idx_score": idx_score,
+        }
+
+        # ========= 详细报告（B 版） =========
+        report_block = (
+            f"  - market_sentiment: {score:.2f}（{level}）\n"
+            f"      · 涨跌家数：上涨 {int(adv)}；下跌 {int(dec)}；总数 {int(total)}；上涨占比 {adv_ratio:.2%}（{width_label}）\n"
+            f"      · 涨跌停结构：涨停 {int(lu)}；跌停 {int(ld)}（{lmt_label}）\n"
+            f"      · HS300 代理涨跌：{hs300_pct:.2f}%（{idx_label}）\n"
+            f"      · 情绪综合判断：{signal}\n"
+        )
 
         return FactorResult(
             name=self.name,
             score=score,
+            details=details,
+            level=level,
             signal=signal,
-            raw={
-                "adv": adv,
-                "dec": dec,
-                "total": total,
-                "adv_ratio": adv_ratio,
-                "limit_up": limit_up,
-                "limit_down": limit_down,
-                "hs300_pct": hs300_pct,
-                "width_comment": width_comment,
-                "lmt_comment": lmt_comment,
-            },
+            raw=raw,
             report_block=report_block,
         )

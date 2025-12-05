@@ -31,6 +31,11 @@ from core.utils.config_loader import load_paths
 
 from core.engines.cn.refresh_controller_cn import RefreshControllerCN, RefreshPlanCN
 
+
+from core.factors.glo.global_lead_factor import GlobalLeadFactor
+#from core.predictors.predict_t1_t5 import PredictionEngine
+from core.reporters.cn.ashare_daily_reporter import build_daily_report_text, save_daily_report
+#from core.predictors.predict_t1_t5 import PredictorT1T5
 # Fetcher 层
 from core.adapters.fetchers.cn.ashare_fetcher import (
     AshareFetcher,
@@ -51,7 +56,7 @@ from core.factors.cn.emotion_engine import compute_cn_emotion_from_snapshot
 from core.engines.cn.emotion_report_writer import format_cn_ashare_emotion_report
 
 # 因子报告（松耦合）
-from core.report.cn.ashare_report_cn import (
+from core.reporters.cn.ashare_daily_reporter import (
     build_daily_report_text,
     save_daily_report,
 )
@@ -78,9 +83,12 @@ def _intraday_cache_exists() -> bool:
 # =====================================================================
 
 def run_cn_ashare_daily(force_daily_refresh: bool = False) -> Dict[str, Any]:
-    """A股日级执行入口（V11.6.6 松耦合版）。"""
+    """A股日级执行入口（V11.7增强版：加入 GlobalLead + T+1/T+5 预测）。"""
 
+    # ============================================================
     # 1) 确定交易日 & 刷新计划
+    # ============================================================
+ 
     bj_now = now_bj()
     controller = RefreshControllerCN(bj_now)
     trade_date = controller.trade_date
@@ -91,60 +99,126 @@ def run_cn_ashare_daily(force_daily_refresh: bool = False) -> Dict[str, Any]:
         has_daily_cache=has_daily_cache,
     )
 
-    log(f"[AShareDaily] Start run at {bj_now.isoformat()}")
-    log(f"[AShareDaily] trade_date = {trade_date}, force={force_daily_refresh}, has_cache={has_daily_cache}")
 
+    log(f"[AShareDaily] Start run at {bj_now.isoformat()}")
+    log(f"[AShareDaily] trade_date={trade_date}, force={force_daily_refresh}, has_cache={has_daily_cache}")
+
+    # ============================================================
     # 2) 获取 snapshot
+    # ============================================================
     fetcher = AshareFetcher()
     daily_snapshot = fetcher.get_daily_snapshot(
         trade_date=trade_date,
         force_refresh=plan.should_refresh_daily,
     )
 
-    # 3) 构造因子 features（完全基于 snapshot）
+    # ============================================================
+    # 3) 构造 features → 因子输入（纯 snapshot 转换）
+    # ============================================================
     processed = _build_processed_for_factors(daily_snapshot)
 
-    # 4) 计算各因子（全部返回 FactorResult，内含 report_block）
+    # ============================================================
+    # 4) 计算所有因子（结果为 FactorResult，松耦合）
+    # ============================================================
     factors: Dict[str, FactorResult] = {}
 
+    # 北向（NPS）
     north_factor = NorthNPSFactor()
     factors[north_factor.name] = north_factor.compute_from_daily(processed)
 
+    # 成交额（Turnover）
     turn_factor = TurnoverFactor()
     factors[turn_factor.name] = turn_factor.compute_from_daily(processed)
 
+    # 市场情绪（涨跌家数）
     ms_factor = MarketSentimentFactor()
     factors[ms_factor.name] = ms_factor.compute_from_daily(processed)
 
+    # 两融（Margin）
     margin_factor = MarginFactor()
     factors[margin_factor.name] = margin_factor.compute_from_daily(processed)
 
-    # 5) 情绪因子：调用 EmotionEngine → 适配为 FactorResult
+    # ============================================================
+    # 5) A 股情绪因子（v11 FULL）
+    # ============================================================
     emotion_input = _build_emotion_input_from_snapshot(daily_snapshot)
     emotion_dict = compute_cn_emotion_from_snapshot(emotion_input)
-
     emotion_fr = _emotion_dict_to_factor_result(emotion_dict)
     factors[emotion_fr.name] = emotion_fr
 
-    # 6) 统一评分（仅用于返回结构 / 上层决策，不参与报告排版）
+    # ============================================================
+    # 6) 新增：全球引导因子（GlobalLeadFactor）
+    # ============================================================
+    gl_factor = GlobalLeadFactor(daily_snapshot).compute()
+    factors["global_lead"] = FactorResult(
+    name="global_lead",
+    score=gl_factor["score"],
+    details={
+        "level": gl_factor["level"],
+        **gl_factor["details"],
+        }
+    )
+    # ============================================================
+    # 7) 统一评分（用于风险等级 summary，不用于报告内容排版）
+    # ============================================================
     usb = UnifiedScoreBuilder()
     summary = usb.unify(factors)
 
-    trade_date_str = trade_date.isoformat()
+    # ============================================================
+    # 8) 新增：T+1 / T+5 预测（PredictionEngine）
+    # ============================================================
+    
+    from core.predictors.prediction_engine import PredictorT1T5 
+
+    predictor = PredictorT1T5()
+    
+    #prediction_block = predictor.format_report(prediction_result)
+    log("[Prediction] Start prediction")
+    log(f"[Prediction] Input factor keys: {list(factors.keys())}")
+
+    #from core.predictors.prediction_engine import PredictorT1T5
+
+    predictor = PredictorT1T5()
+    pred_raw = predictor.predict(factors)  # {'T+1': {...}, 'T+5': {...}}
+    
+    # --- 适配 reporter 期望的 key 命名 ---
+    prediction_block = {
+        "t1": pred_raw.get("T+1", {}),
+        "t5": pred_raw.get("T+5", {}),
+    }
+    
+    # Debug 日志（可选，但强烈推荐）：
+    log(f"[Prediction] T+1 score={prediction_block['t1'].get('score')}, direction={prediction_block['t1'].get('direction')}")
+    log(f"[Prediction] T+5 score={prediction_block['t5'].get('score')}, direction={prediction_block['t5'].get('direction')}")
+
+    # ============================================================
+    # 9) 构建 meta
+    # ============================================================
+    
+    trade_date_str = trade_date.strftime("%Y-%m-%d")     # 报告内部显示用
+    file_date_str = bj_now.strftime("%Y%m%d")            # ★ 文件名用（20251205）
 
     meta = {
         "market": "CN",
         "trade_date": trade_date_str,
-        "version": "UnifiedRisk_v11.6.6",
+        "version": "UnifiedRisk_v11.7",
         "generated_at": bj_now.strftime("%Y-%m-%d %H:%M:%S"),
         "total_score": summary.get("total_score"),
         "risk_level": summary.get("risk_level"),
     }
 
-    # 7) 构建“因子报告”（松耦合）
-    risk_report_text = build_daily_report_text(meta, factors)
+    # ============================================================
+    # 10) 生成 A 股风险报告（含预测模块）
+    # ============================================================
+    risk_report_text = build_daily_report_text(
+        meta=meta,
+        factors=factors,
+        prediction=prediction_block,   # ★ 新增：报告加入预测
+    )
 
-    # 8) 构建“情绪报告”
+    # ============================================================
+    # 11) 生成情绪报告（保持原版）
+    # ============================================================
     emotion_report_text = format_cn_ashare_emotion_report({
         "generated_at": bj_now,
         "trade_date": trade_date,
@@ -154,6 +228,7 @@ def run_cn_ashare_daily(force_daily_refresh: bool = False) -> Dict[str, Any]:
         },
     })
 
+    
     full_report = (
         risk_report_text
         + "\n"
@@ -163,10 +238,18 @@ def run_cn_ashare_daily(force_daily_refresh: bool = False) -> Dict[str, Any]:
         + emotion_report_text
     )
 
-    # 9) 写入报告文件
+    # ============================================================
+    # 12) 写入报告文件
+    # ============================================================
+    
+    # 用 file_date_str 生成文件名
     final_path = save_daily_report("cn", trade_date_str, full_report)
     log(f"[AShareDaily] Report saved: {final_path}")
+    
 
+    # ============================================================
+    # 13) 返回数据结构
+    # ============================================================
     return {
         "meta": meta,
         "snapshot": daily_snapshot,
@@ -174,6 +257,7 @@ def run_cn_ashare_daily(force_daily_refresh: bool = False) -> Dict[str, Any]:
         "factors": factors,
         "summary": summary,
         "emotion": emotion_dict,
+        "prediction": prediction_block,
         "report_path": final_path,
         "report_text": full_report,
     }
@@ -186,19 +270,36 @@ def run_cn_ashare_daily(force_daily_refresh: bool = False) -> Dict[str, Any]:
 def _build_processed_for_factors(snapshot: Dict[str, Any]) -> Dict[str, Any]:
     """根据 snapshot 组装因子层需要的 features。
 
-    目前支持：
-    - north_nps: 依赖 etf_proxy.etf_flow_e9 / total_turnover_e9 / hs300_proxy_pct
-    - turnover: 依赖 turnover.{sh_turnover_e9, sz_turnover_e9, total_turnover_e9}
-    - market_sentiment: 依赖 breadth.{adv, dec, total, limit_up, limit_down} + hs300_proxy_pct
-    - margin: 直接在因子内部调用 EastmoneyMarginClientCN（与 processed 无强耦合）
+    目标：
+      1）保持与 snapshot 同构：etf_proxy / turnover / breadth / margin 等原样保留
+      2）附加一层 features：给后续复杂模型 / 预测使用
     """
+
+    snapshot = snapshot or {}
+
     etf = snapshot.get("etf_proxy", {}) or {}
     turnover = snapshot.get("turnover", {}) or {}
     breadth = snapshot.get("breadth", {}) or {}
+    margin = snapshot.get("margin", {}) or {}
 
-    sh = float(turnover.get("sh_turnover_e9", 0.0) or 0.0)
-    sz = float(turnover.get("sz_turnover_e9", 0.0) or 0.0)
-    total_t = float(turnover.get("total_turnover_e9", sh + sz) or (sh + sz))
+    # 这里的成交额字段，以你 datasource 实际输出为准：
+    # 若 MarketDataReaderCN 已经返回 {shanghai, shenzhen, total}，则可以不再转换；
+    # 若仍然是 sh_turnover_e9 等，可以在这里做一次兼容映射。
+    sh = float(
+        turnover.get("shanghai")
+        or turnover.get("sh_turnover_e9")
+        or 0.0
+    )
+    sz = float(
+        turnover.get("shenzhen")
+        or turnover.get("sz_turnover_e9")
+        or 0.0
+    )
+    total_t = float(
+        turnover.get("total")
+        or turnover.get("total_turnover_e9")
+        or (sh + sz)
+    )
 
     # 一个简单的流动性占比 proxy：相对于 1200 亿基准
     base_liq = 1200.0
@@ -224,10 +325,29 @@ def _build_processed_for_factors(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         "limit_down": int(breadth.get("limit_down", 0) or 0),
     }
 
-    return {
-        "raw": snapshot,
+    # processed = snapshot 的增强版
+    processed: Dict[str, Any] = {
+        # 保留所有原始字段
+        **snapshot,
+
+        # 按因子习惯挂载的字段（可选，增强清晰度）
+        "etf_proxy": etf,
+        "turnover": {
+            "shanghai": sh,
+            "shenzhen": sz,
+            "total": total_t,
+        },
+        "breadth": breadth,
+        "margin": margin,
+
+        # 附加 feature 向量
         "features": features,
     }
+
+    # 可选：给 MarketSentimentFactor 直接用
+    processed["hs300_pct"] = features["hs300_proxy_pct"]
+
+    return processed
 
 
 # =====================================================================
@@ -282,37 +402,47 @@ def _build_emotion_input_from_snapshot(snapshot: Dict[str, Any]) -> Dict[str, An
         "limit_down_count": limit_down_count,
     }
 
+def _emotion_dict_to_factor_result(emotion_dict: Dict[str, Any]) -> FactorResult:
+    """
+    将情绪因子 emotion_dict 转换为 FactorResult（V11.7 结构化版本）
+    emotion_dict 格式示例：
+        {
+            "score": 52.3,
+            "level": "中性偏弱",
+            "signal": "情绪降温",
+            "details": {...},   # 可以没有
+            "raw": {...}
+        }
+    """
 
-def _emotion_dict_to_factor_result(emo: Dict[str, Any]) -> FactorResult:
-    """将 EmotionEngine 的 dict 结果适配成标准 FactorResult。"""
+    score = float(emotion_dict.get("score", 50.0))
+    level = emotion_dict.get("level", "中性")
+    signal = emotion_dict.get("signal", "")
+    raw = emotion_dict.get("raw", {})
 
-    score = float(emo.get("EmotionScore", 50.0) or 50.0)
-    level = str(emo.get("EmotionLevel", "Neutral") or "Neutral")
+    # 若 emotion_engine 没有 details，则用 raw 兜底
+    details = emotion_dict.get("details") or {
+        "level": level,
+        **(raw or {})
+    }
 
-    idx_lbl = emo.get("IndexLabel", "")
-    vol_lbl = emo.get("VolumeLabel", "")
-    brd_lbl = emo.get("BreadthLabel", "")
-    nf_lbl = emo.get("NorthLabel", "")
-    mf_lbl = emo.get("MainForceLabel", "")
-    der_lbl = emo.get("DerivativeLabel", "")
-    lim_lbl = emo.get("LimitLabel", "")
+    # 自动生成报告块（可自定义）
+    report_block = (
+        f"  - emotion: {score:.2f}（{level}）\n"
+        f"      · 情绪信号：{signal}\n"
+    )
 
-    signal = f"情绪：{level}（score={score:.1f}）"
-
-    report_block = f"""  - emotion: {score:.2f}（{level}）
-        · 指数：{idx_lbl}
-        · 成交量：{vol_lbl}
-        · 市场宽度：{brd_lbl}
-        · 北向资金：{nf_lbl}
-        · 主力资金：{mf_lbl}
-        · 衍生品：{der_lbl}
-        · 涨跌停：{lim_lbl}
-"""
+    # 若 raw 中含更多字段，可自动展开
+    for k, v in raw.items():
+        report_block += f"      · {k}: {v}\n"
 
     return FactorResult(
         name="emotion",
         score=score,
+        details=details,
+        level=level,
         signal=signal,
-        raw=emo,
+        raw=raw,
         report_block=report_block,
     )
+ 

@@ -14,6 +14,9 @@ from core.utils.config_loader import load_paths
 from core.utils.time_utils import now_bj
 from core.utils.logger import log
 
+from core.adapters.datasources.cn.em_margin_client import EastmoneyMarginClientCN
+from core.adapters.cache import file_cache
+
 _paths = load_paths()
 
 DAY_CACHE_ROOT = os.path.join(_paths.get("cache_dir", "data/cache/"), "day_cn")
@@ -47,61 +50,50 @@ class AshareFetcher:
     # ================================
     # 日级 snapshot 入口
     # ================================
-
-    def get_daily_snapshot(self, trade_date: Date, force_refresh: bool) -> Dict[str, Any]:
-        cache_path = get_daily_cache_path(trade_date)
-
-        # ------------------------
-        # 缓存优先
-        # ------------------------
+    def get_daily_snapshot(self, trade_date: Date, force_refresh: bool = False):
+        day_str = trade_date.strftime("%Y%m%d")
+        cache_dir = os.path.join("data/cache/day_cn", day_str)
+        snapshot_path = os.path.join(cache_dir, "ashare_daily_snapshot.json")
+    
+        # 1. 尝试读 snapshot（除非 force_refresh=True）
         if not force_refresh:
-            cached = load_json(cache_path)
-            if cached is not None:
-                log(f"[CN Fetcher] 使用日级缓存: {cache_path}")
+            cached = file_cache.load_json(snapshot_path)
+            if cached:
+                log(f"[CN Fetcher] 使用日级缓存: {os.path.abspath(snapshot_path)}")
                 return cached
-
+    
         log(f"[CN Fetcher] 刷新日级数据 trade_date={trade_date}, force_refresh={force_refresh}")
-
-        # ------------------------
-        # 北向 ETF 代理
-        # ------------------------
-        etf_proxy = get_etf_north_proxy(trade_date)
-
-        # ------------------------
-        # 成交额 + 市场情绪（zh_spot）
-        # ------------------------
-        reader = MarketDataReaderCN(
-            trade_date,
-            root="data/ashare",
-            spot_mode="fallback_once"
-        )
-
+    
+        # 2. === 获取 ETF Proxy（支持 force_refresh，一次刷新，多次复用）===
+        etf_proxy = get_etf_north_proxy(trade_date, force_refresh=force_refresh)
+        # etf_proxy 是一个 dict，例如：
+        # { "net_etf_flow": ..., "turnover_etf": ..., "hs300_pct": ... }
+    
+        # 3. === zh_spot + turnover + breadth ===
+        reader = MarketDataReaderCN(trade_date, root="data/ashare", spot_mode="dev_debug_once")
         turnover = reader.get_turnover_summary()
         breadth = reader.get_breadth_summary()
-
-        # ------------------------
-        # snapshot 组装
-        # ------------------------
-        bj_now = now_bj()
-
-        data: Dict[str, Any] = {
-            "trade_date": trade_date.isoformat(),
-            "debug_flag": f"daily_generated_at_{bj_now.isoformat()}",
-
-            "meta": {"source": "UnifiedRisk_V11.6_cn"},
-
-            # 因子需要的内容
+    
+        # 4. === Margin U 方案（不写 margin_lsdb.json 路径）===
+        margin_client = EastmoneyMarginClientCN()
+        margin_series = margin_client.get_recent_series(max_days=60)
+        margin_block = {"series": margin_series}
+    
+        # 5. === 组装 snapshot ===
+        snapshot = {
+            "meta": {
+                "trade_date": trade_date.isoformat(),
+            },
             "etf_proxy": etf_proxy,
             "turnover": turnover,
             "breadth": breadth,
+            "margin": margin_block,
         }
-
-        # ------------------------
-        # 写入缓存
-        # ------------------------
-        save_json(cache_path, data)
-        return data
-
+    
+        # 6. === 写入缓存 ===
+        file_cache.save_json(snapshot_path, snapshot)
+        return snapshot
+     
     # ================================
     # 盘中 snapshot 入口
     # ================================

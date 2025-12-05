@@ -1,150 +1,114 @@
+# -*- coding: utf-8 -*-
+"""
+UnifiedRisk v11.7
+margin_factor.py — 全系统统一单位版（内部全部使用“亿元(e9)”）
+"""
+
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Dict, Any, List
-
 import numpy as np
-
-from core.adapters.datasources.cn.em_margin_client import EastmoneyMarginClientCN
+from typing import Dict, Any
 from core.models.factor_result import FactorResult
-
-
-@dataclass
-class MarginFactorConfig:
-    max_days: int = 20
-    lookback_days: int = 10
+from core.adapters.datasources.cn.em_margin_client import EastmoneyMarginClientCN
 
 
 class MarginFactor:
-    """
-    两融因子（V11.4.2）
-    - 结构完全兼容你的 FactorResult 定义（name, score, signal, raw）
-    """
-
     name = "margin"
 
-    def __init__(self, config: MarginFactorConfig | None = None):
-        self.config = config or MarginFactorConfig()
-        self.client = EastmoneyMarginClientCN()
-
-    # ---- 主入口（Engine 调用） ----
-
     def compute_from_daily(self, processed: Dict[str, Any]) -> FactorResult:
-        series = self.client.get_recent_series(max_days=self.config.max_days)
+        # 获取最近 20~60 日两融数据（单位已经在 client 中转换为“亿”）
+        client = EastmoneyMarginClientCN()
+        series = client.get_recent_series(max_days=60)
 
-        # 数据不足 → 中性
-        if len(series) < self.config.lookback_days + 1:
+        if not series or len(series) < 5:
             return FactorResult(
                 name=self.name,
-                score=50.0,
-                signal="中性",
-                raw={"reason": "margin series too short"},
+                score=50,
+                signal="数据不足",
+                raw={},
+                report_block=f"  - {self.name}: 50.00（数据不足）\n",
             )
 
-        # 转 numpy
+        # 直接使用“亿”单位
         rz = np.array([float(x["rz"]) for x in series], dtype=float)
         rq = np.array([float(x["rq"]) for x in series], dtype=float)
+        total = rz + rq
+        dates = [x["date"] for x in series]
 
-        # 最近 lookback_days+1 天
-        rz = rz[-(self.config.lookback_days + 1):]
-        rq = rq[-(self.config.lookback_days + 1):]
+        rz_now, rz_prev = rz[-1], rz[-2]
+        rq_now, rq_prev = rq[-1], rq[-2]
+        total_now, total_prev = total[-1], total[-2]
 
-        rz_chg = self._pct_change(rz[-2], rz[-1])
-        rq_chg = self._pct_change(rq[-2], rq[-1])
+        # 涨跌幅（比例）
+        rz_chg = (rz_now - rz_prev) / rz_prev if rz_prev != 0 else 0
+        rq_chg = (rq_now - rq_prev) / rq_prev if rq_prev != 0 else 0
+        total_chg_pct = (total_now - total_prev) / total_prev if total_prev != 0 else 0
 
-        score_rz = self._score_change_pos(rz_chg)
-        score_rq = self._score_change_neg(rq_chg)
-        score_trend = self._score_trend(rz[-self.config.lookback_days:])
+        # 10 日趋势
+        slope_10 = rz[-1] - rz[-10]
+        if slope_10 > 0:
+            trend_label = "融资持续增加（偏多）"
+        elif slope_10 < 0:
+            trend_label = "融资持续减少（偏空）"
+        else:
+            trend_label = "趋势中性"
 
-        # raw 分数：[-1, 1]
-        raw_score = 0.4 * score_rz + 0.3 * score_rq + 0.3 * score_trend
+        # 3 日加速度
+        acc_3d = rz[-1] - rz[-3]
+        if acc_3d > 0:
+            acc_label = "加速流入（偏多）"
+        elif acc_3d < 0:
+            acc_label = "明显减速（偏空）"
+        else:
+            acc_label = "中性"
 
-        # 映射到 0~100
-        score_0_100 = self._map_to_0_100(raw_score)
+        # 杠杆区间（真实 A 股两融余额 ≈ 15000–18000 亿）
+        if total_now >= 18000:
+            zone_label = "高杠杆区（需警惕系统性风险）"
+        elif total_now >= 15000:
+            zone_label = "正常偏高"
+        else:
+            zone_label = "正常区间"
 
-        # signal：统一逻辑
-        if score_0_100 >= 55:
+        # 得分
+        score = 50
+        score += 10 if slope_10 > 0 else -10 if slope_10 < 0 else 0
+        score += 5 if acc_3d > 0 else -5 if acc_3d < 0 else 0
+        if total_now >= 18000:
+            score -= 10
+
+        score = max(0, min(100, score))
+
+        # 信号
+        if score >= 60:
             signal = "偏多"
-        elif score_0_100 <= 45:
+        elif score <= 40:
             signal = "偏空"
         else:
             signal = "中性"
 
-        # 回传结构完全匹配 FactorResult
+        # 报告块
+        report_block = f"""  - {self.name}: {score:.2f}（{signal}）
+        · 当日融资余额：{rz_now:.2f} 亿（{rz_chg*100:.2f}%）
+        · 当日融券余额：{rq_now:.2f} 亿（{rq_chg*100:.2f}%）
+        · 两融总余额：{total_now:.2f} 亿（{total_chg_pct*100:.2f}%）
+        · 10日趋势：{trend_label}
+        · 3日加速度：{acc_3d:.2f} 亿（{acc_label}）
+        · 杠杆风险区间：{zone_label}
+"""
+
         return FactorResult(
             name=self.name,
-            score=score_0_100,
+            score=score,
             signal=signal,
             raw={
-                "rz_change_pct": rz_chg,
-                "rq_change_pct": rq_chg,
-                "score_rz": score_rz,
-                "score_rq": score_rq,
-                "score_trend": score_trend,
-                "raw_score_internal": raw_score,
-                "recent_rz": rz.tolist(),
-                "recent_rq": rq.tolist(),
+                "dates": dates,
+                "rz": rz.tolist(),
+                "rq": rq.tolist(),
+                "total": total.tolist(),
+                "trend_label": trend_label,
+                "acc_3d": acc_3d,
+                "zone_label": zone_label,
             },
+            report_block=report_block,
         )
-
-    # ---- 工具函数 ----
-
-    @staticmethod
-    def _pct_change(prev: float, curr: float) -> float:
-        if prev == 0:
-            return 0.0
-        return (curr - prev) / prev
-
-    @staticmethod
-    def _score_change_pos(chg: float) -> float:
-        if chg >= 0.05:
-            return 1.0
-        if chg >= 0.02:
-            return 0.5
-        if chg <= -0.05:
-            return -1.0
-        if chg <= -0.02:
-            return -0.5
-        return 0.0
-
-    @staticmethod
-    def _score_change_neg(chg: float) -> float:
-        if chg <= -0.05:
-            return 1.0
-        if chg <= -0.02:
-            return 0.5
-        if chg >= 0.05:
-            return -1.0
-        if chg >= 0.02:
-            return -0.5
-        return 0.0
-
-    def _score_trend(self, rz_tail: List[float]) -> float:
-        y = np.array(rz_tail, dtype=float)
-        n = len(y)
-        if n < 3:
-            return 0.0
-
-        x = np.arange(n, dtype=float)
-        try:
-            k, b = np.polyfit(x, y, 1)
-        except Exception:
-            return 0.0
-
-        mean_val = float(y.mean()) or 1.0
-        norm_slope = k / mean_val
-
-        if norm_slope >= 0.01:
-            return 1.0
-        if norm_slope >= 0.004:
-            return 0.5
-        if norm_slope <= -0.01:
-            return -1.0
-        if norm_slope <= -0.004:
-            return -0.5
-        return 0.0
-
-    @staticmethod
-    def _map_to_0_100(raw: float) -> float:
-        raw_clamped = max(-1.0, min(1.0, raw))
-        return round(50.0 + raw_clamped * 50.0, 2)

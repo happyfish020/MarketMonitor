@@ -1,101 +1,62 @@
+# -*- coding: utf-8 -*-
+"""
+Unified Score Builder (V11.6.2)
+- 统一因子评分
+- 增加 factor_details 字段（支持 margin 等详细信息输出）
+"""
+
 from __future__ import annotations
+from typing import Dict, Any, Mapping
 
-from pathlib import Path
-from typing import Dict, Any
-import yaml
+from core.models.factor_result import FactorResult
 
 
-# ---------------------------------------------------------
-# 加载因子权重
-# ---------------------------------------------------------
-def _load_weights_config() -> Dict[str, Any]:
+class UnifiedScoreBuilder:
     """
-    加载 A 股因子权重配置 config/weights_cn.yaml。
-    """
-    base = Path(__file__).resolve().parents[2]
-    cfg_path = base / "config" / "weights_cn.yaml"
-
-    if not cfg_path.exists():
-        return {}
-
-    try:
-        with cfg_path.open("r", encoding="utf-8") as f:
-            data = yaml.safe_load(f) or {}
-        return data.get("weights", {})
-    except Exception:
-        return {}
-
-
-# ---------------------------------------------------------
-# 主统一评分函数（内部）
-# ---------------------------------------------------------
-def unify(factor_scores: Dict[str, float]) -> Dict[str, Any]:
-    """
-    unified scoring engine
-    输入：
-        {
-            "north_nps": score,
-            "turnover": score,
-            "market_sentiment": score,
-            "margin": score
-        }
-    返回：
-        {
-            "total_score": xx,
-            "risk_level": "...",
-            "factor_scores": {...}
-        }
-    """
-    weights_cfg = _load_weights_config()
-
-    # 默认权重（若 YAML 没配置）
-    default_weights = {
-        "north_nps": 0.30,
-        "turnover": 0.25,
-        "market_sentiment": 0.25,
-        "margin": 0.20,
+    将多个 FactorResult 合并成统一结果 summary：
+    {
+        "total_score": float,
+        "risk_level": str,
+        "factor_scores": {name: score},
+        "factor_signals": {name: signal},
+        "factor_details": {name: <detail dict or raw>},
     }
-
-    # 以 YAML 配置覆盖默认
-    weights = default_weights.copy()
-    weights.update(weights_cfg)
-
-    # 加权得分
-    total_score = 0.0
-    for name, score in factor_scores.items():
-        w = weights.get(name, 0)
-        total_score += score * w
-
-    # 风险等级
-    if total_score >= 70:
-        risk = "偏强 / 多头占优"
-    elif total_score >= 55:
-        risk = "中性偏强"
-    elif total_score >= 45:
-        risk = "中性"
-    elif total_score >= 30:
-        risk = "偏弱"
-    else:
-        risk = "风险偏高 / 空头主导"
-
-    return {
-        "total_score": total_score,
-        "risk_level": risk,
-        "factor_scores": factor_scores,
-    }
-
-
-# ---------------------------------------------------------
-# 提供给外部的正式接口 unify_scores()
-# ---------------------------------------------------------
-def unify_scores(*, north_nps: float, turnover: float,
-                 market_sentiment: float, margin: float) -> Dict[str, Any]:
     """
-    对外统一接口，engine 可直接调用。
-    """
-    return unify({
-        "north_nps": north_nps,
-        "turnover": turnover,
-        "market_sentiment": market_sentiment,
-        "margin": margin,
-    })
+
+    def unify(self, factors: Mapping[str, FactorResult]) -> Dict[str, Any]:
+        summary: Dict[str, Any] = {
+            "factor_scores": {},
+            "factor_signals": {},
+            "factor_details": {},   # <-- 🔥 新增字段
+        }
+
+        # -------- 汇总每个因子 --------
+        total = 0.0
+        for name, factor in factors.items():
+            sc = float(factor.score)
+            total += sc
+
+            summary["factor_scores"][name] = sc
+            summary["factor_signals"][name] = factor.signal
+
+            # 🔥 detail 统一写入 factor_details
+            # Margin 等高级因子的 detail 保存在 factor.raw 中
+            summary["factor_details"][name] = factor.raw or {}
+
+        # -------- 平均评分作为综合得分 --------
+        n = len(factors)
+        if n > 0:
+            summary["total_score"] = round(total / n, 2)
+        else:
+            summary["total_score"] = 50.0
+
+        # -------- 风险等级规则 --------
+        ts = summary["total_score"]
+        if ts >= 60:
+            summary["risk_level"] = "偏强"
+        elif ts >= 45:
+            summary["risk_level"] = "中性"
+        else:
+            summary["risk_level"] = "偏弱"
+
+        return summary

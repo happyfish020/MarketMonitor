@@ -1,95 +1,90 @@
+# -*- coding: utf-8 -*-
+"""
+UnifiedRisk v11.7
+MarketSentimentFactor — 市场宽度 + 涨跌停 + HS300 代理
+"""
+
 from __future__ import annotations
 
 from typing import Dict, Any
-
 from core.models.factor_result import FactorResult
 
 
 class MarketSentimentFactor:
-    """
-    A股市场情绪因子（宽度 + 涨跌停 + 权重ETF 情绪）。
-
-    设计目标：
-    - 仅依赖日级聚合数据（breadth + ETF proxy），不调用额外数据源；
-    - 输出 0–100 分的相对情绪强度；
-    - 文本信号可用于报告解释。
-    """
-
     name = "market_sentiment"
 
     def compute_from_daily(self, processed: Dict[str, Any]) -> FactorResult:
-        f = processed.get("features", {}) or {}
+        f = processed["features"]
 
-        # ---- 1. 宽度：涨跌家数 ----
-        adv = int(f.get("adv", 0) or 0)
-        dec = int(f.get("dec", 0) or 0)
-        lup = int(f.get("limit_up", 0) or 0)
-        ldn = int(f.get("limit_down", 0) or 0)
-        total = int(f.get("total", 0) or 0)
+        adv = int(f.get("adv") or 0)
+        dec = int(f.get("dec") or 0)
+        total = int(f.get("total_stocks") or (adv + dec))
+        limit_up = int(f.get("limit_up") or 0)
+        limit_down = int(f.get("limit_down") or 0)
+        hs300_pct = float(f.get("hs300_proxy_pct") or 0.0)  # %
 
-        if total <= 0 or (adv + dec) <= 0:
-            score = 50.0
-            signal = "市场宽度数据缺失（视为情绪中性）"
-            return FactorResult(
-                name=self.name,
-                score=score,
-                signal=signal,
-                raw={
-                    "adv": adv,
-                    "dec": dec,
-                    "limit_up": lup,
-                    "limit_down": ldn,
-                    "total": total,
-                },
-            )
-
+        total = max(total, 1)
         adv_ratio = adv / total
-        dec_ratio = dec / total
 
-        # 以 (adv - dec) / total 作为宽度原始值，控制在 [-0.5, 0.5] 区间
-        breadth_raw = (adv - dec) / total
-        breadth_raw = max(-0.5, min(0.5, breadth_raw))
-        # 映射到 [-1, 1]
-        breadth_score = breadth_raw / 0.3
-        breadth_score = max(-1.0, min(1.0, breadth_score))
+        # === 1. 宽度评分（以 adv_ratio 为主） ===
+        score = 50.0
+        width_comment = ""
 
-        # ---- 2. 涨跌停扩散（轻权重） ----
-        # 对于大多数交易日，涨跌停占比极低，这部分只作为情绪极端时的“加分/减分项”
-        limit_base = max(total, 10)
-        limit_raw = (lup - ldn) / limit_base
-        limit_raw = max(-0.1, min(0.1, limit_raw))
-        limit_score = limit_raw / 0.06
-        limit_score = max(-1.0, min(1.0, limit_score))
-
-        # ---- 3. 权重 ETF 情绪（hs300_pct） ----
-        hs300_pct = float(f.get("hs300_pct", 0.0) or 0.0)
-        # 以 ±3% 作为情绪极值参考
-        hs_raw = hs300_pct / 3.0
-        hs_raw = max(-1.5, min(1.5, hs_raw))
-        hs_score = max(-1.0, min(1.0, hs_raw))
-
-        # ---- 4. 综合情绪得分 ----
-        # 宽度为主（50%），权重ETF 次之（30%），涨跌停为轻量修正（20%）
-        combined = 0.5 * breadth_score + 0.3 * hs_score + 0.2 * limit_score
-        score = self._map_to_0_100(combined)
-
-        # 文本信号
-        if score >= 75:
-            desc = "市场情绪偏热，风险偏好较高"
-        elif score >= 60:
-            desc = "市场情绪偏暖，做多意愿较强"
-        elif score >= 45:
-            desc = "市场情绪中性略偏谨慎"
-        elif score >= 30:
-            desc = "市场情绪偏冷，资金偏防御"
+        if adv_ratio >= 0.65:
+            score += 15
+            width_comment = "多头占绝对优势，情绪偏亢奋"
+        elif adv_ratio >= 0.55:
+            score += 7
+            width_comment = "多头略占优，情绪偏乐观"
+        elif adv_ratio >= 0.45:
+            width_comment = "多空均衡，情绪中性"
+        elif adv_ratio >= 0.35:
+            score -= 7
+            width_comment = "空头略占优，情绪偏谨慎"
         else:
-            desc = "市场情绪极度低迷或恐慌"
+            score -= 15
+            width_comment = "空头主导，情绪偏悲观"
 
-        signal = (
-            f"{desc}（adv={adv} / dec={dec} / total={total}，"
-            f"涨停={lup} 跌停={ldn}，"
-            f"adv_ratio={adv_ratio:.2f}，hs300_pct={hs300_pct:.2f}%）"
-        )
+        # === 2. 涨跌停结构评分 ===
+        lmt_comment = ""
+        if limit_up >= 80 and limit_down <= 10:
+            score += 8
+            lmt_comment = "涨停家数较多，强势股活跃"
+        elif limit_up >= 40 and limit_down <= 20:
+            score += 3
+            lmt_comment = "涨停活跃度尚可"
+        elif limit_down >= 30 and limit_up <= 10:
+            score -= 8
+            lmt_comment = "跌停家数偏多，恐慌盘较重"
+        else:
+            if not lmt_comment:
+                lmt_comment = "涨跌停结构中性"
+
+        # === 3. HS300 方向修正 ===
+        if hs300_pct >= 1.5:
+            score += 5
+        elif hs300_pct <= -1.5:
+            score -= 5
+
+        # 限制 0~100
+        score = max(0.0, min(100.0, score))
+
+        if score >= 60:
+            signal = "偏多"
+        elif score <= 40:
+            signal = "偏空"
+        else:
+            signal = "中性"
+
+        # === 4. 报告文本 ===
+        report_block = f"""  - {self.name}: {score:.2f}（{signal}）
+        · 涨跌：上涨 {adv} ；下跌 {dec} ；总数 {total}
+        · 涨停：{limit_up} ；跌停：{limit_down}
+        · adv_ratio：{adv_ratio:.2f}
+        · HS300 代理涨跌：{hs300_pct:.2f}%
+        · 宽度点评：{width_comment}
+        · 涨跌停结构：{lmt_comment}
+"""
 
         return FactorResult(
             name=self.name,
@@ -98,20 +93,13 @@ class MarketSentimentFactor:
             raw={
                 "adv": adv,
                 "dec": dec,
-                "limit_up": lup,
-                "limit_down": ldn,
                 "total": total,
                 "adv_ratio": adv_ratio,
-                "dec_ratio": dec_ratio,
-                "breadth_score": breadth_score,
-                "limit_score": limit_score,
+                "limit_up": limit_up,
+                "limit_down": limit_down,
                 "hs300_pct": hs300_pct,
-                "combined_raw": combined,
+                "width_comment": width_comment,
+                "lmt_comment": lmt_comment,
             },
+            report_block=report_block,
         )
-
-    @staticmethod
-    def _map_to_0_100(raw: float) -> float:
-        """将 [-1, 1] 范围的原始情绪分数映射到 [0, 100]。"""
-        raw_clamped = max(-1.0, min(1.0, raw))
-        return round(50.0 + raw_clamped * 50.0, 2)

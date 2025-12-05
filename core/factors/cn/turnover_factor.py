@@ -1,143 +1,79 @@
+# -*- coding: utf-8 -*-
+"""
+UnifiedRisk v11.7
+TurnoverFactor — 成交额因子（单位统一为：亿元）
+"""
+
 from __future__ import annotations
 
 from typing import Dict, Any
-
 from core.models.factor_result import FactorResult
 
 
 class TurnoverFactor:
-    """
-    A股市场成交额因子（流动性 / 动能 / 宽基吸金）
-
-    ✅ 成交额唯一来源：snapshot["zh_spot"].amount 汇总
-    """
-
     name = "turnover"
 
-    def compute_from_daily(self, processed: Dict[str, Any], snapshot: Dict[str, Any] | None = None) -> FactorResult:
-        features = processed.get("features", {}) or {}
+    def compute_from_daily(self, processed: Dict[str, Any]) -> FactorResult:
+        f = processed["features"]
 
-        # =============== 1. 从 zh_spot 计算成交额（唯一来源） ===============
-        sh = sz = total = 0.0
+        # 这里的数值在 snapshot 中已是“亿”单位
+        sh = float(f.get("sh_turnover_e9") or 0.0)
+        sz = float(f.get("sz_turnover_e9") or 0.0)
+        total = float(f.get("total_turnover_e9") or (sh + sz))
 
-        df = None
-        if snapshot is not None:
-            df = snapshot.get("zh_spot")
-
-        if df is not None and hasattr(df, "empty") and (not df.empty) and ("amount" in df.columns):
-            # 总成交额（亿元）
-            try:
-                total = float(df["amount"].sum()) / 1e9
-            except Exception:
-                total = 0.0
-
-            # 按市场拆分：优先用 market 字段，其次用 code 规则
-            sh_amt = sz_amt = 0.0
-            try:
-                if "market" in df.columns:
-                    m = df["market"].astype(str).str.upper()
-                    sh_mask = m.str.startswith("SH")
-                    sz_mask = m.str.startswith("SZ")
-                    sh_amt = float(df.loc[sh_mask, "amount"].sum()) / 1e9
-                    sz_amt = float(df.loc[sz_mask, "amount"].sum()) / 1e9
-                elif "code" in df.columns:
-                    code_str = df["code"].astype(str)
-                    sh_mask = code_str.str.startswith("6")  # 粗略规则：6打头当作沪市
-                    sh_amt = float(df.loc[sh_mask, "amount"].sum()) / 1e9
-                    sz_amt = total - sh_amt
-                else:
-                    sh_amt = sz_amt = 0.0
-            except Exception:
-                sh_amt = sz_amt = 0.0
-
-            sh = sh_amt
-            sz = sz_amt
-        else:
-            # 如果 zh_spot 本身出问题，才退回到 features 里的旧字段
-            sh = float(features.get("turnover_sh", 0.0) or 0.0)
-            sz = float(features.get("turnover_sz", 0.0) or 0.0)
-            total = float(features.get("turnover_total", 0.0) or 0.0)
-
-        # =============== 2. 宽基 ETF 成交额（来自 etf_proxy -> features） ===============
-        etf_turnover = float(features.get("turnover_etf", 0.0) or 0.0)
-
-        if total <= 0:
-            score = 50.0
-            signal = "成交额数据缺失或异常（视为中性）"
-            raw = {
-                "turnover_sh": sh,
-                "turnover_sz": sz,
-                "turnover_total": total,
-                "turnover_etf": etf_turnover,
-                "etf_ratio": 0.0,
-            }
-            return FactorResult(name=self.name, score=score, signal=signal, raw=raw)
-
-        # =============== 3. 成交额绝对强度打分 ===============
-        if total >= 4000:
-            base = 1.0   # 极度放量
-        elif total >= 2500:
-            base = 0.7   # 明显放量
-        elif total >= 1500:
-            base = 0.4   # 正常偏上
-        elif total >= 800:
-            base = 0.1   # 正常偏弱
+        # === 1. 成交热度区间（绝对规模） ===
+        # 你可以根据现在 A 股的常态，之后再微调区间
+        if total >= 1000:
+            zone_label = "极度放量（需关注情绪亢奋与筹码松动）"
+            base_score = 70
+        elif total >= 700:
+            zone_label = "放量活跃（风险与机会并存）"
+            base_score = 60
         elif total >= 400:
-            base = -0.2  # 明显缩量
+            zone_label = "正常偏弱（略有缩量）"
+            base_score = 50
+        elif total >= 250:
+            zone_label = "缩量偏弱（风险偏防御）"
+            base_score = 40
         else:
-            base = -0.5  # 极度缩量
+            zone_label = "极度缩量（风险偏回避，博弈氛围浓）"
+            base_score = 35
 
-        # =============== 4. ETF 吸金度 ===============
-        etf_ratio = etf_turnover / total if total > 0 else 0.0
-        if etf_ratio >= 0.25:
-            etf_score = 0.6
-            etf_desc = "宽基ETF显著吸金"
-        elif etf_ratio >= 0.15:
-            etf_score = 0.3
-            etf_desc = "宽基ETF温和吸金"
-        elif etf_ratio >= 0.05:
-            etf_score = 0.0
-            etf_desc = "宽基ETF参与一般"
+        # === 2. 结构简单点评（上/深占比，目前先给中性占位） ===
+        structure_label = "结构中性（上/深成交占比正常）"
+
+        # 如需精细：可用 sh / total 判断权重偏向主板/创成长
+
+        # === 3. 得分（目前先用 base_score，后续可接入历史趋势） ===
+        score = max(0.0, min(100.0, float(base_score)))
+
+        if score >= 60:
+            signal = "偏多"
+        elif score <= 40:
+            signal = "偏空"
         else:
-            etf_score = -0.2
-            etf_desc = "宽基ETF参与度较低"
+            signal = "中性"
 
-        raw_combined = 0.8 * base + 0.2 * etf_score
-        score = self._map_to_0_100(raw_combined)
-
-        if score >= 70:
-            desc = "成交活跃，流动性充足"
-        elif score >= 55:
-            desc = "成交正常偏暖"
-        elif score >= 45:
-            desc = "成交中性"
-        elif score >= 30:
-            desc = "成交偏冷，风险偏回避"
-        else:
-            desc = "成交极度低迷或异常，需谨慎"
-
-        signal = (
-            f"{desc}（total={total:.1f}亿, ETF={etf_turnover:.1f}亿, "
-            f"etf_ratio={etf_ratio:.2f}，{etf_desc}）"
-        )
+        # === 4. 报告块 ===
+        report_block = f"""  - {self.name}: {score:.2f}（{signal}）
+        · 上证成交额：{sh:.2f} 亿
+        · 深证成交额：{sz:.2f} 亿
+        · 全市场成交额：{total:.2f} 亿
+        · 当日成交热度：{zone_label}
+        · 历史趋势：历史数据有限，暂不评估
+        · 成交结构点评：{structure_label}
+"""
 
         return FactorResult(
             name=self.name,
             score=score,
             signal=signal,
             raw={
-                "turnover_sh": sh,
-                "turnover_sz": sz,
-                "turnover_total": total,
-                "turnover_etf": etf_turnover,
-                "etf_ratio": etf_ratio,
-                "base_component": base,
-                "etf_component": etf_score,
+                "sh_turnover_e9": sh,
+                "sz_turnover_e9": sz,
+                "total_turnover_e9": total,
+                "zone_label": zone_label,
+                "structure_label": structure_label,
             },
+            report_block=report_block,
         )
-
-    @staticmethod
-    def _map_to_0_100(raw: float) -> float:
-        """将 [-1, 1] 映射到 [0, 100]。"""
-        raw_clamped = max(-1.0, min(1.0, raw))
-        return round(50.0 + raw_clamped * 50.0, 2)

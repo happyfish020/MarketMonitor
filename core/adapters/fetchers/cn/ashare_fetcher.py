@@ -20,8 +20,8 @@ from core.adapters.datasources.cn.market_db_client import MarketDataReaderCN
 from core.adapters.datasources.cn.zh_spot_utils import normalize_zh_spot_columns
 
 from core.adapters.datasources.cn.em_margin_client import EastmoneyMarginClientCN
-from core.adapters.datasources.glo.index_series_client import IndexSeriesClient
-from core.adapters.datasources.glo.global_lead_client  import GlobalLeadClient   # ★ breadth_series 已删除
+import core.adapters.datasources.glo.index_series_client #import IndexSeriesClient
+import core.adapters.datasources.glo.global_lead_client  #import GlobalLeadClient   # ★ breadth_series 已删除
 
 from core.utils.config_loader import load_paths
 from core.utils.time_utils import now_bj

@@ -5,6 +5,7 @@ T1:
   emotion: 0.15
   margin: 0.10
   global_lead: 0.10
+  "index_global": 0.15
 
 T5:
   market_sentiment: 0.15
@@ -13,3 +14,4 @@ T5:
   emotion: 0.10
   margin: 0.20
   global_lead: 0.20
+  "index_global": 0.15

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-UnifiedRisk v11.7 — MarketSentiment 因子（宽度 + 涨跌停 + HS300 代理，详细版 B）
+UnifiedRisk v11.7 — MarketSentiment 因子（宽度 + 涨跌停 + HS300 代理）
 
 依赖 processed["breadth"]：
   {
@@ -44,7 +44,8 @@ class MarketSentimentFactor:
             etf_proxy = data.get("etf_proxy") or {}
             hs300_pct = float(etf_proxy.get("hs300_pct") or 0.0)
 
-        # ----------------- 1）宽度评分 -----------------
+        # ----------------- 情绪区间与打分 -----------------
+        # 宽度评分
         if adv_ratio >= 0.7:
             width_label = "普涨"
             width_score = 85
@@ -61,7 +62,7 @@ class MarketSentimentFactor:
             width_label = "普跌"
             width_score = 25
 
-        # ----------------- 2）涨跌停氛围 -----------------
+        # 涨跌停氛围评分（简单：涨停多 +，跌停多 -）
         if lu >= 100 and ld <= 10:
             lmt_label = "强势涨停潮"
             lmt_score = 85
@@ -78,7 +79,7 @@ class MarketSentimentFactor:
             lmt_label = "中性"
             lmt_score = 55
 
-        # ----------------- 3）HS300 方向评分 -----------------
+        # HS300 方向评分
         if hs300_pct >= 2.0:
             idx_label = "大盘强势上攻"
             idx_score = 85
@@ -95,9 +96,10 @@ class MarketSentimentFactor:
             idx_label = "大盘大幅下跌"
             idx_score = 25
 
-        # ----------------- 综合情绪评分 -----------------
+        # 综合情绪评分（简单平均，可后续权重化）
         score = float((width_score + lmt_score + idx_score) / 3.0)
 
+        # 文本 level
         if score >= 75:
             level = "情绪亢奋偏多"
         elif score >= 60:
@@ -136,16 +138,12 @@ class MarketSentimentFactor:
             "width_label": width_label,
             "lmt_label": lmt_label,
             "idx_label": idx_label,
-            "width_score": width_score,
-            "lmt_score": lmt_score,
-            "idx_score": idx_score,
         }
 
-        # ========= 详细报告（B 版） =========
         report_block = (
             f"  - market_sentiment: {score:.2f}（{level}）\n"
-            f"      · 涨跌家数：上涨 {int(adv)}；下跌 {int(dec)}；总数 {int(total)}；上涨占比 {adv_ratio:.2%}（{width_label}）\n"
-            f"      · 涨跌停结构：涨停 {int(lu)}；跌停 {int(ld)}（{lmt_label}）\n"
+            f"      · 涨跌家数：上涨 {int(adv)}；下跌 {int(dec)}；总数 {int(total)}；上涨占比 {adv_ratio:.2%}\n"
+            f"      · 涨跌停：涨停 {int(lu)}；跌停 {int(ld)}\n"
             f"      · HS300 代理涨跌：{hs300_pct:.2f}%（{idx_label}）\n"
             f"      · 情绪综合判断：{signal}\n"
         )

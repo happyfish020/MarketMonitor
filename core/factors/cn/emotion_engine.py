@@ -7,8 +7,6 @@ EmotionEngine for A-share market (UnifiedRisk V11)
 from __future__ import annotations
 from typing import Dict, Any
 
-from core.models.factor_result import FactorResult
-
 
 def _level_from_score(score: float) -> str:
     """情绪等级"""
@@ -149,51 +147,3 @@ def compute_cn_emotion_from_snapshot(snap: Dict[str, Any]) -> Dict[str, Any]:
 
         "raw": snap,
     }
-
-
-# ============================================================
-# 新增：EmotionFactor（包装成 FactorResult + report_block）
-# ============================================================
-
-class EmotionFactor:
-    name = "emotion"
-
-    def compute_from_snapshot(self, snap: Dict[str, Any]) -> FactorResult:
-        """
-        直接从 snapshot 原始字段计算情绪因子。
-        """
-        res = compute_cn_emotion_from_snapshot(snap)
-
-        score = float(res.get("EmotionScore", 50.0))
-        level = res.get("EmotionLevel", "Neutral")
-
-        idx_l = res.get("IndexLabel", "N/A")
-        vol_l = res.get("VolumeLabel", "N/A")
-        br_l  = res.get("BreadthLabel", "N/A")
-        nf_l  = res.get("NorthLabel", "N/A")
-        mf_l  = res.get("MainForceLabel", "N/A")
-        der_l = res.get("DerivativeLabel", "N/A")
-        lim_l = res.get("LimitLabel", "N/A")
-
-        signal = f"Index={idx_l}，Volume={vol_l}，Breadth={br_l}"
-
-        report_block = (
-            f"  - emotion: {score:.2f}（{level}）\n"
-            f"      · 指数：{idx_l}\n"
-            f"      · 成交量：{vol_l}\n"
-            f"      · 市场宽度：{br_l}\n"
-            f"      · 北向资金：{nf_l}\n"
-            f"      · 主力资金：{mf_l}\n"
-            f"      · 衍生品：{der_l}\n"
-            f"      · 涨跌停：{lim_l}\n"
-        )
-
-        return FactorResult(
-            name=self.name,
-            score=score,
-            level=level,
-            signal=signal,
-            details=res,
-            raw=res.get("raw") or {},
-            report_block=report_block,
-        )

@@ -149,15 +149,9 @@ def run_cn_ashare_daily(force_daily_refresh: bool = False) -> Dict[str, Any]:
     # ============================================================
     # 6) 新增：全球引导因子（GlobalLeadFactor）
     # ============================================================
-    gl_factor = GlobalLeadFactor(daily_snapshot).compute()
-    factors["global_lead"] = FactorResult(
-    name="global_lead",
-    score=gl_factor["score"],
-    details={
-        "level": gl_factor["level"],
-        **gl_factor["details"],
-        }
-    )
+    gl_factor = GlobalLeadFactor()
+    gl_fr = gl_factor.compute_from_snapshot(daily_snapshot)
+    factors[gl_fr.name] = gl_fr 
     # ============================================================
     # 7) 统一评分（用于风险等级 summary，不用于报告内容排版）
     # ============================================================
@@ -168,28 +162,17 @@ def run_cn_ashare_daily(force_daily_refresh: bool = False) -> Dict[str, Any]:
     # 8) 新增：T+1 / T+5 预测（PredictionEngine）
     # ============================================================
     
-    from core.predictors.prediction_engine import PredictorT1T5 
+    from core.predictors.prediction_engine import PredictorT1T5
 
     predictor = PredictorT1T5()
-    
-    #prediction_block = predictor.format_report(prediction_result)
-    log("[Prediction] Start prediction")
-    log(f"[Prediction] Input factor keys: {list(factors.keys())}")
+    prediction_raw = predictor.predict(factors)  # ★ 输入因子，不是 snapshot
 
-    #from core.predictors.prediction_engine import PredictorT1T5
-
-    predictor = PredictorT1T5()
-    pred_raw = predictor.predict(factors)  # {'T+1': {...}, 'T+5': {...}}
-    
-    # --- 适配 reporter 期望的 key 命名 ---
     prediction_block = {
-        "t1": pred_raw.get("T+1", {}),
-        "t5": pred_raw.get("T+5", {}),
+        "t1": prediction_raw.get("T+1", {}),
+        "t5": prediction_raw.get("T+5", {}),
     }
+
     
-    # Debug 日志（可选，但强烈推荐）：
-    log(f"[Prediction] T+1 score={prediction_block['t1'].get('score')}, direction={prediction_block['t1'].get('direction')}")
-    log(f"[Prediction] T+5 score={prediction_block['t5'].get('score')}, direction={prediction_block['t5'].get('direction')}")
 
     # ============================================================
     # 9) 构建 meta
@@ -325,7 +308,26 @@ def _build_processed_for_factors(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         "limit_down": int(breadth.get("limit_down", 0) or 0),
     }
 
-    # processed = snapshot 的增强版
+    
+    # === Margin 序列：转为 e9 命名结构，便于 MarginFactor 使用 ===
+    # snapshot["margin"] 形如：{"series": [{"date","rz","rq","rzrq"}, ...]}
+    # 这里统一转换为 rz_e9 / rq_e9 / total_e9
+    margin_series_src = (margin.get("series") or [])
+    margin_series_e9 = []
+    for row in margin_series_src:
+        margin_series_e9.append({
+            "date": row.get("date"),
+            "rz_e9": float(row.get("rz_e9") or row.get("rz") or 0.0),
+            "rq_e9": float(row.get("rq_e9") or row.get("rq") or 0.0),
+            "total_e9": float(row.get("total_e9") or row.get("rzrq") or 0.0),
+        })
+    # 覆盖为标准结构
+    margin = {
+        **margin,
+        "series": margin_series_e9,
+    }
+
+# processed = snapshot 的增强版
     processed: Dict[str, Any] = {
         # 保留所有原始字段
         **snapshot,

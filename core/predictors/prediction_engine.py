@@ -1,18 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-UnifiedRisk v11.7
-prediction_engine.py — T+1 / T+5 市场预测引擎（最终合并版）
-
-位置：
-    core/predictors/prediction_engine.py
-
-说明：
-    此文件完全取代旧的 predict_t1_t5.py
-    Engine 使用方式：
-        predictor = PredictorT1T5()
-        pred = predictor.predict(factors)
-        pred_block = predictor.format_report(pred)
-        build_daily_report_text(..., prediction=pred_block)
+V11.8 预测引擎（T+1 / T+5）
+不再依赖 index_series，完全基于因子 scores 构建。
 """
 
 from __future__ import annotations
@@ -21,107 +10,82 @@ from typing import Dict, Any
 
 class PredictorT1T5:
     """
-    UnifiedRisk 官方预测引擎（未来可扩展为机器学习/概率模型）
+    输入：factors = {name: FactorResult}
+    输出：
+        {
+           "T+1": {...},
+           "T+5": {...}
+        }
     """
 
-    # ----------------------------------------------------------------------
-    # T+1：短周期 → 情绪、成交、北向主导
-    # ----------------------------------------------------------------------
-    T1_WEIGHTS = {
-        "market_sentiment": 0.30,
-        "turnover":         0.20,
-        "north_nps":        0.15,
-        "emotion":          0.15,
-        "margin":           0.10,
-        "global_lead":      0.10,
+    WEIGHTS_T1 = {
+        "north_nps": 0.30,
+        "turnover": 0.20,
+        "market_sentiment": 0.20,
+        "index_global": 0.20,
+        "global_lead": 0.10,
     }
 
-    # ----------------------------------------------------------------------
-    # T+5：中周期 → 杠杆、全球方向、成交主导
-    # ----------------------------------------------------------------------
-    T5_WEIGHTS = {
-        "market_sentiment": 0.15,
-        "turnover":         0.20,
-        "north_nps":        0.15,
-        "emotion":          0.10,
-        "margin":           0.20,
-        "global_lead":      0.20,
+    WEIGHTS_T5 = {
+        "global_lead": 0.40,
+        "index_global": 0.30,
+        "emotion": 0.15,
+        "market_sentiment": 0.10,
+        "north_nps": 0.05,
     }
 
-    # ----------------------------------------------------------------------
-    # Score → Direction 映射
-    # ----------------------------------------------------------------------
-    @staticmethod
-    def _score_to_direction(score: float) -> str:
+    def predict(self, factors: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        统一入口：只传 factor dict，不再需要 index_series！
+        engine 调用：
+            prediction_raw = predictor.predict(factors)
+        """
+        score_t1 = self._weighted_score(factors, self.WEIGHTS_T1)
+        score_t5 = self._weighted_score(factors, self.WEIGHTS_T5)
+
+        result_t1 = {
+            "score": score_t1,
+            "direction": self._label(score_t1),
+            "explain": self._explain(score_t1, horizon="T+1"),
+        }
+
+        result_t5 = {
+            "score": score_t5,
+            "direction": self._label(score_t5),
+            "explain": self._explain(score_t5, horizon="T+5"),
+        }
+
+        return {
+            "T+1": result_t1,
+            "T+5": result_t5,
+        }
+
+    # ============================================================
+    # 工具函数
+    # ============================================================
+    def _weighted_score(self, factors, weights: Dict[str, float]):
+        total = 0
+        for name, w in weights.items():
+            if name in factors:
+                total += factors[name].score * w
+        return round(total, 2)
+
+    def _label(self, score: float) -> str:
         if score >= 65:
-            return "偏多（上涨）"
+            return "上涨"
         elif score >= 55:
-            return "震荡偏多"
+            return "偏强震荡"
         elif score > 45:
             return "震荡"
         elif score > 35:
-            return "震荡偏空"
+            return "偏弱震荡"
         else:
-            return "偏空（下跌）"
+            return "下跌"
 
-    # ----------------------------------------------------------------------
-    # 单周期预测：按权重计算贡献 & 综合分
-    # ----------------------------------------------------------------------
-    def _compute(self, factors: Dict[str, Any], weights: Dict[str, float]) -> Dict[str, Any]:
-        score_sum = 0.0
-        detail = {}
+    def _explain(self, score: float, horizon: str) -> str:
+        if horizon == "T+1":
+            base = "短线（T+1）"
+        else:
+            base = "中短期（T+5）"
 
-        for name, w in weights.items():
-            factor = factors.get(name)
-            if factor is None:
-                factor_score = None
-                contrib = 0.0
-            else:
-                factor_score = float(factor.score)
-                contrib = factor_score * w
-                score_sum += contrib
-
-            detail[name] = {
-                "factor_score": factor_score,
-                "weight": w,
-                "contribution": contrib,
-            }
-
-        final_score = round(score_sum, 2)
-        direction = self._score_to_direction(final_score)
-
-        return {
-            "score": final_score,
-            "direction": direction,
-            "details": detail,
-        }
-
-    # ----------------------------------------------------------------------
-    # 主接口：返回包含 T+1 / T+5 的 dict
-    # ----------------------------------------------------------------------
-    def predict(self, factor_results: Dict[str, Any]) -> Dict[str, Any]:
-        t1 = self._compute(factor_results, self.T1_WEIGHTS)
-        t5 = self._compute(factor_results, self.T5_WEIGHTS)
-        return {
-            "T+1": t1,
-            "T+5": t5,
-        }
-
-    # ----------------------------------------------------------------------
-    # 文本输出（插入日报报告）
-    # ----------------------------------------------------------------------
-    def format_report(self, pred: Dict[str, Any]) -> str:
-        def block(name: str, obj: Dict[str, Any]) -> str:
-            s = f"【{name}】方向：{obj['direction']}  |  综合分：{obj['score']}\n"
-            s += "  - 因子贡献：\n"
-            for fname, info in obj["details"].items():
-                fs = info["factor_score"]
-                if fs is None:
-                    continue
-                s += (
-                    f"      · {fname}: {fs:.2f} × {info['weight']:.2f}"
-                    f" = {info['contribution']:.2f}\n"
-                )
-            return s
-
-        return block("T+1", pred["T+1"]) + "\n" + block("T+5", pred["T+5"])
+        return f"{base}综合风险评分={score}，方向判定：{self._label(score)}"

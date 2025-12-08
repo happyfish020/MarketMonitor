@@ -1,59 +1,115 @@
-from dataclasses import dataclass
-from datetime import datetime, date
+# core/adapters/fetchers/cn/refresh_controller_cn.py
 
-from core.utils.time_utils import is_intraday_trading_time
-from core.utils.trade_calendar import get_trade_date_daily, is_trading_day
-from core.utils.logger import log
+"""
+UnifiedRisk V12 - CN Refresh Controller
+三种刷新模式：
+  1) readonly  —— 仅读缓存
+  2) snapshot  —— 刷新 snapshot 所需符号
+  3) full      —— 刷新 symbols.yaml 中全部符号
+"""
 
+from core.utils.config_loader import load_symbols
+from core.utils.logger import get_logger
 
-@dataclass
-class RefreshPlanCN:
-    trade_date: date
-    is_trading_day_now: bool
-    should_refresh_daily: bool
-    should_refresh_intraday: bool
+LOG = get_logger("RefreshControllerCN")
 
 
 class RefreshControllerCN:
-    def __init__(self, bj_now: datetime) -> None:
-        self.bj_now = bj_now
-        # 日级 trade_date 使用方案 B 逻辑
-        self.trade_date = get_trade_date_daily(bj_now)
 
-    def build_refresh_plan(
-        self,
-        force_daily: bool = False,
-        force_intraday: bool = False,
-        has_daily_cache: bool = False,
-        has_intraday_cache: bool = False,
-    ) -> RefreshPlanCN:
-        today = self.bj_now.date()
-        is_trading_today = is_trading_day(today)
-        trading_time = is_intraday_trading_time(self.bj_now)
+    def __init__(self, refresh_mode: str = "readonly"):
+        """
+        refresh_mode ∈ {"readonly", "snapshot", "full"}
+        """
+        self.refresh_mode = refresh_mode
+        self.symbols = load_symbols()
 
-        # 日级刷新策略：
-        # - 有 --force 就一定刷新
-        # - 否则：只要没有日级缓存就刷新一次
-        should_refresh_daily = False
-        if force_daily:
-            should_refresh_daily = True
-        else:
-            if not has_daily_cache:
-                should_refresh_daily = True
+        LOG.info("RefreshControllerCN 初始化: mode=%s", refresh_mode)
 
-        # 盘中刷新策略（Q2：在交易时间用 today，否则用缓存/T）
-        should_refresh_intraday = False
-        if force_intraday:
-            should_refresh_intraday = True
-        else:
-            if is_trading_today and trading_time and (not has_intraday_cache):
-                should_refresh_intraday = True
+    # ------------------------------------------------------------------
+    # 基础属性
+    # ------------------------------------------------------------------
+    @property
+    def refresh_flag(self) -> bool:
+        """是否允许 refresh=True"""
+        return self.refresh_mode in ("snapshot", "full")
 
-        plan = RefreshPlanCN(
-            trade_date=self.trade_date,
-            is_trading_day_now=is_trading_today,
-            should_refresh_daily=should_refresh_daily,
-            should_refresh_intraday=should_refresh_intraday,
-        )
-        log(f"[CN RefreshPlan] now={self.bj_now}, plan={plan}")
-        return plan
+    @property
+    def is_snapshot(self) -> bool:
+        return self.refresh_mode == "snapshot"
+
+    @property
+    def is_full(self) -> bool:
+        return self.refresh_mode == "full"
+
+    @property
+    def is_readonly(self) -> bool:
+        return self.refresh_mode == "readonly"
+
+    # ------------------------------------------------------------------
+    # Snapshot 需要刷新哪些符号（minimal set）
+    # ------------------------------------------------------------------
+    def list_snapshot_symbols(self):
+        """
+        Snapshot 模式刷新最小集合：
+        - A股核心指数
+        - 核心ETF
+        - GlobalLead 全部
+        """
+        result = []
+
+        # 1) index
+        for sym in self.symbols.get("cn_index", {}).values():
+            result.append(sym)
+
+        # 2) core ETF
+        for sym in self.symbols.get("cn_etf", {}).get("core", []):
+            result.append(sym)
+
+        # 3) global lead 全部
+        glead = self.symbols.get("global_lead", {})
+        for group, items in glead.items():
+            for sym in items:
+                result.append(sym)
+
+        LOG.info("Snapshot 刷新符号数=%s", len(result))
+        return result
+
+    # ------------------------------------------------------------------
+    # FULL 刷新所有符号（递归遍历 YAML）
+    # ------------------------------------------------------------------
+    def list_full_symbols(self):
+        results = []
+
+        def add(node):
+            if isinstance(node, str):
+                results.append(node)
+            elif isinstance(node, list):
+                for it in node:
+                    add(it)
+            elif isinstance(node, dict):
+                for it in node.values():
+                    add(it)
+
+        add(self.symbols)
+        LOG.info("FULL 刷新符号总数=%s", len(results))
+        return results
+
+    # ------------------------------------------------------------------
+    # fetcher 使用 should_refresh(symbol)
+    # ------------------------------------------------------------------
+    def should_refresh(self, symbol: str) -> bool:
+        """统一判断一个 symbol 是否应该刷新"""
+
+        # READONLY —— 永远不刷
+        if self.is_readonly:
+            return False
+
+        # SNAPSHOT —— 只刷 snapshot 集合
+        if self.is_snapshot:
+            return symbol in self.list_snapshot_symbols()
+
+        # FULL —— 全部刷新
+        if self.is_full:
+            return True
+
+        return False

@@ -1,195 +1,197 @@
-# -*- coding: utf-8 -*-
+# core/adapters/fetchers/cn/ashare_fetcher.py
+
 """
-A 股（CN）数据抓取统一入口（日级 + 盘中） — V11.7 FINAL
-严格遵守：
-- snapshot：统一汇总缓存（唯一文件）
-- symbolcache：datasource 单标缓存（内部处理）
-- datasource：不写 snapshot，不写 datasource 级 JSON
-- breadth：来自 zh_spot，不需要 breadth_series_client
+UnifiedRisk V12 - AshareFetcher
+负责：
+  - 按 refresh_controller 决定刷新策略
+  - 遍历 symbols.yaml 中的指数 / ETF / GlobalLead
+  - 调用 datasources 构建 snapshot_v12
 """
 
-from __future__ import annotations
-
-from datetime import datetime, date as Date
-import os
+from datetime import datetime, date
 from typing import Dict, Any
 
-from core.adapters.cache.file_cache import load_json, save_json
-from core.adapters.datasources.cn.etf_north_proxy import get_etf_north_proxy
-from core.adapters.datasources.cn.market_db_client import MarketDataReaderCN
-from core.adapters.datasources.cn.zh_spot_utils import normalize_zh_spot_columns
+from core.utils.logger import get_logger
+from core.utils.config_loader import load_symbols
+from core.utils.time_utils import BJ_TZ
+import os 
+# DataSources
+from core.adapters.datasources.glo.index_series_source import IndexSeriesSource
+from core.adapters.datasources.cn.turnover_source import TurnoverDataSource
 
-from core.adapters.datasources.cn.em_margin_client import EastmoneyMarginClientCN
-import core.adapters.datasources.glo.index_series_client #import IndexSeriesClient
-import core.adapters.datasources.glo.global_lead_client  #import GlobalLeadClient   # ★ breadth_series 已删除
+from core.adapters.datasources.cn.margin_source import MarginDataSource
 
+from core.adapters.datasources.cn.zh_spot_source import ZhSpotSource
+from core.adapters.datasources.glo.global_lead_source import GlobalLeadSource
+
+
+# RefreshController
+from core.adapters.fetchers.cn.refresh_controller_cn import RefreshControllerCN
+from core.adapters.datasources.cn.north_nps_source import NorthNpsDataSource
+from core.adapters.datasources.cn.unified_emotion_source import UnifiedEmotionDataSource
 from core.utils.config_loader import load_paths
-from core.utils.time_utils import now_bj
-from core.utils.logger import log
 
-# ---------------------------------------------------------------------
-_paths = load_paths()
+LOG = get_logger("AshareFetcher")
+#_paths = load_paths()
 
-DAY_CACHE_ROOT = os.path.join(_paths.get("cache_dir", "data/cache/"), "day_cn")
-INTRADAY_CACHE_ROOT = os.path.join(_paths.get("cache_dir", "data/cache/"), "intraday_cn")
-ASHARE_ROOT = _paths.get("ashare_root", "data/ashare")
+#DAY_CACHE_ROOT = os.path.join(_paths.get("cache_dir", "data/cache/"), "day_cn")
+#INTRADAY_CACHE_ROOT = os.path.join(_paths.get("cache_dir", "data/cache/"), "intraday_cn")
+#ASHARE_ROOT = _paths.get("ashare_root", "data/ashare")
 
-
-def get_daily_cache_path(trade_date: Date) -> str:
-    """日级 snapshot 缓存路径"""
-    day_str = trade_date.strftime("%Y%m%d")
-    return os.path.join(DAY_CACHE_ROOT, day_str, "ashare_daily_snapshot.json")
+ 
 
 
-def get_intraday_cache_path() -> str:
-    """盘中 snapshot 缓存路径"""
-    return os.path.join(INTRADAY_CACHE_ROOT, "ashare_intraday_snapshot.json")
+class AshareDataFetcher:
 
-
-# =====================================================================
-# 主 Fetcher
-# =====================================================================
-
-class AshareFetcher:
-    """CN Fetcher 层：只做缓存 + 调用 datasource + 组装 snapshot。"""
-
-    # ================================
-    # 日级 snapshot 入口
-    # ================================
-    def get_daily_snapshot(self, trade_date: Date, force_refresh: bool = False) -> Dict[str, Any]:
+    def __init__(self, trade_date: str, refresh_mode: str = "readonly"):
         """
-        UnifiedRisk V11.7.1（正式）
-        A 股日级 snapshot 构建流程：
-            1. 缓存命中 → 直接返回
-            2. 刷新数据源
-               - ETF Proxy（北向代理）
-               - zh_spot（成交额 + 宽度）
-               - Margin（两融）
-               - IndexSeries（大盘指数序列）
-               - GlobalLead（海外引导因子）
-            3. 写入 snapshot JSON
+        refresh_mode: readonly / snapshot / full
         """
-    
-        snapshot_path = get_daily_cache_path(trade_date)
-    
-        # =====================================================
-        # 1）缓存读取
-        # =====================================================
-        if not force_refresh:
-            cached = load_json(snapshot_path)
-            if cached:
-                log(f"[CN Fetcher] 使用缓存 snapshot: {snapshot_path}")
-                return cached
-    
-        log(f"[CN Fetcher] 刷新 snapshot trade_date={trade_date}, force={force_refresh}")
-    
-        # =====================================================
-        # 2）ETF Proxy（北向代理因子）
-        # =====================================================
-        etf_proxy = get_etf_north_proxy(trade_date, force_refresh=force_refresh)
-    
-        # =====================================================
-        # 3）zh_spot: 成交额 & 宽度
-        # =====================================================
-        reader = MarketDataReaderCN(
-            trade_date,
-            root=ASHARE_ROOT,
-            spot_mode="dev_debug_once",
-        )
-        turnover = reader.get_turnover_summary()
-        breadth = reader.get_breadth_summary()
-    
-        # =====================================================
-        # 4）两融（margin）
-        # =====================================================
-        margin_series = EastmoneyMarginClientCN().get_recent_series(max_days=60)
-        margin_block = {"series": margin_series}
-    
-        # =====================================================
-        # 5）指数序列（index_series）
-        # =====================================================
-        try:
-            index_series = IndexSeriesClient().fetch(trade_date)
-        except Exception as e:
-            log(f"[CN Fetcher] index_series 失败: {e}")
-            index_series = {
-                "error": str(e)
-            }
-    
-        # =====================================================
-        # 6）全球引导（global_lead）
-        # =====================================================
-        try:
-            gl_client = GlobalLeadClient()
-            global_lead = gl_client.fetch(trade_date)
-    
-            # ★ 必须确保 global_lead 是结构化结果
-            if not global_lead or isinstance(global_lead, dict) and len(global_lead) == 0:
-                log("[CN Fetcher] global_lead 返回空 → 使用兜底结构")
-                global_lead = {
-                    "score": 50,
-                    "level": "中性",
-                    "details": {"msg": "global_lead 数据缺失"},
-                }
-    
-        except Exception as e:
-            log(f"[CN Fetcher] global_lead 失败: {e}")
-            global_lead = {
-                "score": 50,
-                "level": "中性",
-                "details": {"msg": f"fetch 失败: {e}"},
-            }
-    
-        # =====================================================
-        # 7）最终 snapshot 数据结构
-        # =====================================================
-        snapshot: Dict[str, Any] = {
+        LOG.info("初始化 AshareDataFetcher, refresh_mode=%s", refresh_mode)
+
+        # 载入 symbol YAML
+        self.symbols = load_symbols()
+
+        # 刷新策略
+        self.rc = RefreshControllerCN(refresh_mode)
+
+        self.trade_date = trade_date
+        # Datasources
+        self.index_source = IndexSeriesSource(market="glo")
+        self.turnover_source = TurnoverDataSource(self.trade_date)
+         
+        self.margin_source = MarginDataSource(self.trade_date)
+        
+        self.north_nps_source = NorthNpsDataSource(self.trade_date)
+        self.emotion_ds = UnifiedEmotionDataSource(trade_date)         
+        #self.sentiment_source = MarketSentimentDataSource(self.trade_date)
+        #self.emotion_source = EmotionDataSource()        
+        #self.global_lead_source = GlobalLeadSource()
+        
+        #self.force_refresh = force_refresh
+    # ==========================================================
+    # Snapshot V12 主入口
+    # ==========================================================
+    def build_daily_snapshot(self ) -> Dict[str, Any]:
+        LOG.info("开始构建 Snapshot V12" )
+
+        snapshot = {
             "meta": {
-                "trade_date": trade_date.isoformat(),
-                "version": "UnifiedRisk_V11.7.1",
-                "source": "cn_ashare_daily",
+                #"date": now.strftime("%Y-%m-%d"),
+                "trade_date": self.trade_date,
             },
-    
-            "etf_proxy": etf_proxy,
-            "turnover": turnover,
-            "breadth": breadth,
-            "margin": margin_block,
-    
-            # 新增/修复
-            "index_series": index_series,
-            "global_lead": global_lead,
+            "index_core": {},
+            "turnover": {},
+            "sentiment": {},
+            "emotion": {},
+            #"northbound": {},
+            "north_nps": {},
+            "margin": {},
+            "spot": {},
+            "global_lead": {},
         }
+
+        # ---------------------------
+        # 1. 指数数据（从 YAML cn_index 读取）
+        # ---------------------------
+        LOG.info("[1] 开始获取 cn_index (指数) ...")
+        for name, symbol in self.symbols.get("cn_index", {}).items():
+            LOG.info("获取指数 %s (%s)", name, symbol)
+
+            refresh = self.rc.should_refresh(symbol)
+            df = self.index_source.get_series(symbol, refresh=refresh)
+
+            snapshot["index_core"][name] = self._parse_index(df, symbol)
+
+        # ---------------------------
+        # 2. Turnover（成交额）
+        # ---------------------------
+        LOG.info("[2] 获取成交额 Turnover ...")
+
+        snapshot["turnover"] = self.turnover_source.get_turnover_block(
+            refresh_mode=self.rc.refresh_mode
+        )
+ 
+       
     
-        # =====================================================
-        # 8）写入缓存
-        # =====================================================
-        os.makedirs(os.path.dirname(snapshot_path), exist_ok=True)
-        save_json(snapshot_path, snapshot)
-        log(f"[CN Fetcher] snapshot 写入完成: {snapshot_path}")
-    
+        # ---------------------------
+        # 4. 北向资金
+        # ---------------------------
+        LOG.info("[4] 获取 Northbound ...")
+
+        #snapshot["northbound"] = self.north_etf_source.get_northbound_snapshot(
+        #    refresh=self.rc.refresh_flag
+        #)
+        snapshot["north_nps"] = self.north_nps_source.build_block(refresh=self.rc.refresh_flag)
+
+
+        # ---------------------------
+        # 5. 两融
+        # ---------------------------
+        LOG.info("[5] 获取 Margin 融资融券 ...")
+
+        snapshot["margin"] = self.margin_source.get_margin_block(
+            refresh=self.rc.refresh_flag
+        )
+
+        # ---------------------------
+        # 6. Spot（A股情绪，涨跌结构、涨停板等）
+        # ---------------------------
+        LOG.info("[6] 获取 Spot (情绪结构) ...")
+ 
+        
+        #snapshot["sentiment"] = self.sentiment_source.get_sentiment_block( refresh_mode=self.rc.refresh_mode)
+        #snapshot["emotion"] = self.emotion_source.get_block(snapshot)
+
+
+        sent_block, emo_block = self.emotion_ds.get_blocks(snapshot, refresh_mode=self.rc.refresh_mode)
+        # ---------------------------
+        # 7. Global Lead（美股、商品、VIX、美元）
+        # ---------------------------
+        LOG.info("[7] 获取 Global Lead ...")
+
+        snapshot["global_lead"] = self._build_global_lead_snapshot()
+
+        LOG.info("Snapshot V12 构建完成")
+
         return snapshot
-    
-    # ================================
-    # 盘中 snapshot（保持原样）
-    # ================================
-    def get_intraday_snapshot(self, bj_now: datetime, force_refresh: bool) -> Dict[str, Any]:
-        cache_path = get_intraday_cache_path()
 
-        if not force_refresh:
-            cached = load_json(cache_path)
-            if cached:
-                log(f"[CN Fetcher] 使用盘中缓存: {cache_path}")
-                return cached
+    # ==========================================================
+    # Global Lead Snapshot 构建
+    # ==========================================================
+    def _build_global_lead_snapshot(self):
+        LOG.info("开始构建 GlobalLead Snapshot ...")
 
-        log(f"[CN Fetcher] 刷新盘中 snapshot → {bj_now}")
+        result = {}
+        glead = self.symbols.get("global_lead", {})
 
-        data: Dict[str, Any] = {
-            "timestamp": bj_now.isoformat(),
-            "debug_flag": f"intraday_generated_at_{bj_now.isoformat()}",
-            "index": {"sh_change": 0.0, "cyb_change": 0.0},
-            "meta": {"source": "UnifiedRisk_V11.7_cn_intraday"},
-        }
+        for group, symbols in glead.items():
+            LOG.info("GlobalLead group=%s", group)
+            result[group] = {}
 
-        os.makedirs(os.path.dirname(cache_path), exist_ok=True)
-        save_json(cache_path, data)
-        return data
+            for sym in symbols:
+                LOG.info("获取 GlobalLead: %s", sym)
+                refresh = self.rc.should_refresh(sym)
+
+                quote = self.global_lead_source.get_last_quote(
+                    sym,
+                    refresh=refresh  # 你 global_lead_source 应接受 refresh 参数
+                )
+
+                result[group][sym] = quote
+
+        return result
+
+    # ==========================================================
+    # 解析指数（统一结构：last, pct）
+    # ==========================================================
+    def _parse_index(self, df, symbol):
+        if df is None or df.empty:
+            LOG.warning("指数数据为空: %s", symbol)
+            return {"last": None, "pct": None}
+
+        last = float(df.iloc[-1]["close"])
+        pct = df.iloc[-1].get("pct")
+
+        LOG.info("指数解析完成 %s: last=%.3f pct=%s", symbol, last, pct)
+        return {"last": last, "pct": pct}

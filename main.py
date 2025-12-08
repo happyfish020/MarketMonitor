@@ -1,64 +1,82 @@
-# -*- coding: utf-8 -*-
-"""
-UnifiedRisk v11.6.6 FULL
-兼容旧版 CLI：--market cn --mode ashare_daily --force
-整合新版松耦合因子框架 + 情绪报告系统
-"""
+# main.py - UnifiedRisk V12 启动入口
 
 import argparse
-from core.utils.logger import init_run_logger, log
+from datetime import datetime
 
-# 新松耦合日级引擎
+from core.utils.logger import get_logger
 from core.engines.cn.ashare_daily_engine import run_cn_ashare_daily
+from core.reporters.cn.ashare_daily_reporter import save_daily_report
 
-# 松耦合因子报告
-from core.reporters.cn.ashare_daily_reporter import build_daily_report_text, save_daily_report
+LOG = get_logger("Main")
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="UnifiedRisk V11.6.6 FULL CN Engine")
+def parse_args():
+    parser = argparse.ArgumentParser(description="UnifiedRisk V12 Runner")
+
     parser.add_argument(
         "--market",
-        choices=["cn"],
+        type=str,
         default="cn",
-        help="市场：目前仅支持 A股 cn",
+        help="市场: cn / us / glo 等"
     )
+
     parser.add_argument(
         "--mode",
-        choices=["ashare_daily"],
+        type=str,
         default="ashare_daily",
-        help="运行模式：ashare_daily",
+        help="模式: ashare_daily"
     )
+
+    # V12 新增刷新模式
     parser.add_argument(
-        "--force",
+        "--full-refresh",
         action="store_true",
-        help="强制刷新当日日级缓存",
+        help="刷新全量数据（所有 symbol）"
     )
 
-    args = parser.parse_args()
+    parser.add_argument(
+        "--ss-refresh",
+        action="store_true",
+        help="刷新 snapshot 所需最小数据集"
+    )
 
-    if args.market != "cn":
-        raise ValueError("当前版本仅支持 market=cn")
+    return parser.parse_args()
 
-    # 初始化日志
-    init_run_logger(args.market, args.mode)
-    log(f"Running UnifiedRisk V11.6.6 ... market={args.market}, mode={args.mode}")
 
-    # 启动 A股日级任务（松耦合）
-    result = run_cn_ashare_daily(force_daily_refresh=args.force)
+def get_refresh_mode(args):
+    if args.full_refresh:
+        return "full"
+    if args.ss_refresh:
+        return "snapshot"
+    return "readonly"
 
-    # 收集结果
-    meta = result["meta"]
-    factors = result["factors"]
-    full_report_text = result["report_text"]      # 已经包含 因子报告 + 情绪报告
-    trade_date = meta["trade_date"]
 
-    # 落地保存报告
-    report_path = save_daily_report("cn", trade_date, full_report_text)
+def main():
+    args = parse_args()
+    refresh_mode = get_refresh_mode(args)
 
-    # 输出到控制台
-    print(full_report_text)
-    log(f"[Main] 报告文件: {report_path}")
+    LOG.info("启动 UnifiedRisk V12 | market=%s mode=%s refresh=%s",
+             args.market, args.mode, refresh_mode)
+
+    if args.market == "cn" and args.mode == "ashare_daily":
+        result = run_cn_ashare_daily(refresh_mode=refresh_mode)
+
+        meta = result["meta"]
+        trade_date = meta.get("trade_date")
+        report_text = result["report_text"]
+
+        # 保存报告
+        report_path = save_daily_report("cn", trade_date, report_text)
+        LOG.info("A股日度报告已保存: %s", report_path)
+            # === 在控制台打印完整报告 ===
+        print("\n" + "=" * 60)
+        print(f"A股日度风险报告 {trade_date}（来自 {report_path} ）")
+        print("=" * 60 + "\n")
+        print(report_text)
+        
+        print("=" * 60 + "\n")
+    else:
+        LOG.error("不支持的参数: market=%s mode=%s", args.market, args.mode)
 
 
 if __name__ == "__main__":

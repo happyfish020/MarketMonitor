@@ -1,159 +1,72 @@
-# -*- coding: utf-8 -*-
-"""
-UnifiedRisk v11.7 — MarketSentiment 因子（宽度 + 涨跌停 + HS300 代理）
-
-依赖 processed["breadth"]：
-  {
-    "adv":        上涨家数,
-    "dec":        下跌家数,
-    "total":      总家数,
-    "limit_up":   涨停数,
-    "limit_down": 跌停数,
-    "adv_ratio":  上涨占比（可选，缺失时由 adv/total 计算）
-  }
-以及可选 HS300 代理涨跌：
-  processed["hs300_pct"] 或 processed["etf_proxy"]["hs300_pct"]
-"""
-
-from __future__ import annotations
+# core/factors/cn/market_sentiment_factor.py
 
 from typing import Dict, Any
+
+from core.factors.base import BaseFactor
 from core.models.factor_result import FactorResult
+from core.utils.logger import get_logger
+
+LOG = get_logger("Factor.MarketSentiment")
 
 
-class MarketSentimentFactor:
-    name = "market_sentiment"
+def _safe_float(v, default=0.0):
+    try:
+        if v is None:
+            return default
+        return float(v)
+    except Exception:
+        return default
 
-    def compute_from_daily(self, processed: Dict[str, Any]) -> FactorResult:
-        data = processed or {}
-        b = data.get("breadth") or {}
 
-        adv = float(b.get("adv") or 0)
-        dec = float(b.get("dec") or 0)
-        total = float(b.get("total") or (adv + dec) or 1)
-        lu = float(b.get("limit_up") or 0)
-        ld = float(b.get("limit_down") or 0)
+class MarketSentimentFactor(BaseFactor):
+    """
+    市场宽度 / 情绪因子：
+      - 涨跌家数
+      - adv/dec 比例
+    与 EmotionFactor 区分：
+      - 这里更偏「广度、参与度」的定量描述
+    """
 
-        adv_ratio = float(b.get("adv_ratio") or (adv / total if total > 0 else 0))
+    def compute(self, snapshot: Dict[str, Any]) -> FactorResult:
+        sentiment = snapshot.get("sentiment", {}) or {}
+        spot = snapshot.get("spot", {}) or {}
 
-        # HS300 代理涨跌
-        hs300_pct = 0.0
-        if "hs300_pct" in data:
-            hs300_pct = float(data.get("hs300_pct") or 0.0)
-        else:
-            etf_proxy = data.get("etf_proxy") or {}
-            hs300_pct = float(etf_proxy.get("hs300_pct") or 0.0)
+        adv = _safe_float(sentiment.get("adv", spot.get("adv")))
+        dec = _safe_float(sentiment.get("dec", spot.get("dec")))
+        ratio = _safe_float(sentiment.get("ratio"))
 
-        # ----------------- 情绪区间与打分 -----------------
-        # 宽度评分
-        if adv_ratio >= 0.7:
-            width_label = "普涨"
-            width_score = 85
-        elif adv_ratio >= 0.55:
-            width_label = "涨多跌少"
-            width_score = 70
-        elif adv_ratio >= 0.45:
-            width_label = "震荡"
-            width_score = 55
-        elif adv_ratio >= 0.3:
-            width_label = "跌多涨少"
-            width_score = 40
-        else:
-            width_label = "普跌"
-            width_score = 25
-
-        # 涨跌停氛围评分（简单：涨停多 +，跌停多 -）
-        if lu >= 100 and ld <= 10:
-            lmt_label = "强势涨停潮"
-            lmt_score = 85
-        elif lu >= 50 and ld <= 20:
-            lmt_label = "较强涨停氛围"
-            lmt_score = 70
-        elif ld >= 50 and lu <= 10:
-            lmt_label = "强势杀跌氛围"
-            lmt_score = 25
-        elif ld >= 30 and lu <= 20:
-            lmt_label = "偏空杀跌"
-            lmt_score = 40
-        else:
-            lmt_label = "中性"
-            lmt_score = 55
-
-        # HS300 方向评分
-        if hs300_pct >= 2.0:
-            idx_label = "大盘强势上攻"
-            idx_score = 85
-        elif hs300_pct >= 0.5:
-            idx_label = "大盘温和上涨"
-            idx_score = 70
-        elif hs300_pct > -0.5:
-            idx_label = "大盘震荡"
-            idx_score = 55
-        elif hs300_pct > -2.0:
-            idx_label = "大盘回调"
-            idx_score = 40
-        else:
-            idx_label = "大盘大幅下跌"
-            idx_score = 25
-
-        # 综合情绪评分（简单平均，可后续权重化）
-        score = float((width_score + lmt_score + idx_score) / 3.0)
-
-        # 文本 level
-        if score >= 75:
-            level = "情绪亢奋偏多"
-        elif score >= 60:
-            level = "情绪偏多"
-        elif score >= 45:
-            level = "情绪中性"
-        elif score >= 30:
-            level = "情绪偏空"
-        else:
-            level = "情绪恐慌偏空"
-
-        signal = f"{width_label}，{idx_label}，{lmt_label}"
-
-        raw = {
-            "adv": adv,
-            "dec": dec,
-            "total": total,
-            "adv_ratio": adv_ratio,
-            "limit_up": lu,
-            "limit_down": ld,
-            "hs300_pct": hs300_pct,
-            "width_label": width_label,
-            "lmt_label": lmt_label,
-            "idx_label": idx_label,
-        }
-
-        details = {
-            "level": level,
-            "adv": adv,
-            "dec": dec,
-            "total": total,
-            "adv_ratio": adv_ratio,
-            "limit_up": lu,
-            "limit_down": ld,
-            "hs300_pct": hs300_pct,
-            "width_label": width_label,
-            "lmt_label": lmt_label,
-            "idx_label": idx_label,
-        }
-
-        report_block = (
-            f"  - market_sentiment: {score:.2f}（{level}）\n"
-            f"      · 涨跌家数：上涨 {int(adv)}；下跌 {int(dec)}；总数 {int(total)}；上涨占比 {adv_ratio:.2%}\n"
-            f"      · 涨跌停：涨停 {int(lu)}；跌停 {int(ld)}\n"
-            f"      · HS300 代理涨跌：{hs300_pct:.2f}%（{idx_label}）\n"
-            f"      · 情绪综合判断：{signal}\n"
+        LOG.info(
+            "Compute MarketSentiment: adv=%.0f dec=%.0f ratio=%.2f",
+            adv, dec, ratio
         )
 
-        return FactorResult(
-            name=self.name,
-            score=score,
-            details=details,
-            level=level,
-            signal=signal,
-            raw=raw,
-            report_block=report_block,
-        )
+        total = adv + dec
+        if total <= 0:
+            adv_ratio = 0.5
+        else:
+            adv_ratio = adv / total
+
+        # 把 adv_ratio 映射到 0-100
+        score = 50 + (adv_ratio - 0.5) * 100
+        score = max(0.0, min(100.0, score))
+
+        if score >= 70:
+            desc = "上涨家数明显占优，市场广度偏多"
+        elif score <= 30:
+            desc = "下跌家数明显占优，市场广度偏空"
+        else:
+            desc = "市场涨跌家数相对均衡"
+
+        detail_lines = [
+            f"上涨家数：{adv:.0f}；下跌家数：{dec:.0f}",
+            f"adv_ratio={adv_ratio:.2f}；原始 sentiment.ratio={ratio:.2f}",
+        ]
+        detail = "\n".join(detail_lines)
+
+        LOG.info("MarketSentimentFactor: score=%.2f desc=%s", score, desc)
+        fr = FactorResult()
+        fr.score=score 
+        fr.desc=desc
+        fr.detail=detail
+        return fr 
+        

@@ -1,163 +1,173 @@
+# core/factors/cn/margin_factor.py
 # -*- coding: utf-8 -*-
-"""
-UnifiedRisk v11.7 — MarginFactor（两融因子，新版）
-统一单位：亿元（e9）
-
-依赖 processed["margin"]：
-  {
-    "series": [
-      {"date": "YYYY-MM-DD", "rz_e9": ..., "rq_e9": ..., "total_e9": ...},
-      ...
-    ]
-  }
-若数据缺失，则返回中性评分。
-"""
 
 from __future__ import annotations
+from typing import Dict, Any
 
-import numpy as np
-from typing import Dict, Any, List
-from core.models.factor_result import FactorResult
+from core.factors.base import BaseFactor, FactorResult
+from core.utils.logger import get_logger
+
+LOG = get_logger("Factor.Margin")
 
 
-class MarginFactor:
-    name = "margin"
+class MarginFactor(BaseFactor):
+    """
+    两融杠杆因子（V12 专业版）
+    支持：
+        - 总余额（total）
+        - 趋势（10日）
+        - 加速度（3日）
+        - 融资余额比例 rz_ratio
+        - 融资买入力 rz_buy
+        - 风险区间（高/中/低）
 
-    def compute_from_daily(self, processed: Dict[str, Any]) -> FactorResult:
-        data = processed or {}
-        margin_block = data.get("margin") or {}
-        series: List[Dict[str, Any]] = margin_block.get("series") or []
+    输出：score (0-100) + desc + detail
+    """
 
-        if not series:
-            score = 50.0
-            level = "中性"
-            signal = "两融数据缺失，视为中性"
-            raw = {"series": []}
-            details = {
-                "level": level,
-                "rz_last_e9": None,
-                "rq_last_e9": None,
-                "total_last_e9": None,
-                "trend_10d": None,
-                "acc_3d": None,
-                "zone_label": "未知",
-            }
-            report_block = (
-                "  - margin: 50.00（中性）\n"
-                "      · 两融数据缺失，暂不评估杠杆风险\n"
-            )
+    def __init__(self):
+        #super().__init__("margin")
+            
+        super().__init__()
+        self.name = "margin"
+
+    #
+    # ------------------ 评分权重体系（可调） ------------------
+    #
+    WEIGHTS = {
+        "trend": 0.35,        # 趋势
+        "accel": 0.25,        # 加速度
+        "rz_ratio": 0.20,     # 融资比例
+        "rz_buy": 0.20,       # 买入力
+    }
+
+    #
+    # ------------------ normalize functions ------------------
+    #
+    def _score_trend(self, val: float) -> float:
+        """趋势越大越多，越负越空"""
+        if val >= 200:
+            return 100
+        if val <= -200:
+            return 0
+        return 50 + (val / 200) * 50
+
+    def _score_accel(self, val: float) -> float:
+        """加速度（短期）变动更敏感"""
+        if val >= 80:
+            return 100
+        if val <= -80:
+            return 0
+        return 50 + (val / 80) * 50
+
+    def _score_rz_ratio(self, ratio: float) -> float:
+        """
+        融资余额占比（%）
+        过高 → 杠杆偏危险
+        过低 → 风险不大
+        """
+        if ratio <= 5:
+            return 80
+        if ratio >= 15:
+            return 40
+        return 80 - (ratio - 5) * 4
+
+    def _score_rz_buy(self, rz_buy: float) -> float:
+        """融资买入力（短期风险放大器）"""
+        if rz_buy >= 500:
+            return 100
+        if rz_buy <= -200:
+            return 0
+        return 50 + (rz_buy / 500) * 50
+
+    #
+    # ------------------ risk zone描述 ------------------
+    #
+    def _risk_zone_desc(self, zone: str) -> str:
+        return {
+            "高": "市场总体杠杆偏高（需关注潜在风险）",
+            "中": "杠杆水平中性（风险中性）",
+            "低": "市场杠杆偏低（风险较小）",
+        }.get(zone, "未知")
+
+    #
+    # ------------------ 主 compute ------------------
+    #
+    def compute(self, snapshot: Dict[str, Any]) -> FactorResult:
+
+        data = snapshot.get("margin", {})
+
+        total = data.get("total", 0.0)
+        rz = data.get("rz_balance", 0.0)
+        rq = data.get("rq_balance", 0.0)
+        trend = data.get("trend_10d", 0.0)
+        accel = data.get("acc_3d", 0.0)
+        rz_ratio = data.get("rz_ratio", 0.0)
+        rz_buy = data.get("rz_buy", 0.0)
+        zone = data.get("risk_zone", "中")
+
+        # 数据缺失 → 中性
+        if total <= 0:
             return FactorResult(
-                name=self.name,
-                score=score,
-                details=details,
-                level=level,
-                signal=signal,
-                raw=raw,
-                report_block=report_block,
+                name="margin",
+                score=50,
+                desc="两融数据缺失（按中性处理）",
+                detail={
+                    "rz_balance": rz,
+                    "rq_balance": rq,
+                    "total": total,
+                    "trend_10d": trend,
+                    "acc_3d": accel,
+                    "risk_zone": zone,
+                },
             )
 
-        # 转为 np 向量
-        rz = np.array([float(x.get("rz_e9") or 0.0) for x in series], dtype=float)
-        rq = np.array([float(x.get("rq_e9") or 0.0) for x in series], dtype=float)
-        total = np.array([float(x.get("total_e9") or (rz_i + rq_i)) for x, rz_i, rq_i in zip(series, rz, rq)], dtype=float)
+        #
+        # ------------------ 各项子评分 ------------------
+        #
+        trend_score = self._score_trend(trend)
+        accel_score = self._score_accel(accel)
+        ratio_score = self._score_rz_ratio(rz_ratio)
+        buy_score = self._score_rz_buy(rz_buy)
 
-        dates = [x.get("date") for x in series]
-        n = len(total)
-
-        # 末日数值
-        rz_last = float(rz[-1])
-        rq_last = float(rq[-1])
-        total_last = float(total[-1])
-
-        # 10 日趋势（简单回归斜率）
-        if n >= 10:
-            y = total[-10:]
-            x = np.arange(len(y))
-            A = np.vstack([x, np.ones_like(x)]).T
-            slope_10, _ = np.linalg.lstsq(A, y, rcond=None)[0]
-        else:
-            slope_10 = 0.0
-
-        # 3 日加速度（后 3 日差分）
-        if n >= 3:
-            acc_3d = float(total[-1] - total[-3])
-        else:
-            acc_3d = 0.0
-
-        # 杠杆区间（粗略，以总额为 proxy）
-        if total_last >= 20000:
-            zone = "极高杠杆"
-            base_score = 30
-        elif total_last >= 16000:
-            zone = "高杠杆"
-            base_score = 40
-        elif total_last >= 12000:
-            zone = "中等偏高杠杆"
-            base_score = 50
-        elif total_last >= 8000:
-            zone = "中性杠杆"
-            base_score = 60
-        else:
-            zone = "低杠杆"
-            base_score = 70
-
-        # 趋势修正：若近期大幅上升 → 风险偏高
-        trend_adj = 0
-        if slope_10 > 50:   # 10 日内快速上升
-            trend_adj = -5
-        elif slope_10 < -50:
-            trend_adj = +5
-
-        # 综合得分
-        score = float(base_score + trend_adj)
-        score = max(0.0, min(100.0, score))
-
-        # 文本 level
-        if score >= 70:
-            level = "杠杆偏低（有弹药）"
-        elif score >= 55:
-            level = "杠杆中性"
-        elif score >= 40:
-            level = "杠杆偏高（需谨慎）"
-        else:
-            level = "杠杆显著偏高（风险区）"
-
-        signal = f"{zone}，当日两融总额约 {total_last:.0f} 亿"
-
-        raw = {
-            "dates": dates,
-            "rz": rz.tolist(),
-            "rq": rq.tolist(),
-            "total": total.tolist(),
-            "trend_10d": slope_10,
-            "acc_3d": acc_3d,
-            "zone_label": zone,
-        }
-        details = {
-            "level": level,
-            "rz_last_e9": rz_last,
-            "rq_last_e9": rq_last,
-            "total_last_e9": total_last,
-            "trend_10d": slope_10,
-            "acc_3d": acc_3d,
-            "zone_label": zone,
-        }
-
-        report_lines = [
-            f"  - margin: {score:.2f}（{level}）",
-            f"      · 当日融资余额：{rz_last:.0f} 亿；融券余额：{rq_last:.0f} 亿；两融总额：{total_last:.0f} 亿（{zone}）",
-            f"      · 10日趋势：{slope_10:.2f}（总额回归斜率，>0 为上升）",
-            f"      · 3日加速度：{acc_3d:.2f} 亿",
-            "",
-        ]
-        report_block = "\n".join(report_lines)
-
-        return FactorResult(
-            name=self.name,
-            score=score,
-            details=details,
-            level=level,
-            signal=signal,
-            raw=raw,
-            report_block=report_block,
+        #
+        # ------------------ 综合评分 ------------------
+        #
+        score = (
+            trend_score * self.WEIGHTS["trend"]
+            + accel_score * self.WEIGHTS["accel"]
+            + ratio_score * self.WEIGHTS["rz_ratio"]
+            + buy_score * self.WEIGHTS["rz_buy"]
         )
+
+        score = max(0, min(100, score))
+
+        #
+        # ------------------ 描述文本 ------------------
+        #
+        desc = f"两融杠杆{self._risk_zone_desc(zone)}"
+
+        detail = {
+            "rz_balance": rz,
+            "rq_balance": rq,
+            "total": total,
+            "trend_10d": trend,
+            "trend_score": trend_score,
+            "acc_3d": accel,
+            "accel_score": accel_score,
+            "rz_ratio": rz_ratio,
+            "ratio_score": ratio_score,
+            "rz_buy": rz_buy,
+            "rz_buy_score": buy_score,
+            "risk_zone": zone,
+        }
+
+        LOG.info(
+            f"[MarginFactor] score={score:.2f} trend={trend} accel={accel} ratio={rz_ratio} rz_buy={rz_buy}"
+        )
+
+        fr = FactorResult()
+        fr.name = "margin"
+        fr.score=round(score, 2)
+        fr.desc=desc
+        fr.detail = detail  
+        return fr 

@@ -1,62 +1,43 @@
-# -*- coding: utf-8 -*-
-"""
-Unified Score Builder (V11.6.2)
-- 统一因子评分
-- 增加 factor_details 字段（支持 margin 等详细信息输出）
-"""
+# core/factors/score_unified.py
 
-from __future__ import annotations
-from typing import Dict, Any, Mapping
-
-from core.models.factor_result import FactorResult
+from dataclasses import dataclass, field
+from typing import Dict
 
 
-class UnifiedScoreBuilder:
+@dataclass
+class UnifiedScore:
     """
-    将多个 FactorResult 合并成统一结果 summary：
-    {
-        "total_score": float,
-        "risk_level": str,
-        "factor_scores": {name: score},
-        "factor_signals": {name: signal},
-        "factor_details": {name: <detail dict or raw>},
-    }
+    汇总后的统一得分：
+        - total: 0~100 综合评分
+        - components: 各因子得分明细
     """
 
-    def unify(self, factors: Mapping[str, FactorResult]) -> Dict[str, Any]:
-        summary: Dict[str, Any] = {
-            "factor_scores": {},
-            "factor_signals": {},
-            "factor_details": {},   # <-- 🔥 新增字段
+    total: float
+    components: Dict[str, float] = field(default_factory=dict)
+
+    def as_dict(self) -> dict:
+        return {
+            "total": float(self.total),
+            "components": {k: float(v) for k, v in self.components.items()},
         }
 
-        # -------- 汇总每个因子 --------
-        total = 0.0
-        for name, factor in factors.items():
-            sc = float(factor.score)
-            total += sc
 
-            summary["factor_scores"][name] = sc
-            summary["factor_signals"][name] = factor.signal
+def unify_scores(**kwargs: float) -> UnifiedScore:
+    """
+    将若干因子得分（0~100）汇总成一个 UnifiedScore。
 
-            # 🔥 detail 统一写入 factor_details
-            # Margin 等高级因子的 detail 保存在 factor.raw 中
-            summary["factor_details"][name] = factor.raw or {}
+    用法：
+        unified = unify_scores(
+            emotion=60,
+            turnover=55,
+            ...
+        )
+    """
+    components = {k: float(v) for k, v in kwargs.items()}
 
-        # -------- 平均评分作为综合得分 --------
-        n = len(factors)
-        if n > 0:
-            summary["total_score"] = round(total / n, 2)
-        else:
-            summary["total_score"] = 50.0
+    if not components:
+        return UnifiedScore(total=50.0, components={})
 
-        # -------- 风险等级规则 --------
-        ts = summary["total_score"]
-        if ts >= 60:
-            summary["risk_level"] = "偏强"
-        elif ts >= 45:
-            summary["risk_level"] = "中性"
-        else:
-            summary["risk_level"] = "偏弱"
+    total = sum(components.values()) / len(components)
 
-        return summary
+    return UnifiedScore(total=total, components=components)

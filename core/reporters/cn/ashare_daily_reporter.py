@@ -1,183 +1,122 @@
-# -*- coding: utf-8 -*-
-"""A股日级风险报告生成器（V11.7，支持 T+1 / T+5 预测模块）。
-
-设计原则：
-- 完全兼容 V11.6.6 的因子松耦合输出机制
-- 不改变 FactorResult 的接口
-- 在报告末尾加入 prediction_block（T+1 / T+5）
+# core/reporters/cn/ashare_daily_reporter.py
+"""
+UnifiedRisk V12 - AShare Daily Reporter (统一情绪结构版)
 """
 
+from __future__ import annotations
+
 import os
-from datetime import datetime
 from typing import Dict, Any
+
 from core.models.factor_result import FactorResult
-from core.utils.config_loader import reports_path
+from core.utils.logger import get_logger
 
-# 报告输出根目录
-REPORT_ROOT = reports_path()
+LOG = get_logger("Reporter.AshareDaily")
 
 
-# ============================================================
-# 辅助函数：格式化预测模块的文本
-# ============================================================
-def _build_prediction_block(pred):
+# ----------------------------------------------------------------------
+# 因子格式化
+# ----------------------------------------------------------------------
+def _format_factor_block(label: str, fr) -> str:
     """
-    兼容 V11.8 新版预测结构（score + direction + explain）
-    同时兼容旧版结构（score + direction + details）
+    V12 因子输出格式化：
+    - fr.desc: 简短描述（字符串）
+    - fr.detail: dict 或 字符串
     """
 
-    if not pred:
-        return "\n【预测】暂无数据\n"
+    desc = fr.desc if isinstance(fr.desc, str) else ""
 
-    t1 = pred.get("t1", {}) or {}
-    t5 = pred.get("t5", {}) or {}
+    # ---- detail 处理 ----
+    if isinstance(fr.detail, dict):
+        detail_lines = []
+        for k, v in fr.detail.items():
+            detail_lines.append(f"    · {k}: {v}")
+        detail = "\n".join(detail_lines)
 
-    def build_one(label: str, obj: Dict[str, Any]):
-        """
-        自动兼容三种结构：
-        1) 旧版：包含 details
-        2) 新版：包含 explain
-        3) 极简版：只有 score + direction
-        """
-        lines = []
-        score = obj.get("score", "-")
-        direction = obj.get("direction", "-")
+    elif isinstance(fr.detail, str):
+        detail = fr.detail.rstrip()
 
-        lines.append(f"【{label}】方向：{direction}  |  综合分：{score}")
+    else:
+        detail = ""
 
-        # --- 情况1：旧版结构，有 details ---
-        details = obj.get("details")
-        if isinstance(details, dict):
-            lines.append("  - 多空结构分析：")
-            for fname, detail in details.items():
-                fs = detail.get("factor_score")
-                lines.append(f"        · {fname}: {fs}")
-
-            lines.append("  - 贡献分布：")
-            for fname, detail in details.items():
-                fs = detail.get("factor_score")
-                w = detail.get("weight")
-                c = detail.get("contribution")
-                lines.append(f"        · {fname}: {fs} × {w} = {c}")
-
-        # --- 情况2：新版结构，有 explain ---
-        explain = obj.get("explain")
-        if explain:
-            lines.append("  - 综合解读：")
-            for part in explain.split("\n"):
-                lines.append(f"        {part}")
-
-        # --- 情况3：极简结构 ---
-        if not details and not explain:
-            lines.append("  - 综合解读：")
-            lines.append("        综合因子评估后，保持震荡结构。")
-
-        return "\n".join(lines)
-
-    # 组合 T+1 / T+5 文本
     return (
-        "\n\n【预测模块】\n"
-        + build_one("T+1", t1)
-        + "\n\n"
-        + build_one("T+5", t5)
-        + "\n"
+        f"{label}: {fr.score:.2f}（{desc}）\n"
+        f"{detail}\n"
     )
 
- 
-# ============================================================
-# 主函数：构建完整报告
-# ============================================================
+
+# ----------------------------------------------------------------------
+# 日报文本构建
+# ----------------------------------------------------------------------
 def build_daily_report_text(
     meta: Dict[str, Any],
     factors: Dict[str, FactorResult],
-    prediction: Dict[str, Any] = None,
+    prediction_block: Dict[str, Any] | None = None,
 ) -> str:
-    """构建 A 股日级风险报告全文（含预测模块）"""
 
-    market = meta.get("market", "CN")
-    trade_date = meta.get("trade_date", "")
-    version = meta.get("version", "UnifiedRisk_v11.8")
-    ts = meta.get("generated_at") or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    trade_date = meta.get("trade_date", "未知日期")
 
-    # ------------------ 标题 ------------------
-    title = f"UnifiedRisk A股日级风险报告 ({market})\n"
-    header = (
-        f"交易日：{trade_date}    生成时间：{ts}    版本：{version}\n"
-        + "-" * 72 + "\n"
-        + "因子得分：\n"
-    )
+    header_lines = [
+        f"【A股日度风险综述】{trade_date}",
+        "=" * 40,
+        "",
+    ]
 
-    # ------------------ 因子输出 ------------------
-    preferred_order = ["north_nps", "turnover", "market_sentiment", "margin"]
-    lines = []
+    body_parts: list[str] = []
 
-    used_keys = set()
-    for key in preferred_order:
-        res = factors.get(key)
-        if not res:
-            continue
+    # --------------------------------------------------------
+    # ⭐ V12 因子输出顺序（情绪合并版）
+    # --------------------------------------------------------
+    order = [
+        ("unified_emotion", "综合情绪因子"),
+        ("north_nps", "北向代理资金因子"),
+        ("turnover", "成交额流动性因子"),
+        ("margin", "两融杠杆因子"),
+        ("index_tech", "指数技术面因子"),
+        ("global_lead", "全球领衔风险因子"),
+    ]
 
-        # 优先 factor_obj.report_block(fr)
-        block = None
-        if hasattr(res, "factor_obj") and res.factor_obj and hasattr(res.factor_obj, "report_block"):
-            block = res.factor_obj.report_block(res)
+    for key, label in order:
+        fr = factors.get(key)
+        LOG.info(f"Report - label: {label}, found={isinstance(fr, FactorResult)}")
 
-        # 其次尝试 res.report_block
-        if not block:
-            block = getattr(res, "report_block", None)
+        if isinstance(fr, FactorResult):
+            block = _format_factor_block(label, fr)
+            if block:
+                body_parts.append(block)
 
-        # fallback
-        if not block:
-            score = getattr(res, "score", 50.0)
-            level = getattr(res, "level", "中性")
-            block = f"  - {key}: {score:.2f}（{level}）"
+    # --------------------------------------------------------
+    # T+1~T+5 预测块
+    # --------------------------------------------------------
+    if prediction_block:
+        body_parts.append("【T+1~T+5 趋势预测】")
+        desc = prediction_block.get("summary", "").strip()
+        if desc:
+            body_parts.append(desc + "\n")
 
-        lines.append(block.rstrip() + "\n")
-        used_keys.add(key)
+    text = "\n".join(header_lines + body_parts).rstrip() + "\n"
 
-    # ------------------ 其它因子按字母序附加 ------------------
-    for name in sorted(k for k in factors.keys() if k not in used_keys):
-        res = factors[name]
-
-        block = None
-        if hasattr(res, "factor_obj") and res.factor_obj and hasattr(res.factor_obj, "report_block"):
-            block = res.factor_obj.report_block(res)
-
-        if not block:
-            block = getattr(res, "report_block", None)
-
-        if not block:
-            score = getattr(res, "score", 50.0)
-            level = getattr(res, "level", "中性")
-            block = f"  - {name}: {score:.2f}（{level}）"
-
-        lines.append(block.rstrip() + "\n")
-
-    # ------------------ 新增：预测模块 ------------------
-    prediction_text = _build_prediction_block(prediction)
-
-    return title + header + "\n".join(lines) + prediction_text + "\n"
+    LOG.info("AshareDailyReporter: 报告文本构建完成，长度=%s 字符", len(text))
+    return text
 
 
-# ============================================================
-# 保存报告文件
-# ============================================================
+# ----------------------------------------------------------------------
+# 保存报告
+# ----------------------------------------------------------------------
+def save_daily_report(market: str, trade_date: str, text: str) -> str:
+    root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+    reports_root = os.path.join(root, "reports", market, "daily")
+    os.makedirs(reports_root, exist_ok=True)
 
-def save_daily_report(market: str, date_str: str, text: str) -> str:
-    """
-    报告写入: reports/{market}/ashare_daily_{date_str}.txt
-    例如: reports/cn/ashare_daily_20251205.txt
-    """
- 
+    if market.lower() == "cn":
+        filename = f"AShares-{trade_date}.txt"
+    else:
+        filename = f"{market.upper()}-{trade_date}.txt"
 
-    root = reports_path()  # 或用 load_paths()["reports_dir"]
-    folder = os.path.join(root, market)
-    os.makedirs(folder, exist_ok=True)
-
-    filename = f"ashare_daily_{date_str}.txt"
-    path = os.path.join(folder, filename)
+    path = os.path.join(reports_root, filename)
 
     with open(path, "w", encoding="utf-8") as f:
         f.write(text)
 
+    LOG.info("AshareDailyReporter: 日报保存成功: %s", path)
     return path

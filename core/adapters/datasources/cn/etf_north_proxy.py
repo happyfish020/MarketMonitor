@@ -194,3 +194,15 @@ def get_etf_north_proxy(trade_date: Date, force_refresh: bool = False) -> Dict[s
         "hs300_proxy_pct": hs300_proxy_pct,
         "details": details,
     }
+
+
+class EtfNorthProxyClient:
+    """
+    北向 ETF 代理 OOP 封装。
+
+    - 内部复用 get_etf_north_proxy()
+    - 对外统一提供 fetch(trade_date, force_refresh=False)
+    """
+
+    def fetch(self, trade_date: Date, force_refresh: bool = False) -> Dict[str, Any]:
+        return get_etf_north_proxy(trade_date, force_refresh=force_refresh)

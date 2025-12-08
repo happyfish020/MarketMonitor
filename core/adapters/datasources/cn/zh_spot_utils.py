@@ -1,5 +1,11 @@
 
+from datetime import date
+from typing import Optional
+
 import pandas as pd
+
+from core.utils.logger import log
+
 
 COL_MAP = {
     "代码": "symbol",
@@ -24,3 +30,15 @@ def normalize_zh_spot_columns(df: pd.DataFrame) -> pd.DataFrame:
         except:
             pass
     return df2
+
+
+class ZhSpotUtils:
+    """
+    A 股当日现货行情（zh_spot）占位 Client。
+    目前只返回空 DataFrame，确保不报错。
+    后续你可以在这里接入 akshare / 东方财富行情。
+    """
+
+    def get_today_spot(self, trade_date: Optional[date] = None) -> pd.DataFrame:
+        log(f"[ZhSpotUtils] get_today_spot() 暂未实现，返回空 DataFrame。trade_date={trade_date}")
+        return pd.DataFrame()

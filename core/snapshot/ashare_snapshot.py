@@ -1,222 +1,107 @@
-# core/snapshot/ashare_snapshot.py
-
+# -*- coding: utf-8 -*-
 """
 UnifiedRisk V12
-Snapshot Builder - 正式版
+CN A-Share Snapshot Builder
 
-功能：
-  - 接收 fetcher 的 raw_snapshot
-  - 构建标准化 snapshot_v12
-  - 自动补齐字段
-  - 日志化所有步骤
+职责：
+- 规范 CN A-Share snapshot 结构
+- 统一字段命名
+- 映射 unified_emotion → market_sentiment / emotion
 """
 
 from typing import Dict, Any
+
+from core.snapshot.snapshot_builder_base import SnapshotBuilderBase
 from core.utils.logger import get_logger
 
-LOG = get_logger("Snapshot.Builder")
+LOG = get_logger("Snapshot.Ashare")
 
 
-class SnapshotBuilder:
+class AshareSnapshotBuilder(SnapshotBuilderBase):
     """
-    Snapshot 统一结构化模块（V12）
+    CN A-Share SnapshotBuilder（V12 定稿）
     """
-
-    # V12 Snapshot Schema（因子系统依赖的字段）
-    REQUIRED_KEYS = [
-        "meta",
-        "index_core",
-        "turnover",
-        "sentiment",
-        "emotion",
-        "margin",
-        "spot",
-        "global_lead",
-        "north_nps"
-    ]
-
-    def __init__(self):
-        LOG.info("SnapshotBuilderV12 初始化")
 
     # ------------------------------------------------------------------
-    def build(self, raw_snapshot: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        根据 raw_snapshot 构建 V12 标准化结构。
+    def build(self, snapshot: Dict[str, Any]) -> Dict[str, Any]:
+        if not isinstance(snapshot, dict):
+            raise ValueError("snapshot must be a dict")
 
-        raw_snapshot 来自 AshareFetcher.build_daily_snapshot_v12()
-        """
+        # 1️⃣ 基础结构兜底（只补 key，不覆盖）
+        self._ensure_basic_blocks(snapshot)
 
-        LOG.info("SnapshotBuilderV12 开始构建 snapshot_v12")
-
-        snapshot = {}
-
-        # ====== 1. 主字段结构化 ======
-        for key in self.REQUIRED_KEYS:
-            if key in raw_snapshot:
-                snapshot[key] = raw_snapshot[key]
-                LOG.info("Snapshot 字段载入: %s (type=%s)",
-                         key, type(raw_snapshot[key]).__name__)
-            else:
-                # 自动补空
-                snapshot[key] = {} if key != "meta" else {"trade_date": None}
-                LOG.warning("Snapshot 字段缺失，已补齐默认值: %s", key)
-
-        # ====== 2. 强化 meta 结构 ======
-        self._fix_meta(snapshot)
-
-        # ====== 3. 强化 index_core ======
-        self._fix_index_core(snapshot)
-
-        # ====== 4. 强化 turnover ======
-        self._fix_turnover(snapshot)
-
-        # ====== 5. 强化 sentiment ======
-        self._fix_sentiment(snapshot)
-
-        # ====== 6. 强化 northbound ======
-        self._fix_northbound(snapshot)
-
-        # ====== 7. 强化 margin ======
-        self._fix_margin(snapshot)
-
-        # ====== 8. 强化 spot ======
-        self._fix_spot(snapshot)
-
-        # ====== 9. 强化 global_lead ======
-        self._fix_global_lead(snapshot)
-
-        LOG.info("SnapshotBuilderV12 构建完成: trade_date=%s",
-                 snapshot["meta"].get("trade_date"))
+        # 2️⃣ unified_emotion → 标准字段映射（关键）
+        self._fix_unified_emotion(snapshot)
 
         return snapshot
 
-    # ------------------------------------------------------------------
-    # 子结构修复区
-    # ------------------------------------------------------------------
+    # ==================================================================
+    # 内部方法
+    # ==================================================================
 
-    def _fix_meta(self, snapshot: Dict[str, Any]):
-        meta = snapshot["meta"]
-        LOG.info("修正 meta 字段: %s", meta)
+    def _ensure_basic_blocks(self, snapshot: Dict[str, Any]) -> None:
+        """
+        确保 CN A-Share snapshot 至少包含这些标准块
+        注意：只 setdefault，绝不覆盖
+        """
+        snapshot.setdefault("market_sentiment", {})
+        snapshot.setdefault("emotion", {})
+        snapshot.setdefault("turnover", {})
+        snapshot.setdefault("margin", {})
+        snapshot.setdefault("north_nps", {})
+        snapshot.setdefault("index_tech", {})
+        snapshot.setdefault("index_global", {})
+        snapshot.setdefault("global_lead", {})
+        snapshot.setdefault("global_macro", {})
+        snapshot.setdefault("sector_rotation", {})
 
-        # trade_date 必须存在
-        if "trade_date" not in meta:
-            LOG.warning("meta.trade_date 缺失，自动补齐 None")
-            meta["trade_date"] = None
+    def _fix_unified_emotion(self, snapshot: Dict[str, Any]) -> None:
+        """
+        V12 定稿规则：
+        unified_emotion → market_sentiment / emotion
 
-        snapshot["meta"] = meta
+        规则：
+        - unified_emotion 是上游聚合结果（完整保留）
+        - 下游标准字段只在为空时填充
+        - 不覆盖 DS / Transformer 已有结果
+        """
 
-    # ------------------------------------------------------------------
-    def _fix_index_core(self, snapshot):
-        d = snapshot["index_core"]
-        if not isinstance(d, dict):
-            LOG.error("index_core 格式异常，重置为空 dict")
-            snapshot["index_core"] = {}
+        ue = snapshot.get("unified_emotion")
+        if not isinstance(ue, dict):
             return
 
-        # 每个指数必须含 {last, pct}
-        for name, info in d.items():
-            if "last" not in info:
-                LOG.warning("index_core.%s.last 缺失，设置为 None", name)
-                info["last"] = None
-            if "pct" not in info:
-                LOG.warning("index_core.%s.pct 缺失，设置为 None", name)
-                info["pct"] = None
+        # -------- market_sentiment（市场情绪 / 广度）--------
+        if not snapshot.get("market_sentiment"):
+            mi = ue.get("market_internal") or {}
+            snapshot["market_sentiment"] = {
+                "adv": mi.get("adv"),
+                "dec": mi.get("dec"),
+                "flat": mi.get("flat"),
+                "adv_ratio": mi.get("adv_ratio"),
+                "limit_up": mi.get("limit_up"),
+                "limit_down": mi.get("limit_down"),
+                "extreme_ratio": mi.get("extreme_ratio"),
+            }
 
-    # ------------------------------------------------------------------
-    def _fix_turnover(self, snapshot):
-        d = snapshot["turnover"]
-        if not isinstance(d, dict):
-            LOG.error("turnover 格式异常，重置为空 dict")
-            snapshot["turnover"] = {}
-            return
+            LOG.info(
+                "[Snapshot] market_sentiment filled from unified_emotion "
+                "(keys=%s)",
+                list(snapshot["market_sentiment"].keys()),
+            )
 
-        # 标准字段
-        d.setdefault("sh", None)
-        d.setdefault("sz", None)
-        d.setdefault("total", None)
+        # -------- emotion（行为 / 资金 / 流动性）--------
+        if not snapshot.get("emotion"):
+            bh = ue.get("behavior") or {}
+            snapshot["emotion"] = {
+                "total": bh.get("total"),
+                "sh": bh.get("sh"),
+                "sz": bh.get("sz"),
+                "bj": bh.get("bj"),
+                "concentration": bh.get("concentration"),
+            }
 
-    # ------------------------------------------------------------------
-    def _fix_sentiment(self, snapshot):
-        d = snapshot["sentiment"]
-        if not isinstance(d, dict):
-            LOG.error("sentiment 格式异常，重置为空 dict")
-            snapshot["sentiment"] = {}
-            return
-
-        d.setdefault("adv", None)
-        d.setdefault("dec", None)
-        d.setdefault("ratio", None)
-
-    # ------------------------------------------------------------------
-    def _fix_northbound(self, snapshot):
-        d = snapshot["north_nps"]
-    
-        if not isinstance(d, dict):
-            LOG.error("north_nps 格式异常，重置为空 dict")
-            snapshot["north_nps"] = {}
-            return
-    
-        # === V12 正式字段（以 DS 输出为准） ===
-        required_keys = [
-            "strength_today",
-            "turnover_today_e9",
-            "trend_3d",
-            "trend_5d",
-            "zone",
-            "anomaly",
-        ]
-    
-        for k in required_keys:
-            if k not in d:
-                LOG.warning(f"[SnapshotBuilder] north_nps 缺失字段: {k}")
-    
-        # 不修改 / 不覆盖 north_nps block（保持 DS 原样）
-        LOG.info("[SnapshotBuilder] north_nps 结构校验完成")
- 
-    # ------------------------------------------------------------------
-    def _fix_margin(self, snapshot):
-        d = snapshot["margin"]
-        if not isinstance(d, dict):
-            LOG.error("margin 格式异常，重置为空 dict")
-            snapshot["margin"] = {}
-            return
-
-        d.setdefault("rz_balance", None)
-        d.setdefault("rq_balance", None)
-        d.setdefault("total", None)
-        d.setdefault("trend_10d", None)
-        d.setdefault("acc_3d", None)
-        d.setdefault("risk_zone", None)
-
-    # ------------------------------------------------------------------
-    def _fix_spot(self, snapshot):
-        d = snapshot["spot"]
-        if not isinstance(d, dict):
-            LOG.error("spot 格式异常，重置为空 dict")
-            snapshot["spot"] = {}
-            return
-
-        d.setdefault("adv", None)
-        d.setdefault("dec", None)
-        d.setdefault("limit_up", None)
-        d.setdefault("limit_down", None)
-        d.setdefault("hs300_pct", None)
-
-    # ------------------------------------------------------------------
-    def _fix_global_lead(self, snapshot):
-        d = snapshot["global_lead"]
-        if not isinstance(d, dict):
-            LOG.error("global_lead 格式异常，重置为空 dict")
-            snapshot["global_lead"] = {}
-            return
-
-        # 每个 symbol 应至少有 close/pct
-        for group, items in d.items():
-            for sym, info in items.items():
-                if "close" not in info:
-                    LOG.warning("global_lead.%s.%s.close 缺失", group, sym)
-                    info["close"] = None
-                if "pct" not in info:
-                    LOG.warning("global_lead.%s.%s.pct 缺失", group, sym)
-                    info["pct"] = None
- 
+            LOG.info(
+                "[Snapshot] emotion filled from unified_emotion "
+                "(keys=%s)",
+                list(snapshot["emotion"].keys()),
+            )

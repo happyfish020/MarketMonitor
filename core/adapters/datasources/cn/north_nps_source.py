@@ -1,204 +1,198 @@
 # core/adapters/datasources/cn/north_nps_source.py
-# -*- coding: utf-8 -*-
+# UnifiedRisk V12.1 - Northbound Proxy DataSource (NPS)
+# 说明：
+# - 使用 ETF 作为北向资金代理
+# - 所有序列统一由 SymbolSeriesStore 管理
+# - 本 DS 只构建 raw block，不做评分/趋势判断
 
 from __future__ import annotations
 
-from typing import Dict, Any, List
+import os
+import json
+from typing import Dict, Any
 
-from core.adapters.datasources.base import BaseDataSource
-from core.adapters.datasources.cn.etf_series_source import ETFSeriesSource
-from core.utils.config_loader import load_symbols
+import pandas as pd
+
 from core.utils.logger import get_logger
+from core.datasources.datasource_base import DataSourceConfig,BaseDataSource
+from core.adapters.cache.symbol_cache import normalize_symbol
+from core.utils.config_loader import load_symbols
+from core.utils.ds_refresh import apply_refresh_cleanup
+from core.adapters.providers.symbol_series_store import SymbolSeriesStore
 
 LOG = get_logger("DS.NorthNPS")
 
 
-class NorthNpsDataSource(BaseDataSource):
+class NorthNPSSource(BaseDataSource):
     """
-    V12 北向代理数据源（松耦合版）
+    V12.1 北向资金代理数据源（ETF-based）
 
-    - 使用 ETFSeriesSource 提供的 core ETF 序列
-    - 计算北向代理强度 + 3/5 日趋势 + 强弱区
-    - 输出给 snapshot["north_nps"] 使用
+    数据来源：
+    - ETF 日线（如 510300 / 159915）
+    - 统一通过 SymbolSeriesStore 拉取
+
+    本 DS 职责：
+    - 构建 snapshot["north_nps"] 的 raw 数据块
+    - 不进行任何评分、趋势、强弱判断
     """
 
-    def __init__(self, trade_date:str ):
-        super().__init__("NorthNpsDataSource")
+    def __init__(self, config: DataSourceConfig, window: int = 120):
+        super().__init__(config)
+        self.config = config
+        self.market = config.market
+        self.ds_name = config.ds_name
 
+        self.cache_root = config.cache_root
+        config.ensure_dirs()
+
+        self.store = SymbolSeriesStore.get_instance()
+        self.window = int(window) if window and window > 0 else 120
+
+        # 读取 symbols.yaml.north_nps
         symbols_cfg = load_symbols()
-        # 优先使用 cn_north_etf_proxy，找不到再退回 cn_etf.core
-        proxy_cfg = symbols_cfg.get("cn_north_etf_proxy") or {}
-        core_cfg = symbols_cfg.get("cn_etf", {}).get("core", [])
-
-        self.etf_sh = proxy_cfg.get("north_sh") or (core_cfg[0] if core_cfg else None)
-        self.etf_sz = proxy_cfg.get("north_sz") or (core_cfg[1] if len(core_cfg) > 1 else None)
-
-        self.etf_source = ETFSeriesSource()
+        try:
+            self.nps_cfg: Dict[str, Dict[str, Any]] = symbols_cfg["north_nps"]
+        except Exception as e:
+            LOG.error("[DS.NorthNPS] symbols.yaml 缺失 north_nps 段: %s", e)
+            raise
 
         LOG.info(
-            "[NorthNPS] 初始化: etf_sh=%s etf_sz=%s",
-            self.etf_sh,
-            self.etf_sz,
+            "[DS.NorthNPS] Init ok. market=%s cache_root=%s window=%s",
+            self.market,
+            self.cache_root,
+            self.window,
         )
 
-    # -------------------------------------------------------
-    # 工具：从 ETF 序列构造“成交额 + 涨跌”时间序列
-    # -------------------------------------------------------
-    def _build_etf_flow_series(self, series: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    # ---------------------------------------------------------
+    def _cache_file(self, symbol: str, trade_date: str) -> str:
+        safe = normalize_symbol(symbol)
+        return os.path.join(self.cache_root, f"{safe}_{trade_date}.json")
+
+    # ---------------------------------------------------------
+    def build_block(self, trade_date: str, refresh_mode: str = "none") -> Dict[str, Any]:
+        LOG.info("[DS.NorthNPS] build_block trade_date=%s mode=%s", trade_date, refresh_mode)
+        return self.get_nps_block(trade_date, refresh_mode)
+
+    # ---------------------------------------------------------
+    def get_nps_block(self, trade_date: str, refresh_mode: str) -> Dict[str, Any]:
         """
-        输入: [{date, close, volume}, ...] (按日期升序)
-        输出: [{date, turnover_e9, pct_change}, ...]
+        返回 snapshot["north_nps"]：
+
+        {
+            "hs300": {
+                "symbol": "510300.SS",
+                "close": 4.61,
+                "prev_close": 4.58,
+                "pct": 0.65,
+                "window": [...]
+            },
+            ...
+        }
         """
-        if not series or len(series) < 2:
-            return []
+        result: Dict[str, Any] = {}
 
-        flows: List[Dict[str, Any]] = []
-        prev_close = series[0]["close"]
+        for name, entry in self.nps_cfg.items():
+            symbol = entry.get("symbol")
+            method = entry.get("method", "etf")
+            provider = entry.get("provider", "yf")
 
-        for row in series[1:]:
-            close = float(row["close"])
-            vol = float(row["volume"])
-            date = row["date"]
+            if not symbol:
+                LOG.error("[DS.NorthNPS] Invalid entry: %s", entry)
+                result[name] = self._neutral_block(name)
+                continue
 
-            # 成交额估算：close * volume（元）→ 亿
-            # 这里 volume 默认为股数（YF 行为），简化为: turnover_e9 = close * volume / 1e8
-            turnover_e9 = close * vol / 1e8 if vol > 0 else 0.0
+            cache_path = self._cache_file(symbol, trade_date)
 
-            pct = 0.0
-            if prev_close > 0:
-                pct = (close - prev_close) / prev_close * 100.0
-
-            flows.append(
-                {
-                    "date": date,
-                    "turnover_e9": turnover_e9,
-                    "pct_change": pct,
-                }
+            mode = apply_refresh_cleanup(
+                refresh_mode=refresh_mode,
+                cache_path=cache_path,
+                history_path=None,
+                spot_path=None,
             )
 
-            prev_close = close
+            # Step1: cache 命中
+            if mode == "none" and os.path.exists(cache_path):
+                try:
+                    LOG.info("[DS.NorthNPS] HitCache %s (%s)", name, cache_path)
+                    result[name] = self._load_json(cache_path)
+                    continue
+                except Exception as exc:
+                    LOG.error("[DS.NorthNPS] CacheReadError %s: %s", symbol, exc)
 
-        return flows
+            # Step2: 通过 SymbolSeriesStore 拉 ETF 序列
+            try:
+                df = self.store.get_series(
+                    symbol=symbol,
+                    window=self.window,
+                    refresh_mode=mode,
+                    method=method,
+                    provider=provider,
+                )
+            except SystemExit:
+                raise
+            except Exception as exc:
+                LOG.error("[DS.NorthNPS] StoreFetchError %s: %s", symbol, exc)
+                result[name] = self._neutral_block(symbol)
+                continue
 
-    # -------------------------------------------------------
-    # 工具：计算 north_proxy 强度序列
-    # -------------------------------------------------------
-    def _combine_strength(self, flows_sh: List[Dict[str, Any]], flows_sz: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """
-        把沪/深两个 ETF 的“成交额 × 涨跌”加权合成一条 north_proxy 强度序列
-        """
-        if not flows_sh and not flows_sz:
-            return []
+            block = self._df_to_block(symbol, df)
 
-        # 用 date 对齐
-        map_sh = {r["date"]: r for r in flows_sh}
-        map_sz = {r["date"]: r for r in flows_sz}
+            # Step3: 写入 daily cache
+            try:
+                self._save_json(cache_path, block)
+            except Exception as exc:
+                LOG.error("[DS.NorthNPS] SaveCacheError %s: %s", symbol, exc)
 
-        all_dates = sorted(set(map_sh.keys()) | set(map_sz.keys()))
-        result: List[Dict[str, Any]] = []
-
-        for d in all_dates:
-            sh = map_sh.get(d)
-            sz = map_sz.get(d)
-
-            strength = 0.0
-            turnover_e9 = 0.0
-
-            if sh:
-                strength += sh["turnover_e9"] * sh["pct_change"]
-                turnover_e9 += sh["turnover_e9"]
-            if sz:
-                strength += sz["turnover_e9"] * sz["pct_change"]
-                turnover_e9 += sz["turnover_e9"]
-
-            result.append(
-                {
-                    "date": d,
-                    "strength": strength,      # 成交额 × 涨跌
-                    "turnover_e9": turnover_e9 # 当日总成交额（估算）
-                }
-            )
+            result[name] = block
 
         return result
 
-    # -------------------------------------------------------
-    # 工具：计算 3 日 / 5 日趋势
-    # -------------------------------------------------------
+    # ---------------------------------------------------------
     @staticmethod
-    def _calc_trend(series: List[Dict[str, Any]], key: str, window: int) -> float:
-        if not series:
-            return 0.0
-        n = len(series)
-        last = series[-1][key]
-        idx_prev = max(0, n - 1 - window)
-        prev = series[idx_prev][key]
-        return last - prev
+    def _df_to_block(symbol: str, df: pd.DataFrame) -> Dict[str, Any]:
+        if df is None or df.empty:
+            return {
+                "symbol": symbol,
+                "close": None,
+                "prev_close": None,
+                "pct": None,
+                "window": [],
+            }
 
-    # -------------------------------------------------------
-    # 对外主入口：构建 snapshot["north_nps"]
-    # -------------------------------------------------------
-    def build_block(self, refresh: bool = False) -> Dict[str, Any]:
-        LOG.info(
-            "[NorthNPS] 构建北向代理数据块 refresh=%s sh=%s sz=%s",
-            refresh,
-            self.etf_sh,
-            self.etf_sz,
-        )
+        df_sorted = df.sort_values("date").reset_index(drop=True)
+        last = df_sorted.iloc[-1]
+        prev = df_sorted.iloc[-2] if len(df_sorted) >= 2 else None
 
-        if not (self.etf_sh and self.etf_sz):
-            LOG.error("[NorthNPS] 没有配置 north ETF 代理符号")
-            return {}
-
-        # 1) 取 ETF 日线序列
-        series_sh = self.etf_source.get_series(self.etf_sh, refresh)
-        series_sz = self.etf_source.get_series(self.etf_sz, refresh)
-
-        # 2) 转为“成交额 + 涨跌”序列
-        flows_sh = self._build_etf_flow_series(series_sh)
-        flows_sz = self._build_etf_flow_series(series_sz)
-
-        # 3) 合成 north_proxy 强度序列
-        strength_series = self._combine_strength(flows_sh, flows_sz)
-        if not strength_series:
-            LOG.error("[NorthNPS] 无法构建强度序列（可能 ETF 数据为空）")
-            return {}
-
-        # 最新
-        latest = strength_series[-1]
-        strength_today = latest["strength"]
-        turnover_today = latest["turnover_e9"]
-
-        trend_3d = self._calc_trend(strength_series, "strength", 3)
-        trend_5d = self._calc_trend(strength_series, "strength", 5)
-
-        # 简单分区：强 / 中 / 弱（可以后替换为分位数）
-        if strength_today >= 0:
-            zone = "强势区" if abs(strength_today) >= 50 else "偏多"
-        else:
-            zone = "弱势区" if abs(strength_today) >= 50 else "偏空"
-
-        LOG.info(
-            "[NorthNPS] strength=%.2f turnover=%.2f trend3=%.2f trend5=%.2f zone=%s",
-            strength_today,
-            turnover_today,
-            trend_3d,
-            trend_5d,
-            zone,
-        )
+        close = last.get("close")
+        pct = last.get("pct")
+        prev_close = prev.get("close") if prev is not None else None
 
         return {
-            "etf_symbols": {
-                "north_sh": self.etf_sh,
-                "north_sz": self.etf_sz,
-            },
-            "etf_series": {
-                self.etf_sh: series_sh,
-                self.etf_sz: series_sz,
-            },
-            "strength_series": strength_series,
-            "strength_today": strength_today,
-            "turnover_today_e9": turnover_today,
-            "trend_3d": trend_3d,
-            "trend_5d": trend_5d,
-            "zone": zone,
+            "symbol": symbol,
+            "close": None if pd.isna(close) else float(close),
+            "prev_close": None if (prev_close is None or pd.isna(prev_close)) else float(prev_close),
+            "pct": None if (pct is None or pd.isna(pct)) else float(pct),
+            "window": df_sorted.to_dict("records"),
         }
+
+    # ---------------------------------------------------------
+    @staticmethod
+    def _neutral_block(symbol: str) -> Dict[str, Any]:
+        LOG.warning("[DS.NorthNPS] Neutral block for %s", symbol)
+        return {
+            "symbol": symbol,
+            "close": None,
+            "prev_close": None,
+            "pct": None,
+            "window": [],
+        }
+
+    @staticmethod
+    def _load_json(path: str) -> Any:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+
+    @staticmethod
+    def _save_json(path: str, obj: Any) -> None:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(obj, f, ensure_ascii=False, indent=2)

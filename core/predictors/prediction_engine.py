@@ -1,3 +1,5 @@
+# core/engines/prediction_engine.py
+# -*- coding: utf-8 -*-
 """
 UnifiedRisk V12 - PredictionEngine
 -----------------------------------
@@ -9,13 +11,11 @@ UnifiedRisk V12 - PredictionEngine
 4. 不读 snapshot、DS、外部文件（松耦合）
 5. 日志完全遵守 V12 规范
 """
-
 from dataclasses import dataclass
 from typing import Dict, Any
 
 from core.utils.config_loader import load_weights
 from core.utils.logger import get_logger
-
 
 logger = get_logger("PredictionEngine")
 
@@ -48,16 +48,15 @@ class PredictionEngine:
         {
             "north_nps": FactorResult,
             "unified_emotion": FactorResult,
-            "turnover": FactorResult,
+           # "turnover": FactorResult,
             "margin": FactorResult,
             "index_tech": FactorResult,
+            ...
         }
     """
-
     def __init__(self):
         cfg = load_weights()
         self.weights: Dict[str, float] = cfg.get("prediction_weights", {})
-
         logger.info("[PredictionEngine] Loaded weights: %s", self.weights)
 
     # ------------------------------------------------------------------
@@ -68,16 +67,14 @@ class PredictionEngine:
         主入口
         :param factors: dict[str → FactorResult]
         """
-
-        logger.info("[PredictionEngine] Start prediction using factors: %s",
-                    list(factors.keys()))
+        logger.info("[PredictionEngine] Start prediction using factors: %s", list(factors.keys()))
 
         # --------------------------------------------------------------
-        # 1. 读取因子得分（必须是松耦合：只读 factor.score）
+        # 1. 读取因子得分（松耦合：只读 factor.score）
         # --------------------------------------------------------------
         def _safe_score(name: str) -> float:
             if name not in factors:
-                logger.warning("[PredictionEngine] Factor '%s' missing, use 50(neutral)", name)
+                logger.warning("[PredictionEngine] Factor '%s' missing, use 50 (neutral)", name)
                 return 50.0
             try:
                 return float(factors[name].score)
@@ -86,13 +83,15 @@ class PredictionEngine:
                 return 50.0  # neutral fallback
 
         scores = {
-            "north_nps": _safe_score("north_nps"),
             "unified_emotion": _safe_score("unified_emotion"),
-            "turnover": _safe_score("turnover"),
+            "north_nps": _safe_score("north_nps"),
+            #"turnover": _safe_score("turnover"),
             "margin": _safe_score("margin"),
+            "sector_rotation": _safe_score("sector_rotation"),
             "index_tech": _safe_score("index_tech"),
+            "index_global": _safe_score("index_global"),
+            "global_lead": _safe_score("global_lead"),
         }
-
         logger.info("[PredictionEngine] Collected factor scores: %s", scores)
 
         # --------------------------------------------------------------
@@ -103,15 +102,12 @@ class PredictionEngine:
 
         for name, score in scores.items():
             w = float(self.weights.get(name, 0.0))
-
             if w <= 0:
                 # 忽略权重为 0 的因子
                 logger.debug("[PredictionEngine] weight[%s]=0, skip", name)
                 continue
-
             weighted_sum += score * w
             weight_total += w
-
             logger.debug("[PredictionEngine] + %s: score=%.2f weight=%.3f → part=%.2f",
                          name, score, w, score * w)
 
@@ -130,7 +126,7 @@ class PredictionEngine:
         # 4. 输出预测结构体
         # --------------------------------------------------------------
         return UnifiedPrediction(
-            weighted_score=final_score,
+            weighted_score=round(final_score, 2),
             scores=scores,
             weights=self.weights,
         )

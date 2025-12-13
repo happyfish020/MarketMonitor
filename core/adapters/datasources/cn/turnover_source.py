@@ -1,146 +1,135 @@
 # core/adapters/datasources/cn/turnover_source.py
 # -*- coding: utf-8 -*-
-"""
-UnifiedRisk V12 - TurnoverDataSource
-接口必须与 Margin / NPS 完全一致：
-    get_turnover_block(refresh=False)
 
-内部逻辑：
-    - 自动获取 trade_date（使用 trade_calendar 工具）
-    - 自动从 SpotStore 获取当天全行情
-    - 自动统计 SH / SZ / total （亿元）
-    - 自动维护历史 series
-    - 不做趋势/评分（交给 TurnoverFactor）
-"""
-
-from __future__ import annotations
 import os
-import time
-from typing import Dict, Any, List
+import json
+from typing import Dict, Any
 
 import pandas as pd
 
-from core.adapters.datasources.base import BaseDataSource
-from core.adapters.cache.file_cache import load_json, save_json
-from core.utils.datasource_config import DataSourceConfig
 from core.utils.logger import get_logger
+from core.datasources.datasource_base import (
+    DataSourceConfig,
+    BaseDataSource,
+)
 from core.utils.spot_store import get_spot_daily
-
-from datetime import datetime
+from core.utils.ds_refresh import apply_refresh_cleanup
 
 LOG = get_logger("DS.Turnover")
 
 
 class TurnoverDataSource(BaseDataSource):
+    """
+    V12 成交额数据源：
+    - 使用 SpotStore 提供的全行情（zh_spot）
+    - 按 symbol 后缀 .SH / .SZ / .BJ 统计成交额（亿元）
+    - 只生成当日 snapshot，不做多日 history 计算（history 仅用于持久化）
+      输出：
+        {
+          "trade_date": str,
+          "sh": float,
+          "sz": float,
+          "bj": float,
+          "total": float,
+        }
+    """
 
-    def __init__(self, trade_date: str):
-        super().__init__("TurnoverDataSource")
+    def __init__(self, config: DataSourceConfig):
+        super().__init__(name="DS.Turnover")
 
-        self.config = DataSourceConfig(market="cn", ds_name="turnover")
-        self.config.ensure_dirs()
+        self.config = config
+        self.cache_root = config.cache_root
+        self.history_root = config.history_root
 
-        self.cache_path = os.path.join(self.config.cache_root, "turnover_today.json")
-        self.hist_path = os.path.join(self.config.history_root, "turnover_series.json")
+        os.makedirs(self.cache_root, exist_ok=True)
+        os.makedirs(self.history_root, exist_ok=True)
 
-        LOG.info(f"[DS.Turnover] init OK: cache={self.cache_path}, history={self.hist_path}")
-        self.trade_date = trade_date
-        LOG.info("Init: Trade_date%s", self.trade_date)
+        LOG.info(
+            "[DS.Turnover] Init: market=%s ds=%s cache_root=%s history_root=%s",
+            config.market,
+            config.ds_name,
+            self.cache_root,
+            self.history_root,
+        )
 
-    # ----------------------------------------------------------------------
-    # Cache
-    # ----------------------------------------------------------------------
-    def _load_cache(self):
-        data = load_json(self.cache_path)
-        if not data:
-            return None
-        if time.time() - data.get("ts", 0) > 600:   # 10 分钟过期
-            return None
-        LOG.info("[DS.Turnover] Hit cache")
-        return data.get("data")
+    # ------------------------------------------------------------
+    def build_block(self, trade_date: str, refresh_mode: str = "none") -> Dict[str, Any]:
+        cache_file = os.path.join(self.cache_root, f"turnover_{trade_date}.json")
 
-    def _save_cache(self, block):
-        save_json(self.cache_path, {"ts": time.time(), "data": block})
-        LOG.info("[DS.Turnover] Save cache")
+        # 按 refresh_mode 清理 cache（如果需要）
+        _ = apply_refresh_cleanup(
+            refresh_mode=refresh_mode,
+            cache_path=cache_file,
+            history_path=None,
+            spot_path=None,
+        )
 
-    # ----------------------------------------------------------------------
-    # History
-    # ----------------------------------------------------------------------
-    def _load_history(self):
-        hist = load_json(self.hist_path)
-        return hist if isinstance(hist, list) else []
+        # 命中 cache
+        if refresh_mode == "none" and os.path.exists(cache_file):
+            try:
+                with open(cache_file, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception as e:
+                LOG.error("[DS.Turnover] load cache error: %s", e)
 
-    def _save_history(self, hist):
-        hist = sorted(hist, key=lambda x: x["date"])[-400:]
-        save_json(self.hist_path, hist)
-        LOG.info(f"[DS.Turnover] Save history rows={len(hist)}")
+        # 1. 读取全行情（SpotStore 内部负责缓存）
+        try:
+            df: pd.DataFrame = get_spot_daily(trade_date, refresh_mode=refresh_mode)
+        except Exception as e:
+            LOG.error("[DS.Turnover] get_spot_daily error: %s", e)
+            return self._neutral_block(trade_date)
 
-    # ----------------------------------------------------------------------
-    # 主函数：必须不需要 trade_date 参数！
-    # ----------------------------------------------------------------------
-    def get_turnover_block(self, refresh_mode: str) -> Dict[str, Any]:
-        """
-        #完全对齐 margin/nps 的接口：
-            block = self.turnover_source.get_turnover_block(refresh_mode)
-        """
+        if df is None or df.empty:
+            LOG.error("[DS.Turnover] Spot DF is empty - return neutral block")
+            return self._neutral_block(trade_date)
 
-        # Step 1 — 取 cache
-        if refresh_mode !="snatpshot" and refresh_mode !="full":
-            cached = self._load_cache()
-            if isinstance(cached, dict):
-                return cached
+        # SpotStore 约定：
+        # - symbol 列：000001.SZ / 600000.SH / 830799.BJ
+        # - 成交额 列：单位为 元
+        def sum_market(suffix: str) -> float:
+            mask = df["symbol"].astype(str).str.endswith(f".{suffix}")
+            sub = df[mask]
+            if sub.empty:
+                return 0.0
+            # 元 -> 亿
+            return round(sub["成交额"].sum() / 1e8, 2)
 
-        # Step 2 — 自动获取今天交易日
-         
-        
-        LOG.info(f"[DS.Turnover] trade_date = {self.trade_date}")
+        sh_val = sum_market("SH")
+        sz_val = sum_market("SZ")
+        bj_val = sum_market("BJ")
+        total_val = round(sh_val + sz_val + bj_val, 2)
 
-        # Step 3 — 获取全行情数据
-        df: pd.DataFrame = get_spot_daily(self.trade_date, refresh_mode)
-
-        # 兼容字段
-        if "成交额" in df.columns:
-            amt_col = "成交额"
-        elif "amount" in df.columns:
-            amt_col = "amount"
-        else:
-            LOG.error("[DS.Turnover] 没有 成交额/amount 字段")
-            return {"sh": 0, "sz": 0, "bj":0 ,"total": 0, "series": []}
-
-        code_col = "代码" if "代码" in df.columns else "symbol"
-
-        # Step 4 — 统计 SH / SZ
-        sh_mask = df[code_col].astype(str).str.startswith("sh")
-        sz_mask = df[code_col].astype(str).str.startswith("sz")
-        bj_mask = df[code_col].astype(str).str.startswith("bj")
-
-
-        sh = df.loc[sh_mask, amt_col].sum() / 1e8
-        sz = df.loc[sz_mask, amt_col].sum() / 1e8
-        bj = df.loc[bj_mask, amt_col].sum() / 1e8
-        total = sh + sz + bj
-
-        LOG.info(f"[DS.Turnover] SH={sh:.2f}  SZ={sz:.2f} BJ={bj:.2f} Total={total:.2f} 亿")
-
-        # Step 5 — 写历史 series
-        hist = self._load_history()
-        existed = {x["date"] for x in hist}
-
-        today_row = {"date": self.trade_date, "total": total}
-        if self.trade_date not in existed:
-            hist.append(today_row)
-
-        self._save_history(hist)
-
-        # Step 6 — 构建 block
-        block = {
-            "sh": round(sh, 2),
-            "sz": round(sz, 2),
-            "bj": round(bj, 2),
-            "total": round(total, 2),
-            "series": hist,
+        block: Dict[str, Any] = {
+            "trade_date": trade_date,
+            "sh": sh_val,
+            "sz": sz_val,
+            "bj": bj_val,
+            "total": total_val,
         }
 
-        # Step 7 — 写入 cache
-        self._save_cache(block)
+        LOG.info(
+            "[DS.Turnover] SH=%s SZ=%s BJ=%s TOTAL=%s",
+            sh_val,
+            sz_val,
+            bj_val,
+            total_val,
+        )
+
+        # 写 cache
+        try:
+            with open(cache_file, "w", encoding="utf-8") as f:
+                json.dump(block, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            LOG.error("[DS.Turnover] save cache error: %s", e)
 
         return block
+
+    # ------------------------------------------------------------
+    def _neutral_block(self, trade_date: str) -> Dict[str, Any]:
+        return {
+            "trade_date": trade_date,
+            "sh": 0.0,
+            "sz": 0.0,
+            "bj": 0.0,
+            "total": 0.0,
+        }

@@ -1,122 +1,240 @@
-# ===================================================================
-# UnifiedRisk V12 - Multi-market Symbols Configuration
-# ===================================================================
+# =================================================================
+# UnifiedRisk V12 - Symbol Configuration
+# Provider Routing + Submethod (method) 版本
+# =================================================================
 
-# ======================================================
-# 1) A股指数（核心指数）
-# ======================================================
+# ---------------------------------------------------------------
+# 中国市场核心指数（A 股）
+# ---------------------------------------------------------------
+ 
+
+north_nps:
+  hs300:
+    symbol: "510300.SS"
+    provider: "yf"
+    method: "etf"
+    alias: "沪深300ETF"
+
+  sz50:
+    symbol: "510050.SS"
+    provider: "yf"
+    method: "etf"
+    alias: "上证50ETF"
+
+  cyb:
+    symbol: "159915.SZ"
+    provider: "yf"
+    method: "etf"
+    alias: "创业板ETF"
+      
 cn_index:
-  sh: "000001.SS"         # 上证指数
-  sz: "399001.SZ"         # 深成指
-  hs300: "000300.SS"      # 沪深300
-  zz500: "000905.SS"      # 中证500
-  kc50: "000688.SS"       # 科创50
 
-# ======================================================
-# 2) A股 ETF（成交额、proxy、NPS）
-# ======================================================
-cn_etf:
-  core:
-    - "510300.SS"         # 沪深300 ETF
-    - "159901.SZ"         # 深成指 ETF
-  liquidity:
-    - "510500.SS"         # 中证500 ETF
-    - "159915.SZ"         # 创业板 ETF
-  thematic:
-    - "159819.SZ"         # AI ETF
-    - "515000.SS"         # 券商 ETF
-    - "512010.SS"         # 能源
-    - "515030.SS"         # 半导体
+  etf_sh:
+    symbol: "510300.SS"
+    provider: "yf"
+    alias: "沪深300ETF"
+  etf_sz:
+    symbol: "159901.SZ"
+    provider: "yf"
+    alias: "深成指ETF"
+ 
+index_core:
+  sh:
+    symbol: "000001.SS"
+    provider: "yf"
+    method: "index"      # 用于拉取 A 股大盘指数
+    alias: "上证指数"
 
-# ======================================================
-# 3) A股板块（Sector Rotation）
-# ======================================================
-cn_sector:
-  use_eastmoney: true
-  sw_level2:
-    - "801010"   # 农林牧渔
-    - "801020"   # 采掘
-    - "801030"   # 化工
-    - "801040"   # 钢铁
-    - "801080"   # 电子
-    - "801180"   # 计算机
-    - "801750"   # 电力设备
-  fields: [flow, adv_dec, main_force]
+  sz:
+    symbol: "399001.SZ"
+    provider: "yf"
+    method: "index"
+    alias: "深证成指"
 
-# ======================================================
-# 4) 美股指数（global lead 核心）
-# ======================================================
-us_index:
-  spx: "^GSPC"            # 标普500
-  ndx: "^IXIC"            # 纳指
-  dji: "^DJI"             # 道指
-  rut: "^RUT"             # 小盘股
+  hs300:
+    symbol: "000300.SS"
+    provider: "yf"
+    method: "index"      # YF index 方法
+    alias: "沪深300"
 
-# ======================================================
-# 5) 美股板块（Sector ETF）
-# ======================================================
-us_sector:
-  etf:
-    xlk: "XLK"            # 科技
-    xlf: "XLF"            # 金融
-    xly: "XLY"            # 可选消费
-    xlp: "XLP"            # 必选消费
-    xli: "XLI"            # 工业
-    xle: "XLE"            # 能源
-    xlv: "XLV"            # 医疗
-    xlb: "XLB"            # 原材料
-    xlu: "XLU"            # 公共事业
-    xlre: "XLRE"          # 房地产
+  zz500:
+    symbol: "sh.000905"  # baostock 格式
+    provider: "bs"        # 使用 BaostockProvider
+    method: "index"       # bs.index
+    alias: "中证500"
 
-# ======================================================
-# 6) 衍生品（期指、波动率）
-# ======================================================
-derivatives:
-  cn_futures:
-    if: "IF9999.CFE"      # 沪深300期指
-    ic: "IC9999.CFE"      # 中证500期指
-    im: "IM9999.CFE"      # 中证1000期指
-  vol:
-    vix: "^VIX"           # 恐慌指数
-    vxn: "^VXN"           # 纳指波动率
+  kc50:
+    symbol: "sz.000688"
+    provider: "bs"
+    method: "index"
+    alias: "科创50"
 
-# ======================================================
-# 7) 宏观资产（global lead & macro）
-# ======================================================
-macro:
-  currency:
-    dxy: "DX-Y.NYB"
-  commodity:
-    gold: "GC=F"
-    copper: "HG=F"
-    oil: "CL=F"
-  yield:
-    tnx: "^TNX"           # 10Y
-    fvx: "^FVX"           # 5Y
-    irx: "^IRX"           # 3M
 
-# ======================================================
-# 8) 加密资产（CIBR 因子）
-# ======================================================
-crypto:
-  major:
-    - "BTC-USD"
-    - "ETH-USD"
-  alt:
-    - "SOL-USD"
-    - "DOGE-USD"
+# ---------------------------------------------------------------
+# 海外指数（Global Index）
+# ---------------------------------------------------------------
 
-# ======================================================
-# 9) 用户自定义主题组（因子可继承）
-# ======================================================
-custom_groups:
-  gold:
-    - "GC=F"
-    - "GLD"
-  copper:
-    - "HG=F"
-    - "JJC"
-  ai:
-    - "159819.SZ"
-    - "300750.SZ"
-    - "688041.SH"
+global_index:
+  spx:
+    symbol: "^GSPC"
+    provider: "yf"
+    method: "equity"     # 标普500 → equity 方法
+    alias: "标普500"
+
+  ndx:
+    symbol: "^NDX"
+    provider: "yf"
+    method: "equity"
+    alias: "纳斯达克100"
+
+  dji:
+    symbol: "^DJI"
+    provider: "yf"
+    method: "equity"
+    alias: "道琼斯指数"
+
+  vix:
+    symbol: "^VIX"
+    provider: "yf"
+    method: "equity"     # vix 通常使用 equity API
+    alias: "VIX"
+
+  dxy:
+    symbol: "DX-Y.NYB"
+    provider: "yf"
+    method: "equity"
+    alias: "美元指数"
+
+  hsi:
+    symbol: "^HSI"
+    provider: "yf"
+    method: "equity"
+    alias: "恒生指数"
+
+  n225:
+    symbol: "^N225"
+    provider: "yf"
+    method: "equity"
+    alias: "日经225"
+
+
+# ---------------------------------------------------------------
+# 早盘 Lead（Global Lead）
+# ---------------------------------------------------------------
+
+global_lead:
+  a50:
+    symbol: "2822.HK"
+    provider: "yf"
+    method: "equity"
+    alias: "A50 港股 ETF"
+
+  es:
+    symbol: "ES=F"
+    provider: "yf"
+    method: "future"     # 期货 → 使用 future 方法
+    alias: "标普期货"
+
+  nq:
+    symbol: "NQ=F"
+    provider: "yf"
+    method: "future"
+    alias: "纳指期货"
+
+  hsi:
+    symbol: "^HSI"
+    provider: "yf"
+    method: "equity"
+    alias: "恒生指数"
+
+  btc:
+    symbol: "BTC-USD"
+    provider: "yf"
+    method: "crypto"     # 数字货币 → crypto 方法
+    alias: "比特币"
+
+
+# ---------------------------------------------------------------
+# ETF 系列（用于 Turnover / Emotion / NPS）
+# ---------------------------------------------------------------
+
+etf_proxy:
+  csi300:
+    symbol: "510300.SS"
+    provider: "yf"
+    method: "equity"
+    alias: "沪深300 ETF"
+
+  csi500:
+    symbol: "510500.SS"
+    provider: "yf"
+    method: "equity"
+    alias: "中证500 ETF"
+
+  csi1000:
+    symbol: "159845.SZ"
+    provider: "yf"
+    method: "equity"
+    alias: "中证100"
+
+# ---------------------------------------------------------------
+# 全球指数（日线） - index_global
+# ---------------------------------------------------------------
+index_global:
+  spx:
+    symbol: "^GSPC"
+    provider: "yf"
+    method: "equity"
+    alias: "标普500"
+
+  ndx:
+    symbol: "^NDX"
+    provider: "yf"
+    method: "equity"
+    alias: "纳斯达克100"
+
+  dxy:
+    symbol: "DX-Y.NYB"
+    provider: "yf"
+    method: "equity"
+    alias: "美元指数"
+
+  hsi:
+    symbol: "^HSI"
+    provider: "yf"
+    method: "equity"
+    alias: "恒生指数"
+
+  n225:
+    symbol: "^N225"
+    provider: "yf"
+    method: "equity"
+    alias: "日经225"
+
+  vix:
+    symbol: "^VIX"
+    provider: "yf"
+    method: "equity"
+    alias: "VIX 恐慌指数"
+
+global_macro:
+  bond10:
+    symbol: "^TNX"
+    provider: "yf"
+    method: "index"
+    alias: "美债10Y"
+  bond05:
+    symbol: "^FVX"
+    provider: "yf"
+    method: "index"
+    alias: "美债5Y"
+  dxy:
+    symbol: "DX-Y.NYB"
+    provider: "yf"
+    method: "index"
+    alias: "美元指数"
+  nas:
+    symbol: "^IXIC"
+    provider: "yf"
+    method: "index"
+    alias: "纳指综合"

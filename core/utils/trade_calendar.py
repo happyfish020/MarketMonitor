@@ -22,7 +22,7 @@ def get_last_trade_date(ref: datetime) -> date:
     while not is_trading_day(d):
         d = d - timedelta(days=1)
     
-    if ref.hour < 5:   # EST Sun afternooon / BJ trading_date  before 5 #nk debug
+    if ref.hour < 9:   # EST Sun afternooon / BJ trading_date  before 5 #nk debug
         return _prev_trading_day(d)
 
     return d

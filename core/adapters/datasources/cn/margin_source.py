@@ -1,303 +1,67 @@
-# -*- coding: utf-8 -*-
-# UnifiedRisk V12 - MarginDataSource (Enhanced, Clean, Fault-tolerant)
+# core/adapters/datasources/cn/margin_source.py
+# UnifiedRisk V12 - Margin DataSource
 
 from __future__ import annotations
 
 import os
-import time
-import requests
+import json
 from typing import Dict, Any, List
 
-from core.adapters.datasources.base import BaseDataSource
-from core.adapters.cache.file_cache import load_json, save_json
-from core.utils.datasource_config import DataSourceConfig
-from core.utils.units import yuan_to_e9
+from core.datasources.datasource_base import (
+    DataSourceConfig,
+    BaseDataSource,
+)
+from core.adapters.providers.provider_router import ProviderRouter
+from core.utils.ds_refresh import apply_refresh_cleanup
 from core.utils.logger import get_logger
 
 LOG = get_logger("DS.Margin")
 
-URL = "https://datacenter-web.eastmoney.com/api/data/v1/get"
-CACHE_TTL = 600  # 10 minutes
-
- 
 
 class MarginDataSource(BaseDataSource):
+    """
+    两融 DataSource
+    - provider: em
+    - 负责 cache / history / trend
+    """
 
-    def __init__(self, trade_date: str):
-        super().__init__("MarginDataSource")
+    def __init__(self, config: DataSourceConfig, window: int = 40):
+        super().__init__(config)
 
-        self.config = DataSourceConfig(market="cn", ds_name="margin")
-        self.config.ensure_dirs()
+        self.window = window
+        self.router = ProviderRouter()
+        self.provider = self.router.get_provider("em")
 
-        self.cache_path = os.path.join(self.config.cache_root, "margin_today.json")
-        self.hist_path = os.path.join(self.config.history_root, "margin_series.json")
+        self.cache_file = os.path.join(config.cache_root, "margin_today.json")
+        self.history_file = os.path.join(config.history_root, "margin_series.json")
 
-        LOG.info(f"[DS.Margin] Init: cache={self.config.cache_root}, history={self.config.history_root}")
-        self.trade_date = trade_date
-        LOG.info("Init: Trade_date%s", self.trade_date)
-  
+    # --------------------------------------------------
+    def build_block(self, trade_date: str, refresh_mode: str = "none") -> Dict[str, Any]:
+        apply_refresh_cleanup(
+            refresh_mode,
+            cache_path=self.cache_file,
+            history_path=self.history_file,
+            spot_path=None,
+        )
 
-    def _is_valid_record(self, row: Dict[str, Any]) -> bool:
-        """
-        判断一条两融记录是否有效：
-        - 日期不为空
-        - TOTAL_RZRQYE > 0（最核心）
-        """
-        if not row.get("date"):
-            return False
-        if float(row.get("total", 0.0)) <= 0:
-            return False
-        return True
+        if refresh_mode == "none" and os.path.exists(self.cache_file):
+            return self._load(self.cache_file)
 
-
-    # ---------------------------------------------------------
-    # Cache
-    # ---------------------------------------------------------
-    def _load_cache(self):
-        data = load_json(self.cache_path)
-        if not data:
-            return None
-        if time.time() - data.get("ts", 0) > CACHE_TTL:
-            return None
-        LOG.info("[DS.Margin] Using cache")
-        return data.get("data")
-
-    def _save_cache(self, block):
-        save_json(self.cache_path, {"ts": time.time(), "data": block})
-        LOG.info("[DS.Margin] Cache saved")
-
-    # ---------------------------------------------------------
-    # History
-    # ---------------------------------------------------------
-    def _load_history(self):
-        hist = load_json(self.hist_path)
-        return hist if isinstance(hist, list) else []
-
-    def _save_history(self, series):
-        # 保留 400 日即可
-        series = sorted(series, key=lambda x: x["date"])[-400:]
-        save_json(self.hist_path, series)
-        LOG.info(f"[DS.Margin] History saved rows={len(series)}")
-
-    # ---------------------------------------------------------
-    # Fetch from Eastmoney (with robust parsing)
-    # ---------------------------------------------------------
-    def _fetch_recent_rows(self, max_days=40) -> List[Dict[str, Any]]:
-        params = {
-            "reportName": "RPTA_RZRQ_LSDB",
-            "columns": "ALL",
-            "sortColumns": "DIM_DATE",
-            "sortTypes": "-1",
-            "pageNumber": 1,
-            "pageSize": max_days,
-            "source": "WEB",
-            "_": int(time.time() * 1000),
-        }
-
-        headers = {
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/120.0 Safari/537.36"
-            ),
-            "Referer": "https://data.eastmoney.com/rzrq/",
-        }
-
-        def safe_num(v):
-            if v is None:
-                return 0.0
-            try:
-                return float(v)
-            except:
-                return 0.0
-
-        for attempt in range(3):
-            try:
-                LOG.info(f"[DS.Margin] FETCH attempt={attempt+1}")
-
-                resp = requests.get(URL, params=params, headers=headers, timeout=10)
-                resp.raise_for_status()
-
-                rows = (resp.json().get("result") or {}).get("data") or []
-                if not rows:
-                    LOG.warning("[DS.Margin] Empty response")
-                    continue
-
-                parsed = []
-
-                for it in rows:
-                    try:
-                        date_raw = it.get("DIM_DATE")
-                        if not date_raw:
-                            continue
-                        date = str(date_raw)[:10]
-
-                        parsed.append({
-                            "date": date,
-                            "rz_balance": yuan_to_e9(safe_num(it.get("TOTAL_RZYE"))),
-                            "rq_balance": yuan_to_e9(safe_num(it.get("TOTAL_RQYE"))),
-                            "total": yuan_to_e9(safe_num(it.get("TOTAL_RZRQYE"))),
-                            "rz_buy": yuan_to_e9(safe_num(it.get("TOTAL_RZMRE"))),
-                            "total_chg": yuan_to_e9(safe_num(it.get("TOTAL_RZRQYECZ"))),
-                            "rz_ratio": safe_num(it.get("TOTAL_RZYEZB")),
-                        })
-
-                    except Exception as e:
-                        LOG.error(f"[DS.Margin] Parse row error: {e} row={it}")
-                        continue
-
-                parsed.sort(key=lambda x: x["date"])
-                LOG.info(f"[DS.Margin] FETCH OK rows={len(parsed)}")
-
-                return parsed
-
-            except Exception as e:
-                LOG.error(f"[DS.Margin] FETCH error: {e}")
-                time.sleep(1)
-
-        LOG.error("[DS.Margin] FETCH FAILED after retries")
-        return []
-
-    # ---------------------------------------------------------
-    # Trend & Acceleration
-    # ---------------------------------------------------------
-    @staticmethod
-    def _diff(series, window, key):
-        if len(series) < window + 1:
-            return 0.0
-
-        try:
-            v_now = float(series[-1].get(key, 0.0))
-            v_prev = float(series[-1-window].get(key, 0.0))
-            return v_now - v_prev
-        except Exception:
-            return 0.0
-
-    # ---------------------------------------------------------
-    # Risk zone
-    # ---------------------------------------------------------
-    @staticmethod
-    def _risk_zone(total):
-        if total >= 25000:
-            return "高"
-        if total >= 15000:
-            return "中"
-        return "低"
-
-    # ---------------------------------------------------------
-    # Normalize / clean history into unified schema
-    # ---------------------------------------------------------
-    def _normalize_history(self, hist: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        cleaned = []
-        for row in hist:
-            rz = float(row.get("rz_balance", row.get("rz", 0.0)))
-            rq = float(row.get("rq_balance", row.get("rq", 0.0)))
-            total = float(row.get("total", row.get("rzrq", rz + rq)))
-
-            cleaned.append({
-                "date": row.get("date"),
-                "rz_balance": rz,
-                "rq_balance": rq,
-                "total": total,
-                "rz_buy": float(row.get("rz_buy", 0.0)),
-                "total_chg": float(row.get("total_chg", 0.0)),
-                "rz_ratio": float(row.get("rz_ratio", 0.0)),
-            })
-
-        cleaned.sort(key=lambda x: x["date"])
-        return cleaned
-
-    # ---------------------------------------------------------
-    # Main entry
-    # ---------------------------------------------------------
-    def get_margin_block(self, refresh=False) -> Dict[str, Any]:
-
-        # 1) cache
-        if not refresh:
-            cached = self._load_cache()
-            if isinstance(cached, dict):
-                return cached
-
-        # 2) fetch remote
-        rows = self._fetch_recent_rows()
+        # 1) provider 拉数据
+        rows = self.provider.fetch_margin_series(days=self.window)
         if not rows:
-            LOG.warning("[DS.Margin] Fallback to history")
-            hist = self._load_history()
-            hist = self._normalize_history(hist)
+            LOG.error("[DS.Margin] empty provider data")
+            return self._neutral(trade_date)
 
-            if not hist:
-                return {
-                    "rz_balance": 0,
-                    "rq_balance": 0,
-                    "total": 0,
-                    "trend_10d": 0,
-                    "acc_3d": 0,
-                    "risk_zone": "中",
-                    "series": [],
-                }
+        # 2) merge history
+        series = self._merge_history(rows)
 
-            last = hist[-1]
-            block = {
-                "rz_balance": last["rz_balance"],
-                "rq_balance": last["rq_balance"],
-                "total": last["total"],
-                "trend_10d": 0,
-                "acc_3d": 0,
-                "risk_zone": self._risk_zone(last["total"]),
-                "series": hist,
-            }
-
-            self._save_cache(block)
-            return block
-
-        # 3) merge + normalize history
-        hist = self._load_history()
-        existed_dates = {x.get("date") for x in hist}
-
-        for r in rows:
-            if r["date"] not in existed_dates:
-                hist.append(r)
-
-        hist = self._normalize_history(hist)
-        self._save_history(hist)
-
-        today = hist[-1]
-        # ---- 如果最新的数据 total=0 或 None，则需要回退一天 ----
-        if not self._is_valid_record(today):
-            LOG.warning(f"[DS.Margin] Today record invalid: date={today.get('date')} total={today.get('total')}")
-            
-            fallback = None
-            for row in reversed(hist[:-1]):  # 跳过最后一条，从倒数第二条往回找
-                if self._is_valid_record(row):
-                    fallback = row
-                    break
-
-            if fallback is None:
-                LOG.error("[DS.Margin] No valid fallback record found, return neutral block")
-                block = {
-                    "rz_balance": 0,
-                    "rq_balance": 0,
-                    "total": 0,
-                    "trend_10d": 0,
-                    "acc_3d": 0,
-                    "risk_zone": "中",
-                    "series": hist,
-                }
-                self._save_cache(block)
-                return block
-
-            LOG.warning(f"[DS.Margin] Fallback to previous valid record: {fallback['date']}")
-            today = fallback
-
-
-
-
-
-        # 4) analytics
-        trend_10d = self._diff(hist, 10, "total")
-        acc_3d = self._diff(hist, 3, "total")
+        # 3) 计算趋势
+        trend_10d, acc_3d = self._calc_trend(series)
+        today = series[-1]
 
         block = {
+            "trade_date": today["date"],
             "rz_balance": today["rz_balance"],
             "rq_balance": today["rq_balance"],
             "total": today["total"],
@@ -306,15 +70,56 @@ class MarginDataSource(BaseDataSource):
             "rz_ratio": today["rz_ratio"],
             "trend_10d": trend_10d,
             "acc_3d": acc_3d,
-            "risk_zone": self._risk_zone(today["total"]),
-            "series": hist,
+            "series": series,
         }
 
-        self._save_cache(block)
-
-        LOG.info(
-            f"[DS.Margin] block: total={today['total']:.2f}, "
-            f"trend10={trend_10d:.2f}, acc3={acc_3d:.2f}, zone={block['risk_zone']}"
-        )
-
+        self._save(self.history_file, series)
+        self._save(self.cache_file, block)
         return block
+
+    # --------------------------------------------------
+    def _merge_history(self, recent: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        old = self._load(self.history_file) if os.path.exists(self.history_file) else []
+        buf = {r["date"]: r for r in old}
+        for r in recent:
+            buf[r["date"]] = r
+        out = sorted(buf.values(), key=lambda x: x["date"])
+        return out[-self.window :]
+
+    @staticmethod
+    def _calc_trend(series: List[Dict[str, Any]]) -> tuple[float, float]:
+        if len(series) < 2:
+            return 0.0, 0.0
+        totals = [s["total"] for s in series]
+        t10 = totals[-1] - totals[-11] if len(totals) >= 11 else 0.0
+        a3 = totals[-1] - totals[-4] if len(totals) >= 4 else 0.0
+        return round(t10, 2), round(a3, 2)
+
+    @staticmethod
+    def _load(path: str):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return []
+
+    @staticmethod
+    def _save(path: str, obj: Any):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(obj, f, ensure_ascii=False, indent=2)
+
+    @staticmethod
+    def _neutral(trade_date: str) -> Dict[str, Any]:
+        return {
+            "trade_date": trade_date,
+            "rz_balance": 0.0,
+            "rq_balance": 0.0,
+            "total": 0.0,
+            "rz_buy": 0.0,
+            "total_chg": 0.0,
+            "rz_ratio": 0.0,
+            "trend_10d": 0.0,
+            "acc_3d": 0.0,
+            "series": [],
+        }

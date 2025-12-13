@@ -12,7 +12,41 @@ _paths = load_paths()
 _BASE_CACHE_DIR = _paths.get("cache_dir", "data/cache/")
 
 
-def _normalize_symbol(symbol: str) -> str:
+def normalize_ashare_symbol(symbol: str) -> str:
+    """
+    将 spot parquet 的 A 股 symbol (sh600000, sz000001, bj830799)
+    转换为标准化 symbol (600000.SH, 000001.SZ, 830799.BJ)。
+
+    不会替代 _normalize_symbol，仅用于 A 股数据源。
+    """
+
+    if not symbol:
+        return ""
+
+    s = symbol.strip().lower()
+
+    # 深交所
+    if s.startswith("sz") and len(s) >= 8:
+        return s[2:8].upper() + ".SZ"
+
+    # 上交所
+    if s.startswith("sh") and len(s) >= 8:
+        return s[2:8].upper() + ".SH"
+
+    # 北交所
+    if s.startswith("bj") and len(s) >= 8:
+        return s[2:8].upper() + ".BJ"
+
+    # 如果已经是标准格式 000001.SZ
+    if "." in s and len(s) >= 9:
+        core, exch = s.split(".", 1)
+        return core.upper() + "." + exch.upper()
+
+    # fallback（异常符号）
+    return s.upper()
+
+
+def normalize_symbol(symbol: str) -> str:
     """
     统一把 symbol 变成文件名安全的形式：
     510300.SS   -> 510300_SS
@@ -49,7 +83,7 @@ def get_symbol_daily_path(market: str, trade_date: date, symbol: str, kind: str 
       => data/cache/day_global/20251202/macro_VIX.json
     """
     root = _day_root(market, trade_date)
-    sym_norm = _normalize_symbol(symbol)
+    sym_norm = normalize_symbol(symbol)
     fname = f"{kind}_{sym_norm}.json"
     return os.path.join(root, fname)
 
@@ -73,7 +107,7 @@ def get_symbol_intraday_path(market: str, symbol: str, kind: str = "generic") ->
     """
     market = market.lower()
     root = os.path.join(_BASE_CACHE_DIR, f"intraday_{market}")
-    sym_norm = _normalize_symbol(symbol)
+    sym_norm = normalize_symbol(symbol)
     fname = f"{kind}_{sym_norm}.json"
     return os.path.join(root, fname)
 

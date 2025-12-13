@@ -1,162 +1,154 @@
-# core/engines/cn/ashare_daily_engine.py
-
+# -*- coding: utf-8 -*-
 """
-UnifiedRisk V12 - A股日度引擎（核心调度模块）
+UnifiedRisk V12 - CN AShare Daily Engine
 
-流程：
-  1) 调用 AshareFetcher 获取 raw snapshot
-  2) SnapshotBuilderV12 统一结构化
-  3) 依次计算各因子（带详细日志）
-  4) unify_scores 汇总评分
-  5) PredictionEngine 生成预测
-  6) Reporter 输出报告
+职责（V12 终态）：
+- 作为系统 orchestration 层
+- 组织 Fetcher → Snapshot → Factors → Prediction → Reporter
+- 不解析业务结果
+- 不输出人类可读文本
+- 不向 main.py 返回业务数据
 """
 
-from datetime import datetime
+from __future__ import annotations
+
 from typing import Dict, Any
+from datetime import datetime, timezone, timedelta
 
 from core.utils.logger import get_logger
-from core.utils.time_utils import BJ_TZ
-
-# Fetcher
 from core.adapters.fetchers.cn.ashare_fetcher import AshareDataFetcher
+from core.predictors.prediction_engine import PredictionEngine
 
-# Snapshot Builder
-from core.snapshot.ashare_snapshot import SnapshotBuilder
-
-# 因子
+# factors
 from core.factors.cn.unified_emotion_factor import UnifiedEmotionFactor
-from core.factors.cn.turnover_factor import TurnoverFactor
-#from core.factors.cn.market_sentiment_factor import MarketSentimentFactor
 from core.factors.cn.margin_factor import MarginFactor
 from core.factors.cn.north_nps_factor import NorthNPSFactor
+from core.factors.cn.sector_rotation_factor import SectorRotationFactor
 from core.factors.cn.index_tech_factor import IndexTechFactor
-from core.factors.cn.emotion_factor import EmotionFactor
 
-# Score Engine
-from core.factors.score_unified import unify_scores
-from core.utils.time_utils import now_bj
-# Prediction
-from core.predictors.prediction_engine import PredictionEngine
-#from core.adapters.fetchers.cn.refresh_controller_cn import RefreshControllerCN 
-# Reporter
-from core.reporters.cn.ashare_daily_reporter import build_daily_report_text
-from core.utils.trade_calendar import get_last_trade_date
+# global / macro factors（真实目录是 glo）
+from core.factors.glo.global_macro_factor import GlobalMacroFactor
+from core.factors.glo.global_lead_factor import GlobalLeadFactor
+from core.factors.glo.index_global_factor import IndexGlobalFactor
 
-LOG = get_logger("Engine.AShareDaily")
+# reporter（唯一输出层）
+from core.reporters.cn.ashare_daily_reporter import (
+    build_daily_report_text,
+    save_daily_report,
+)
 
- 
+LOG = get_logger("Engine.AshareDaily")
+
+
 # ----------------------------------------------------------------------
-def run_cn_ashare_daily(refresh_mode: str = "readonly") -> Dict[str, Any]:
+# 工具：trade_date 统一
+# ----------------------------------------------------------------------
+def _normalize_trade_date(trade_date: str | None) -> str:
+    if trade_date:
+        return str(trade_date)
+
+    bj_tz = timezone(timedelta(hours=8))
+    return datetime.now(bj_tz).strftime("%Y-%m-%d")
+
+
+# ----------------------------------------------------------------------
+# 主入口（被 main.py 调用）
+# ----------------------------------------------------------------------
+def run_cn_ashare_daily(
+    *,
+    trade_date: str | None = None,
+    refresh_mode: str = "readonly",
+) -> None:
     """
-    refresh_mode ∈ {"readonly", "snapshot", "full"}
+    CN AShare 日度运行入口（V12）
+
+    - 不返回任何业务数据
+    - 不抛出非致命异常
     """
-    LOG.info("======== A股日度风险流程启动 | refresh_mode=%s ========", refresh_mode)
 
-    bj_now = now_bj()
-    
-    trade_date = get_last_trade_date(bj_now)
-    trade_date_str = trade_date.strftime("%Y-%m-%d")
+    trade_date_str = _normalize_trade_date(trade_date)
 
- 
-
-
-
-    # ------------------------------------------------------------------
-    # Step 1: 时间
-    ## ------------------------------------------------------------------
-    #bj_now = datetime.now(BJ_TZ)
-    LOG.info("当前北京时间: %s", bj_now.strftime("%Y-%m-%d %H:%M:%S"))
-
-    # ------------------------------------------------------------------
-    # Step 2: Snapshot（Fetcher → SnapshotBuilder）
-    # ------------------------------------------------------------------
-    LOG.info("[Step 2] 构建 Snapshot (Fetcher → Builder) ...")
-
-    fetcher = AshareDataFetcher(trade_date_str, refresh_mode=refresh_mode )
-    raw_snapshot = fetcher.build_daily_snapshot()
-
-    builder = SnapshotBuilder()
-    snapshot = builder.build(raw_snapshot)
-
-    #trade_date = snapshot["meta"].get("trade_date")
-    LOG.info("Snapshot 构建完成 trade_date=%s", trade_date_str)
-
-    # ------------------------------------------------------------------
-    # Step 3: 计算因子（按顺序）
-    # ------------------------------------------------------------------
-    LOG.info("[Step 3] 开始计算因子 ...")
-
-    factors = {}
-
-    def compute_factor(name: str, factor_obj):
-        LOG.info("[Factor.%s] ComputeStart", name)
-        try:
-            result = factor_obj.compute(snapshot)
-            LOG.info("[Factor.%s] ComputeEnd: score=%.2f", name, result.score)
-            return result
-        except Exception as e:
-            LOG.error("[Factor.%s] ComputeError: %s", name, e)
-            raise
-
-
-    factors["north_nps"] = compute_factor("north_nps", NorthNPSFactor( ))
-    factors["turnover"] = compute_factor("turnover", TurnoverFactor())
-    factors["margin"] = compute_factor("margin", MarginFactor( ))
-    factors["unified_emotion"] = compute_factor("unified_emotion", UnifiedEmotionFactor())
-  
-    #factors["sentiment"] = compute_factor("sentiment", MarketSentimentFactor())
-    
-    #factors["emotion"] = compute_factor("emotion", EmotionFactor())
- 
-
-    #factors["index_tech"] = compute_factor("index_tech", IndexTechFactor())
-
-    # ------------------------------------------------------------------
-    # Step 4: 综合评分 unify_scores
-    # ------------------------------------------------------------------
-    LOG.info("[Step 4] 综合评分 unify_scores 开始 ...")
-
-    unified = unify_scores(
-        
-        turnover=factors["turnover"].score,
-        #sentiment=factors["sentiment"].score,
-        margin=factors["margin"].score,
-        north_nps=factors["north_nps"].score,
-        #emotion=factors["emotion"].score,
-        unified_emotion=factors["unified_emotion"].score,
-        #index_tech=factors["index_tech"].score,
+    LOG.info(
+        "Run CN AShare Daily | trade_date=%s refresh=%s",
+        trade_date_str,
+        refresh_mode,
     )
 
-    LOG.info("[Step 4] 综合评分结束 | TotalScore=%.2f", unified.total)
+    # ------------------------------------------------------------------
+    # 1️⃣ Snapshot（Fetcher）
+    # ------------------------------------------------------------------
+    fetcher = AshareDataFetcher(trade_date_str, refresh_mode=refresh_mode)
+    snapshot: Dict[str, Any] = fetcher.prepare_daily_market_snapshot()
+
+    meta = snapshot.get("meta", {})
+    meta.setdefault("trade_date", trade_date_str)
 
     # ------------------------------------------------------------------
-    # Step 5: 预测
+    # 2️⃣ Factors（严格 V12：compute(input_block)）
     # ------------------------------------------------------------------
-    LOG.info("[Step 5] 预测模型启动 PredictionEngine ...")
+    factor_list = [
+        UnifiedEmotionFactor(),
+        GlobalMacroFactor(),
+        IndexGlobalFactor(),
+        GlobalLeadFactor(),
+        NorthNPSFactor(),
+        #TurnoverFactor(),
+        MarginFactor(),
+        SectorRotationFactor(),
+        IndexTechFactor(),
+    ]
 
+    factors: Dict[str, Any] = {}
+
+    for factor in factor_list:
+        try:
+            fr = factor.compute(snapshot)
+            factors[fr.name] = fr
+
+            # Engine 日志：不假设 level 类型
+            level = (
+                fr.level.value
+                if hasattr(fr.level, "value")
+                else str(fr.level)
+            )
+
+            LOG.info(
+                "[Factor.%s] score=%.2f level=%s",
+                fr.name,
+                fr.score,
+                level,
+            )
+
+        except Exception:
+            LOG.exception(
+                "Factor compute failed: %s",
+                getattr(factor, "name", factor.__class__.__name__),
+            )
+
+    # ------------------------------------------------------------------
+    # 3️⃣ Prediction（不解构）
+    # ------------------------------------------------------------------
     predictor = PredictionEngine()
-    prediction = predictor.predict(snapshot, factors)
+    prediction = predictor.predict(factors)
 
-    LOG.info("[Step 5] 预测完成 | summary=%s", prediction.get("summary"))
-
-    # ------------------------------------------------------------------
-    # Step 6: Reporter（构建文本，不保存）
-    # ------------------------------------------------------------------
-    LOG.info("[Step 6] 构建报告文本 build_daily_report_text ...")
-
-    report_text = build_daily_report_text(snapshot, factors,  prediction)
-
-    LOG.info("[Step 6] 报告文本构建完成 | 字符数=%s", len(report_text))
-
-    LOG.info("======== A股日度风险流程完成 ========")
+    LOG.info(
+        "Prediction generated: %s",
+        type(prediction).__name__,
+    )
 
     # ------------------------------------------------------------------
-    return {
-        "meta": snapshot["meta"],
-        "snapshot": snapshot,
-        "factors": factors,
-        "unified": unified,
-        "prediction": prediction,
-        "report_text": report_text,
-    }
+    # 4️⃣ Reporter（唯一输出层）
+    # ------------------------------------------------------------------
+    report_text = build_daily_report_text(
+        meta=meta,
+        factors=factors,
+        prediction=prediction,
+    )
+
+    save_daily_report(
+        market="cn",
+        trade_date=trade_date_str,
+        text=report_text,
+    )
+
+    LOG.info("CN AShare Daily finished successfully.")

@@ -1,197 +1,226 @@
-# core/adapters/fetchers/cn/ashare_fetcher.py
-
-"""
-UnifiedRisk V12 - AshareFetcher
-负责：
-  - 按 refresh_controller 决定刷新策略
-  - 遍历 symbols.yaml 中的指数 / ETF / GlobalLead
-  - 调用 datasources 构建 snapshot_v12
-"""
-
-from datetime import datetime, date
+import os
+from datetime import datetime
 from typing import Dict, Any
 
 from core.utils.logger import get_logger
-from core.utils.config_loader import load_symbols
-from core.utils.time_utils import BJ_TZ
-import os 
-# DataSources
-from core.adapters.datasources.glo.index_series_source import IndexSeriesSource
-from core.adapters.datasources.cn.turnover_source import TurnoverDataSource
-
-from core.adapters.datasources.cn.margin_source import MarginDataSource
-
-from core.adapters.datasources.cn.zh_spot_source import ZhSpotSource
-from core.adapters.datasources.glo.global_lead_source import GlobalLeadSource
-
-
-# RefreshController
+from core.datasources.datasource_base import DataSourceConfig,BaseDataSource
+from core.snapshot.ashare_snapshot  import  AshareSnapshotBuilder
 from core.adapters.fetchers.cn.refresh_controller_cn import RefreshControllerCN
-from core.adapters.datasources.cn.north_nps_source import NorthNpsDataSource
-from core.adapters.datasources.cn.unified_emotion_source import UnifiedEmotionDataSource
-from core.utils.config_loader import load_paths
+
+# ==== DataSources (V12 标准) ====
+from core.adapters.datasources.cn.index_core_source import IndexCoreSource
+from core.adapters.datasources.cn.turnover_source import TurnoverDataSource
+from core.adapters.datasources.cn.market_sentiment_source import MarketSentimentDataSource
+from core.adapters.datasources.cn.margin_source import MarginDataSource
+from core.adapters.datasources.cn.north_nps_source import NorthNPSSource
+#from core.adapters.datasources.cn.unified_emotion_source import UnifiedEmotionDataSource
+from core.adapters.datasources.glo.global_lead_source import GlobalLeadSource
+from core.adapters.datasources.glo.index_global_source import IndexGlobalSource
+from core.adapters.datasources.glo.global_macro_source import GlobalMacroSource
+#from core.adapters.datasources.cn.index_tech_source import IndexTechDataSource
+
+
+from core.adapters.transformers.cn.index_tech_tr import IndexTechTransformer
+from core.adapters.transformers.cn.unified_emotion_tr import UnifiedEmotionTransformer
+from core.adapters.transformers.cn.sector_rotation_tr import SectorRotationTransformer
 
 LOG = get_logger("AshareFetcher")
-#_paths = load_paths()
-
-#DAY_CACHE_ROOT = os.path.join(_paths.get("cache_dir", "data/cache/"), "day_cn")
-#INTRADAY_CACHE_ROOT = os.path.join(_paths.get("cache_dir", "data/cache/"), "intraday_cn")
-#ASHARE_ROOT = _paths.get("ashare_root", "data/ashare")
-
- 
 
 
 class AshareDataFetcher:
+    """
+    V12 A 股日度数据抓取总入口
+    负责：
+      - 初始化全部数据源（DataSourceConfig 注入）
+      - 使用 RefreshController 判断刷新策略
+      - 逐个数据源获取原始数据块
+      - 统一交给 SnapshotBuilderV12 生成最终 snapshot
+    """
 
-    def __init__(self, trade_date: str, refresh_mode: str = "readonly"):
-        """
-        refresh_mode: readonly / snapshot / full
-        """
-        LOG.info("初始化 AshareDataFetcher, refresh_mode=%s", refresh_mode)
+    def __init__(self, trade_date: str, refresh_mode: str = "auto"):
+            """
+            V12 标准构造：
+              - trade_date 由 engine 显式传入
+              - refresh_mode 用于 RefreshController 判断刷新策略
+            """
+            LOG.info(
+                "[AshareFetcher] 初始化 AshareDataFetcher, trade_date=%s refresh_mode=%s",
+                trade_date, refresh_mode
+            )
+    
+            # 刷新策略控制器
+            self.rc = RefreshControllerCN(refresh_mode)
+    
+            # trade_date 允许显式传入，优先级高于 RefreshController.today
+            self.trade_date = trade_date
+    
+            LOG.info("[AshareFetcher] 使用 trade_date=%s", self.trade_date)
+    
+            # === 初始化数据源（全部使用 DataSourceConfig） ===
+            self.index_core = IndexCoreSource(
+                DataSourceConfig(market="cn", ds_name="index_core")
+            )
+    #
+            self.turnover = TurnoverDataSource(
+                DataSourceConfig(market="cn", ds_name="turnover")
+            )
+    
+            self.market_sentiment = MarketSentimentDataSource(
+                DataSourceConfig(market="cn", ds_name="market_sentiment")
+            )
+    
 
-        # 载入 symbol YAML
-        self.symbols = load_symbols()
+            self.margin_source = MarginDataSource(
+                DataSourceConfig(market="cn", ds_name="margin")
+            )
+    #
+            self.north_nps_source = NorthNPSSource(
+                DataSourceConfig(market="cn", ds_name="north_nps")
+            )
+    
+ 
 
-        # 刷新策略
-        self.rc = RefreshControllerCN(refresh_mode)
+            #self.emotion_ds = UnifiedEmotionDataSource(
+            #    DataSourceConfig(market="cn", ds_name="emotion")
+            #)
+    
+            self.global_lead = GlobalLeadSource(
+                DataSourceConfig(market="glo", ds_name="global_lead")
+            )
+    
+            self.index_global = IndexGlobalSource(
+                DataSourceConfig(market="glo", ds_name="index_global")
+            ) 
 
-        self.trade_date = trade_date
-        # Datasources
-        self.index_source = IndexSeriesSource(market="glo")
-        self.turnover_source = TurnoverDataSource(self.trade_date)
-         
-        self.margin_source = MarginDataSource(self.trade_date)
+            self.macro_source = GlobalMacroSource(
+                DataSourceConfig(market="glo", ds_name="global_macro")
+            ) 
+
+            self.index_tech_tr = IndexTechTransformer(window=60)
+            self.unified_emotion_tr = UnifiedEmotionTransformer()
+            self.sector_rotation_tr = SectorRotationTransformer()
+            #self.index_tech_ds = IndexTechDataSource(
+            #        DataSourceConfig(market="cn", ds_name="index_tech")
+            #    )
+    # ==============================================================
+    # 主流程：构建 Snapshot（提供给 engine → factor → reporter）
+    # ==============================================================
+    def prepare_daily_market_snapshot(self) -> Dict[str, Any]:
+        LOG.info("[AshareFetcher] 开始构建 Snapshot V12")
+
+        snapshot: Dict[str, Any] = {}
+
+        # ------------------------------------------------------------
+        # ① 核心指数（上证 / 深成 / HS300 / ZZ500 / KC50）
+        # ------------------------------------------------------------
+        LOG.info("[AshareFetcher] [1] 获取核心指数 index_core ...")
+ 
+
+        snapshot["index_core"] = self.index_core.build_block(
+            trade_date=self.trade_date,
+            refresh_mode=self.rc.refresh_mode
+        )
+    
+    
+
+        # ------------------------------------------------------------
+        # ② 成交额 Turnover（沪深北）
+        # ------------------------------------------------------------
+        #LOG.info("[AshareFetcher] [2] 获取成交额 Turnover ...")
+        #snapshot["turnover"] = self.turnover_source.get_turnover_block(
+        #    trade_date=self.trade_date,
+        #    refresh_mode=self.rc.refresh_mode
+        #)
+
+        # ------------------------------------------------------------
+        # ③ 北向 NPS
+        # ------------------------------------------------------------
+        LOG.info("[AshareFetcher] [3] 获取北向 NorthNPS ...")
+        snapshot["north_nps"] = self.north_nps_source.build_block(
+            trade_date=self.trade_date,
+            refresh_mode=self.rc.refresh_mode
+        )
+
+        # ------------------------------------------------------------
+        # ④ 两融 Margin
+        # ------------------------------------------------------------
+        LOG.info("[AshareFetcher] [4] 获取两融 Margin ...")
+        snapshot["margin"] = self.margin_source.build_block(
+            trade_date=self.trade_date,
+            refresh_mode    =self.rc.refresh_mode
+        )
+
+        # ------------------------------------------------------------
+        # ⑤ 情绪（市场内部 MarketSentiment + 行为因子 Behavior）
+        # ------------------------------------------------------------
+        #LOG.info("[AshareFetcher] [5] 获取情绪结构 UnifiedEmotion ...")
+        #sentiment_block, emotion_block = self.emotion_ds.get_blocks(
+        #    snapshot=snapshot,
+        #    trade_date=self.trade_date,
+        #    refresh_mode=self.rc.refresh_mode
+        #)
+        snapshot["turnover"] = self.turnover.build_block(
+            trade_date=self.trade_date,
+            refresh_mode    =self.rc.refresh_mode
+        )
         
-        self.north_nps_source = NorthNpsDataSource(self.trade_date)
-        self.emotion_ds = UnifiedEmotionDataSource(trade_date)         
-        #self.sentiment_source = MarketSentimentDataSource(self.trade_date)
-        #self.emotion_source = EmotionDataSource()        
-        #self.global_lead_source = GlobalLeadSource()
+        snapshot["market_sentiment"] = self.market_sentiment.build_block(
+            trade_date=self.trade_date,
+            refresh_mode    =self.rc.refresh_mode
+        )
+
+       
+
+        #snapshot["emotion"] = emotion_block
+
+
+
+
+        # ------------------------------------------------------------
+        # ⑥ 全球引导 GlobalLead
+        # ------------------------------------------------------------
+        LOG.info("[AshareFetcher] [6] 获取 Global Lead ...")
+        snapshot["global_lead"] = self.global_lead.build_block(
+            trade_date=self.trade_date,
+            refresh_mode=self.rc.refresh_mode
+        )
+
+        # ------------------------------------------------------------
+        # ⑦ 全球指数强弱（美股、日经、恒生等）
+        # ------------------------------------------------------------
+        LOG.info("[AshareFetcher] [7] 获取全球指数 index_global ...")
+        snapshot["index_global"] = self.index_global.build_block(
+            trade_date=self.trade_date,
+            refresh_mode=self.rc.refresh_mode
+        )
+
         
-        #self.force_refresh = force_refresh
-    # ==========================================================
-    # Snapshot V12 主入口
-    # ==========================================================
-    def build_daily_snapshot(self ) -> Dict[str, Any]:
-        LOG.info("开始构建 Snapshot V12" )
-
-        snapshot = {
-            "meta": {
-                #"date": now.strftime("%Y-%m-%d"),
-                "trade_date": self.trade_date,
-            },
-            "index_core": {},
-            "turnover": {},
-            "sentiment": {},
-            "emotion": {},
-            #"northbound": {},
-            "north_nps": {},
-            "margin": {},
-            "spot": {},
-            "global_lead": {},
-        }
-
-        # ---------------------------
-        # 1. 指数数据（从 YAML cn_index 读取）
-        # ---------------------------
-        LOG.info("[1] 开始获取 cn_index (指数) ...")
-        for name, symbol in self.symbols.get("cn_index", {}).items():
-            LOG.info("获取指数 %s (%s)", name, symbol)
-
-            refresh = self.rc.should_refresh(symbol)
-            df = self.index_source.get_series(symbol, refresh=refresh)
-
-            snapshot["index_core"][name] = self._parse_index(df, symbol)
-
-        # ---------------------------
-        # 2. Turnover（成交额）
-        # ---------------------------
-        LOG.info("[2] 获取成交额 Turnover ...")
-
-        snapshot["turnover"] = self.turnover_source.get_turnover_block(
+        snapshot["global_macro"] = self.macro_source.build_block(
+            trade_date=self.trade_date,
             refresh_mode=self.rc.refresh_mode
         )
  
-       
-    
-        # ---------------------------
-        # 4. 北向资金
-        # ---------------------------
-        LOG.info("[4] 获取 Northbound ...")
-
-        #snapshot["northbound"] = self.north_etf_source.get_northbound_snapshot(
-        #    refresh=self.rc.refresh_flag
-        #)
-        snapshot["north_nps"] = self.north_nps_source.build_block(refresh=self.rc.refresh_flag)
-
-
-        # ---------------------------
-        # 5. 两融
-        # ---------------------------
-        LOG.info("[5] 获取 Margin 融资融券 ...")
-
-        snapshot["margin"] = self.margin_source.get_margin_block(
-            refresh=self.rc.refresh_flag
-        )
-
-        # ---------------------------
-        # 6. Spot（A股情绪，涨跌结构、涨停板等）
-        # ---------------------------
-        LOG.info("[6] 获取 Spot (情绪结构) ...")
- 
+        # === IndexTech （技术面数据源）
         
-        #snapshot["sentiment"] = self.sentiment_source.get_sentiment_block( refresh_mode=self.rc.refresh_mode)
-        #snapshot["emotion"] = self.emotion_source.get_block(snapshot)
 
+        
+        snapshot["index_tech"] = self.index_tech_tr.transform(snapshot, refresh_mode=self.rc.refresh_mode)
+        
+        
+        snapshot["unified_emotion"] = self.unified_emotion_tr.transform(snapshot, refresh_mode=self.rc.refresh_mode)
 
-        sent_block, emo_block = self.emotion_ds.get_blocks(snapshot, refresh_mode=self.rc.refresh_mode)
-        # ---------------------------
-        # 7. Global Lead（美股、商品、VIX、美元）
-        # ---------------------------
-        LOG.info("[7] 获取 Global Lead ...")
+        snapshot["sector_rotation"] = self.sector_rotation_tr.transform(snapshot, refresh_mode=self.rc.refresh_mode)
 
-        snapshot["global_lead"] = self._build_global_lead_snapshot()
+        #LOG.info("[AshareFetcher] unified_emotion snapshot: %s", snapshot["unified_emotion"])
+        #snapshot["index_tech"] = self.index_tech_ds.build_index_tech(snapshot)
+        #LOG.info("[AshareFetcher] index_tech snapshot: %s", snapshot["index_tech"])
+#
+        # ------------------------------------------------------------
+        # ⑧ SnapshotBuilderV12 构建最终结构
+        # ------------------------------------------------------------
+        LOG.info("[AshareFetcher] Snapshot 数据源加载完成，开始组装 snapshot ...")
+        builder = AshareSnapshotBuilder()
+        final_snapshot = builder.build(snapshot)
 
-        LOG.info("Snapshot V12 构建完成")
-
-        return snapshot
-
-    # ==========================================================
-    # Global Lead Snapshot 构建
-    # ==========================================================
-    def _build_global_lead_snapshot(self):
-        LOG.info("开始构建 GlobalLead Snapshot ...")
-
-        result = {}
-        glead = self.symbols.get("global_lead", {})
-
-        for group, symbols in glead.items():
-            LOG.info("GlobalLead group=%s", group)
-            result[group] = {}
-
-            for sym in symbols:
-                LOG.info("获取 GlobalLead: %s", sym)
-                refresh = self.rc.should_refresh(sym)
-
-                quote = self.global_lead_source.get_last_quote(
-                    sym,
-                    refresh=refresh  # 你 global_lead_source 应接受 refresh 参数
-                )
-
-                result[group][sym] = quote
-
-        return result
-
-    # ==========================================================
-    # 解析指数（统一结构：last, pct）
-    # ==========================================================
-    def _parse_index(self, df, symbol):
-        if df is None or df.empty:
-            LOG.warning("指数数据为空: %s", symbol)
-            return {"last": None, "pct": None}
-
-        last = float(df.iloc[-1]["close"])
-        pct = df.iloc[-1].get("pct")
-
-        LOG.info("指数解析完成 %s: last=%.3f pct=%s", symbol, last, pct)
-        return {"last": last, "pct": pct}
+        LOG.info("[AshareFetcher] Snapshot 构建完成 trade_date=%s", self.trade_date)
+        return final_snapshot

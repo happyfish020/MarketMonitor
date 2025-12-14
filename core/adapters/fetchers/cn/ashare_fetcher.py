@@ -24,6 +24,9 @@ from core.adapters.transformers.cn.index_tech_tr import IndexTechTransformer
 from core.adapters.transformers.cn.unified_emotion_tr import UnifiedEmotionTransformer
 from core.adapters.transformers.cn.sector_rotation_tr import SectorRotationTransformer
 
+
+from core.adapters.transformers.structural_context import StructuralContext
+
 LOG = get_logger("AshareFetcher")
 
 
@@ -218,9 +221,31 @@ class AshareDataFetcher:
         # ------------------------------------------------------------
         # ⑧ SnapshotBuilderV12 构建最终结构
         # ------------------------------------------------------------
-        LOG.info("[AshareFetcher] Snapshot 数据源加载完成，开始组装 snapshot ...")
         builder = AshareSnapshotBuilder()
         final_snapshot = builder.build(snapshot)
+    ##
+    
+    # ============================================================
+    # ⑨ Structural Context（全局结构背景，append-only）
+    # ============================================================
 
+    
+        try:
+            LOG.info("[AshareFetcher] Snapshot 数据源加载完成，开始组装 snapshot ...")
+
+            ctx = StructuralContext()
+            final_snapshot["structural_context"] = ctx.assemble(
+                pillars={
+                    "breadth_damage": final_snapshot.get("breadth_damage"),
+                    "participation": final_snapshot.get("participation"),
+                    "index_sector_corr": final_snapshot.get("index_sector_corr"),
+                }
+            )
+        except Exception as e:
+            # Structural Context must NEVER break snapshot construction
+            LOG.error (f"[AshareFetcher] structural_context - Snapshot assemble:{e}")
+    
+
+###
         LOG.info("[AshareFetcher] Snapshot 构建完成 trade_date=%s", self.trade_date)
         return final_snapshot

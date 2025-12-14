@@ -1,0 +1,12 @@
+data:
+  price_csv: "data/prices.csv"
+
+backtest:
+  start_date: "2025-10-10"
+  days: 60
+
+metrics:
+  new_low_window: 50
+
+output:
+  dir: "outputs/run_20251010_35d"

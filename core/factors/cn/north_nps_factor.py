@@ -10,7 +10,7 @@ class NorthNPSFactor(FactorBase):
 
     def compute(self, input_block: Dict[str, Any]) -> FactorResult:
         data = self.pick(input_block, "north_nps_raw", {})
-
+        assert data, "north_nps_raw is missing"
         # ① 数据完全缺失 → DATA_NOT_CONNECTED
         if not data:
             return FactorResult(

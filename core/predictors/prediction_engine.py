@@ -186,6 +186,7 @@ class PredictionEngine:
         evidence["raw_weight_total"] = round(raw_weight_sum, 4)
 
         if raw_weight_sum <= 0:
+            logger.warning("[PredictionEngine] NO_EFFECTIVE_FACTORS")
             return {
                 "final_score": 50.0,
                 "risk_level": "NEUTRAL",
@@ -209,13 +210,16 @@ class PredictionEngine:
         final_score = weighted_sum / raw_weight_sum
         risk_level: RiskLevel = self._level_from_score(final_score)
 
-        # ✅ NEW: Action Hint
-        action_hint = self._build_action_hint(factors, risk_level)
+        logger.info(
+            "[PredictionEngine] used=%s raw_weight_total=%.4f final_score=%.2f",
+            evidence["used_in_aggregation"],
+            raw_weight_sum,
+            final_score,
+        )
 
         return {
             "final_score": round(final_score, 2),
             "risk_level": risk_level,
-            "action_hint": action_hint,
             "evidence": evidence,
         }
 

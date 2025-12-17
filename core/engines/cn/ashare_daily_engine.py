@@ -24,6 +24,7 @@ from core.factors.cn.north_nps_factor import NorthNPSFactor
 from core.factors.cn.turnover_factor import TurnoverFactor
 from core.factors.cn.sector_rotation_factor import SectorRotationFactor
 from core.factors.cn.index_tech_factor import IndexTechFactor
+from core.factors.cn.etf_index_sync_factor import ETFIndexSyncFactor
 from core.factors.cn.participation_factor import ParticipationFactor
 
 from core.factors.glo.global_macro_factor import GlobalMacroFactor
@@ -38,6 +39,7 @@ from core.predictors.prediction_engine import PredictionEngine
 
 from core.predictors.prediction_engine import PredictionEngine
 from core.reporters.cn.ashare_daily_reporter import build_daily_report_text, save_daily_report
+from core.regime.ashares_gate_decider import ASharesGateDecider
 
 
 LOG = get_logger("Engine.AshareDaily")
@@ -78,9 +80,10 @@ def run_cn_ashare_daily(trade_date: str | None = None, refresh_mode: str = "auto
         SectorRotationFactor(),
         IndexTechFactor(),
         BreadthFactor(),
+        ETFIndexSyncFactor(),
     ]
 
-    factors: Dict[str, Any] = {}
+    #factors: Dict[str, Any] = {}
 
      # 1️⃣ 计算所有 Factor（raw）
     factors: dict[str, FactorResult] = {}
@@ -88,17 +91,33 @@ def run_cn_ashare_daily(trade_date: str | None = None, refresh_mode: str = "auto
     for factor in factor_list:
         try:
             fr = factor.compute(snapshot)
-            factors[factor.name] = fr
-            print(factor.name)
-            assert factors[factor.name] , f"{factor.name} is missing" 
-            LOG.info("[Factor.%s] score=%.2f level=%s", factor.name, fr.score, fr.level)
+            print(fr.name)
+            factors[fr.name] = fr
+            
+            assert factors[fr.name] , f"{fr.name} is missing" 
+            LOG.info("[Factor.%s] score=%.2f level=%s", fr.name, fr.score, fr.level)
         except Exception as e:
-            LOG.error("[Factor.%s] compute failed: %s", factor.name, e, exc_info=True)
+            LOG.error("[Factor.%s] compute failed: %s", fr.name, e, exc_info=True)
     
     # 2️⃣ PolicySlotBinder（raw → 制度槽位）
     binder = ASharesPolicySlotBinder()
     factors_bound = binder.bind(factors)
     
+
+    decider = ASharesGateDecider()
+    gate_decision = decider.decide(snapshot, factors_bound)
+    
+    snapshot["gate"] = {
+        "level": gate_decision.level,
+        "reasons": gate_decision.reasons,
+        "evidence": gate_decision.evidence,
+    }
+    LOG.info(
+        "[ASharesEngine] Gate | level=%s | reasons=%s | evidence=%s",
+        gate_decision.level,
+        gate_decision.reasons,
+        gate_decision.evidence,
+    )
     # 3️⃣ Prediction（只吃制度槽位）
     prediction_engine = PredictionEngine()
     prediction = prediction_engine.predict(factors_bound)

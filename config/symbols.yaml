@@ -238,3 +238,14 @@ global_macro:
     provider: "yf"
     method: "index"
     alias: "纳指综合"
+
+core_theme:
+  ai_index:
+    symbol: "^NDX"
+    provider: yf
+    method: index
+
+  ai_etf:
+    symbol: "159819.SZ"
+    provider: yf
+    method: index

@@ -17,7 +17,7 @@ prediction_weights:
   global_macro:     0.10   # 宏观锚
   global_lead:      0.07   # ⬆ 对 A 股更敏感
   index_global:     0.05   # 保守
-  sector_rotation:  0.00   # ⬇ 明确为增强项  added to breadth 0.03
+  sector_rotation:  0.00   # ⬇ 明确为增强项  added to breadth 0.03 # DS not ready; explicitly disabled before Phase-3
 #    
 # 预留扩展
 extended_factors:

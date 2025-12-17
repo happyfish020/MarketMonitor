@@ -24,6 +24,8 @@ from core.adapters.datasources.cn.north_nps_source import NorthNPSDataSource
 from core.adapters.datasources.cn.turnover_source import TurnoverDataSource
 from core.adapters.datasources.cn.margin_source import MarginDataSource
 from core.adapters.datasources.cn.market_sentiment_source import MarketSentimentDataSource
+from core.adapters.datasources.cn.core_theme_source import CoreThemeDataSource
+from core.adapters.datasources.cn.etf_spot_sync_source  import ETFSpotSyncDataSource
 from core.adapters.datasources.glo.global_macro_source import GlobalMacroDataSource
 from core.adapters.datasources.glo.global_lead_source import GlobalLeadDataSource
 from core.adapters.datasources.glo.index_global_source import IndexGlobalDataSource
@@ -81,7 +83,14 @@ class AshareDataFetcher(FetcherBase):
         self.index_global_ds = IndexGlobalDataSource(
             DataSourceConfig(market="glo", ds_name="index_global")
         ) 
-         
+
+        self.core_theme_ds =  CoreThemeDataSource(
+            DataSourceConfig(market="cn", ds_name="core_theme")
+        )     
+
+        self.etf_spot_sync_ds =  ETFSpotSyncDataSource(
+            DataSourceConfig(market="cn", ds_name="core_theme")
+        )     
         self.global_macro_ds = GlobalMacroDataSource(
                 DataSourceConfig(market="glo", ds_name="global_macro")
             ) 
@@ -182,6 +191,18 @@ class AshareDataFetcher(FetcherBase):
         )
         assert snapshot.get("index_global_raw"), "index_global raw missing"   
 
+        snapshot["core_theme_raw"] = self.core_theme_ds.build_block(
+            trade_date=self.trade_date,
+            refresh_mode=self.refresh_mode,
+        )
+        assert snapshot.get("core_theme_raw"), "core_theme_raw missing"   
+
+
+        snapshot["etf_spot_sync_raw"] = self.etf_spot_sync_ds.build_block(
+            trade_date=self.trade_date,
+            refresh_mode=self.refresh_mode,
+        )
+        assert snapshot.get("etf_spot_sync_raw"), "etf_spot_sync_raw missing"   
 
 
         snapshot["unified_emotion_raw"] = self.unified_emotion_bb.build_block(snapshot, refresh_mode=self.refresh_mode)

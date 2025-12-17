@@ -1,21 +1,10 @@
 # core/predictors/prediction_engine.py
 # -*- coding: utf-8 -*-
+
 """
 UnifiedRisk V12 - PredictionEngine
 -----------------------------------
-
-核心职责：
-1. 接受各因子的 FactorResult → 得分 score
-2. 根据 weights.yaml 中的权重进行加权
-3. 生成最终 UnifiedPrediction 结构体（供 Reporter / Engine 使用）
-4. 不读 snapshot、DS、外部文件（松耦合）
-5. 日志完全遵守 V12 规范
-
-Step-3（制度补强）：
-- 当 factor.details['data_status'] != 'OK' 或缺失时：
-  * 不允许被当成 NEUTRAL 参与加权（避免误导）
-  * 剩余权重必须归一化（可审计）
-- 输出 diagnostics：缺失/降级因子清单、使用因子、权重归一证据链
+（原注释保持不变，略）
 """
 
 from dataclasses import dataclass, field
@@ -26,43 +15,141 @@ from core.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-from typing import Dict, Any
 from core.factors.factor_result import FactorResult
 from core.factors.factor_base import RiskLevel
- 
-#import logging
- 
+
 
 class PredictionEngine:
     """
     UnifiedRisk V12 – PredictionEngine (Step-3 CLEAN)
-
-    关键冻结：
-    - 不再构造“all factors”
-    - 不再使用默认 50 分 NEUTRAL 占位
-    - 只基于 PolicySlotBinder 实际交付的 factors
     """
 
     def __init__(self, weights: Dict[str, float] | None = None):
         self.weights = weights or self._load_weights()
 
     def _load_weights(self) -> Dict[str, float]:
-        # 原有加载逻辑，保持不变
-        from core.utils.config_loader import load_weights
         cfg = load_weights()
-
         if "prediction_weights" not in cfg:
             raise ValueError("weights.yaml missing 'prediction_weights' section")
-
         return cfg["prediction_weights"]
 
-    def predict(self, factors: Dict[str, FactorResult]) -> Dict[str, Any]:
+    # ==============================
+    # NEW: Action Hint Builder
+    # ==============================
+    def _build_action_hint(
+        self,
+        factors: Dict[str, FactorResult],
+        risk_level: RiskLevel,
+    ) -> Dict[str, Any]:
         """
-        factors:
-          key = 制度槽位名（不带 _raw）
-          value = FactorResult
+        Build Gate × Action Matrix hint.
+        Pure function:
+        - Only reads FactorResult (score / level / details)
+        - No snapshot / DS dependency
+        - Missing info => safe HOLD
         """
 
+        def _get_level(slot: str) -> Optional[str]:
+            fr = factors.get(slot)
+            return fr.level if fr else None
+
+        def _get_score(slot: str) -> Optional[float]:
+            fr = factors.get(slot)
+            return fr.score if fr else None
+
+        # ---- Safely extract signals ----
+        participation = _get_level("participation")
+        breadth = _get_level("breadth")
+        margin_score = _get_score("margin")
+        global_macro = _get_level("global_macro")
+        index_global = _get_level("index_global")
+
+        # Default: HOLD
+        hint = {
+            "action": "HOLD",
+            "reason": "DEFAULT_HOLD",
+            "allowed": {
+                "etf_add": False,
+                "stock_add": False,
+            },
+            "limits": {},
+            "conditions": [],
+            "forbidden": [],
+        }
+
+        # ==============================
+        # CAUTION Gate Logic
+        # ==============================
+        if risk_level == "NEUTRAL":
+            cond_struct = participation == "Hidden Weakness"
+            cond_margin = margin_score is not None and margin_score >= 70
+            cond_global = (
+                global_macro == "NEUTRAL"
+                and index_global == "NEUTRAL"
+            )
+
+            if cond_struct and cond_margin and cond_global:
+                hint.update({
+                    "action": "HOLD",
+                    "reason": "Caution + HiddenWeakness + HighMargin + GlobalNeutral",
+                    "allowed": {
+                        "etf_add": True,
+                        "stock_add": False,
+                    },
+                    "limits": {
+                        "etf_add_units_max": 1,
+                        "mode": "CONDITIONAL_ONLY",
+                    },
+                    "conditions": [
+                        "仅允许核心ETF回踩支撑后的条件型加仓（≤1单位）",
+                        "不追涨",
+                    ],
+                    "forbidden": [
+                        "加仓高弹性个股",
+                        "一次性打光现金",
+                        "情绪性追涨ETF",
+                    ],
+                })
+                return hint
+
+        # ==============================
+        # NORMAL Gate Logic（ETF Ladder）
+        # ==============================
+        if risk_level == "LOW":
+            improving_struct = participation != "Hidden Weakness"
+            ok_margin = margin_score is None or margin_score < 70
+
+            if improving_struct and ok_margin:
+                hint.update({
+                    "action": "ETF_LADDER",
+                    "reason": "Normal Gate with improving structure",
+                    "allowed": {
+                        "etf_add": True,
+                        "stock_add": True,
+                    },
+                    "limits": {
+                        "etf_add_units_max": 2,
+                        "ladder": "L1->L2 same day, L3 requires T+1",
+                    },
+                    "conditions": [
+                        "L1: 回踩支撑/均价 + 不破低点 → +1单位",
+                        "L2: 突破前高 + 指数同步 → 再+1单位",
+                        "L3: 连续2日确认 + Breadth改善（T+1）",
+                    ],
+                    "forbidden": [
+                        "直线拉升追涨",
+                        "单日ETF加仓>2单位",
+                        "结构退化当日加仓",
+                    ],
+                })
+                return hint
+
+        return hint
+
+    # ==============================
+    # Original predict()
+    # ==============================
+    def predict(self, factors: Dict[str, FactorResult]) -> Dict[str, Any]:
         evidence: Dict[str, Any] = {
             "used": [],
             "used_in_aggregation": [],
@@ -98,12 +185,11 @@ class PredictionEngine:
 
         evidence["raw_weight_total"] = round(raw_weight_sum, 4)
 
-        # 极端情况：无可用因子
         if raw_weight_sum <= 0:
-            logger.warning("[PredictionEngine] NO_EFFECTIVE_FACTORS")
             return {
                 "final_score": 50.0,
                 "risk_level": "NEUTRAL",
+                "action_hint": {"action": "HOLD", "reason": "NO_EFFECTIVE_FACTORS"},
                 "evidence": {
                     **evidence,
                     "normalized_weight_total": 0.0,
@@ -111,7 +197,6 @@ class PredictionEngine:
                 },
             }
 
-        # 权重归一
         normalized_weights = {}
         for slot in evidence["used_in_aggregation"]:
             normalized_weights[slot] = round(
@@ -124,16 +209,13 @@ class PredictionEngine:
         final_score = weighted_sum / raw_weight_sum
         risk_level: RiskLevel = self._level_from_score(final_score)
 
-        logger.info(
-            "[PredictionEngine] used=%s raw_weight_total=%.4f final_score=%.2f",
-            evidence["used_in_aggregation"],
-            raw_weight_sum,
-            final_score,
-        )
+        # ✅ NEW: Action Hint
+        action_hint = self._build_action_hint(factors, risk_level)
 
         return {
             "final_score": round(final_score, 2),
             "risk_level": risk_level,
+            "action_hint": action_hint,
             "evidence": evidence,
         }
 

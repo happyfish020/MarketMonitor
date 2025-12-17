@@ -89,6 +89,7 @@ def run_cn_ashare_daily(trade_date: str | None = None, refresh_mode: str = "auto
         try:
             fr = factor.compute(snapshot)
             factors[factor.name] = fr
+            print(factor.name)
             assert factors[factor.name] , f"{factor.name} is missing" 
             LOG.info("[Factor.%s] score=%.2f level=%s", factor.name, fr.score, fr.level)
         except Exception as e:

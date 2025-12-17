@@ -24,7 +24,9 @@ class TurnoverFactor(FactorBase):
          
 
     def compute(self, snapshot: Dict[str, Any]) -> FactorResult:
-        data = snapshot.get("turnover", {}) or {}
+        data = snapshot.get("turnover_raw", {}) or {}
+        assert data, "turnover_raw is missing"
+
         if not data:
             return FactorResult(
                 name=self.name,
@@ -76,16 +78,16 @@ class TurnoverFactor(FactorBase):
 
         # 等级划分
         if score >= 60:
-            level = "高"
+            level = "HIGH"    
         elif score <= 40:
-            level = "低"
+            level = "NEUTRAL"
         else:
-            level = "中"
+            level = "LOW"
 
         # 描述生成
-        if level == "高":
+        if level == "HIGH":
             summary = "市场成交额放大，流动性充裕"
-        elif level == "低":
+        elif level == "LOW":
             summary = "市场成交额低迷，流动性不足"
         else:
             summary = "市场成交额平稳，流动性正常"
@@ -97,9 +99,10 @@ class TurnoverFactor(FactorBase):
         if sz is not None:
             details["sz_turnover"] = sz
         details["total_turnover"] = total
-        details["data_status"] =  "OK",
+        details["data_status"] =  "OK"
         details["_raw_data"] = json.dumps(data)[:160] + "..."
         LOG.info(f"[TurnoverFactor] sh={sh} sz={sz} total={total:.0f} score={score:.2f} level={level}")
+        
         return self.build_result(
             score=score,
             level=level,

@@ -21,8 +21,22 @@ class BreadthFactor(FactorBase):
         super().__init__(name="breadth_raw")
 
     def compute(self, snapshot: Dict[str, Any]) -> FactorResult:
-        block = snapshot.get("breadth_raw") or {}
-        ratio = float(block.get("new_low_ratio", 0.0))
+        data = snapshot.get("breadth_raw") or {}
+        assert data, "breadth_raw is missing"
+
+        if not data:
+            return FactorResult(
+                name=self.name,
+                score=50.0,
+                level="NEUTRAL",
+                details={
+                    "data_status": "DATA_NOT_CONNECTED",
+                    "reason": "breadth_raw data missing",
+                },
+            )
+
+
+        ratio = float(data.get("new_low_ratio", 0.0))
 
         state, score, level, reason = self._map_state(ratio)
 

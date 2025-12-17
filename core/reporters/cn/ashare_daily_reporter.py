@@ -83,8 +83,8 @@ def build_daily_report_text(
     else:
         lines.append("- Participation：DATA_NOT_CONNECTED")
 
-    if _factor_exists(factors, "breadth"):
-        fr = factors["breadth"]
+    if _factor_exists(factors, "breadth_raw"):
+        fr = factors["breadth_raw"]
         state = fr.details.get("state", fr.level)
         lines.append(f"- Breadth：{state}")
     else:
@@ -107,8 +107,8 @@ def build_daily_report_text(
         lines.append("北向代理：DATA_NOT_CONNECTED")
     lines.append("")
 
-    if _factor_exists(factors, "margin"):
-        m = factors["margin"].details or {}
+    if _factor_exists(factors, "margin_raw"):
+        m = factors["margin_raw"].details or {}
         lines.append("两融：")
         lines.append(f"- trend_10d：{_fmt_num(m.get('trend_10d'))}")
         lines.append(f"- acc_3d：{_fmt_num(m.get('acc_3d'))}")
@@ -123,7 +123,7 @@ def build_daily_report_text(
     lines.append("【📌 数据源链路检查（DS Raw）】")
 
     # --- Breadth DS ---
-    bd = snapshot.get("breadth")
+    bd = snapshot.get("breadth_raw")
     if isinstance(bd, dict):
         lines.append("Breadth DS：")
         lines.append(f"- new_low_ratio：{_fmt_pct(bd.get('new_low_ratio'))}")

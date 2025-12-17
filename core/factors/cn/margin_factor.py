@@ -3,13 +3,14 @@
 from __future__ import annotations
 from typing import Dict, Any
 import json
-from core.factors.factor_base import BaseFactor, FactorResult
+from core.factors.factor_base import FactorBase
+from core.factors.factor_result import FactorResult
 from core.utils.logger import get_logger
 
 LOG = get_logger("Factor.Margin")
 
 
-class MarginFactor(BaseFactor):
+class MarginFactor(FactorBase):
     """
     两融杠杆因子（UnifiedRisk V12）
     """
@@ -22,7 +23,7 @@ class MarginFactor(BaseFactor):
     }
 
     def __init__(self):
-        super().__init__(name="margin")
+        super().__init__(name="margin_raw")
 
     # ------------------------------------------------------------------
     # level 映射（V12 强约束）
@@ -81,13 +82,16 @@ class MarginFactor(BaseFactor):
     # 主计算函数（V12 标准）
     # ------------------------------------------------------------------
     def compute(self, snapshot: Dict[str, Any]) -> FactorResult:
-        data = snapshot.get("margin") or {}
+        data = snapshot.get("margin_raw") or {}
 
         if not data:
             return self.build_result(
                 score=50.0,
                 level="NEUTRAL",
-                details={"reason": "margin data missing"},
+                details={
+                    "data_status": "DATA_NOT_CONNECTED",
+                    "reason": "margin_raw data missing",
+                },
             )
 
         trend = data.get("trend_10d")
@@ -127,6 +131,7 @@ class MarginFactor(BaseFactor):
                 "rz_ratio": rz_ratio,
                 "rz_buy": rz_buy,
                 "risk_zone_raw": zone_raw,
+                "data_status": "OK",
                 "_raw_data": json.dumps(data)[:160] + "...",
             },
         )

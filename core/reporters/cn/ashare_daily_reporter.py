@@ -1,238 +1,247 @@
 # -*- coding: utf-8 -*-
 """
-UnifiedRisk V12 - AShare Daily Reporter
+UnifiedRisk V12 - AShare Daily Reporter (Dev / Audit Mode)
+
 职责：
-- 仅负责“结构化结果 → 文本”
-- 不做任何计算、不猜测任何规则
+- build_daily_report_text : 生成“给人看的”日报文本
+- save_daily_report       : 将日报保存到统一 output 目录
+
+⚠️ Dev 铁律：
+- Reporter 必须显式展示 DS 级事实数据，用于链路审计
+- 不参与计算、不修改因子、不补数据
 """
 
 from __future__ import annotations
 
 import os
-from typing import Dict, Any, Mapping
+from typing import Dict, Any, List
 
-from core.factors.factor_base import FactorResult
-from core.models.risk_level import RiskLevel
-from core.predictors.prediction_block import PredictionBlock
 from core.utils.logger import get_logger
+from core.utils.path_utils import ensure_dir
+from core.utils.config_loader import load_paths
 
-LOG = get_logger("Reporter.AshareDaily")
+LOG = get_logger("Reporter.AShareDaily")
+
+# ----------------------------------------------------------------------
+# 路径规范（V12 冻结）
+# ----------------------------------------------------------------------
+
+_paths = load_paths()
+REPORT_ROOT = _paths.get("cn_report_dir", "data/reports/cn/daily/")
 
 
 # ----------------------------------------------------------------------
-# 基础格式化工具
+# 工具函数
 # ----------------------------------------------------------------------
-def _format_factor_block(label: str, fr: FactorResult) -> str:
-    """
-    V12 因子输出格式化：
-    - score + level
-    - details 仅作为“事实列表”展示
-    """
-    lines: list[str] = []
-    level = fr.level.value if hasattr(fr.level, "value") else str(fr.level)
-    lines.append(f"{label}: {fr.score:.2f}（{level}）")
-
-    if isinstance(fr.details, dict) and fr.details:
-        for k, v in fr.details.items():
-            lines.append(f"    · {k}: {v}")
-
-    return "\n".join(lines)
+def _fmt_pct(x: float, nd: int = 2) -> str:
+    try:
+        return f"{x * 100:.{nd}f}%"
+    except Exception:
+        return "N/A"
 
 
-def _build_section(
-    title: str,
-    items: list[tuple[str, str]],
-    factors: Mapping[str, FactorResult],
-) -> str:
-    """
-    构建一个分区块：
-    - title: 分区标题
-    - items: [(factor_key, label), ...]
-    """
-    blocks: list[str] = []
+def _fmt_num(x: float, nd: int = 2) -> str:
+    try:
+        return f"{x:.{nd}f}"
+    except Exception:
+        return "N/A"
 
-    for key, label in items:
-        fr = factors.get(key)
-        if isinstance(fr, FactorResult):
-            blocks.append(_format_factor_block(label, fr))
 
-    if not blocks:
-        return ""
-
-    lines: list[str] = []
-    lines.append(title)
-    lines.append("-" * len(title))
-    lines.extend(blocks)
-
-    return "\n".join(lines)
+def _factor_exists(factors: Dict[str, Any], name: str) -> bool:
+    return name in factors and factors[name] is not None
 
 
 # ----------------------------------------------------------------------
-# 日报文本构建
+# 1️⃣ 构建日报文本
 # ----------------------------------------------------------------------
 def build_daily_report_text(
     meta: Dict[str, Any],
-    factors: Dict[str, FactorResult],
-    prediction: PredictionBlock | None = None,
+    factors: Dict[str, Any],
+    prediction: Any = None,
+    snapshot: Dict[str, Any] | None = None,
 ) -> str:
-    trade_date = meta.get("trade_date", "未知日期")
+    trade_date = meta.get("trade_date", "UNKNOWN")
+    lines: List[str] = []
 
-    header = [
-        f"A股日度风险综述 {trade_date}",
-        "=" * 40,
-        "",
-    ]
+    snapshot = snapshot or {}
 
-    body: list[str] = []
+    # ==============================================================
+    # Header
+    # ==============================================================
+    lines.append(f"📊 A股每日结构风险报告  {trade_date}")
+    lines.append("")
 
-    # 1️⃣ 情绪结构
-    section = _build_section(
-        "情绪结构",
-        [("unified_emotion", "综合情绪因子")],
-        factors,
-    )
-    if section:
-        body.append(section)
-        body.append("")
+    # ==============================================================
+    # 一、结构裁决层
+    # ==============================================================
+    lines.append("【结构裁决】")
 
-    # 2️⃣ 宏观结构
-    section = _build_section(
-        "宏观结构",
-        [
-            ("global_macro", "全球宏观金融条件"),
-            ("index_global", "海外指数强弱"),
-        ],
-        factors,
-    )
-    if section:
-        body.append(section)
-        body.append("")
+    if _factor_exists(factors, "participation"):
+        fr = factors["participation"]
+        state = fr.details.get("state", fr.level)
+        lines.append(f"- Participation：{state}")
+    else:
+        lines.append("- Participation：DATA_NOT_CONNECTED")
 
-    # 3️⃣ 日内引导
-    section = _build_section(
-        "日内引导结构",
-        [("global_lead", "全球日内引导")],
-        factors,
-    )
-    if section:
-        body.append(section)
-        body.append("")
+    if _factor_exists(factors, "breadth"):
+        fr = factors["breadth"]
+        state = fr.details.get("state", fr.level)
+        lines.append(f"- Breadth：{state}")
+    else:
+        lines.append("- Breadth：DATA_NOT_CONNECTED")
 
-    # 4️⃣ A股核心因子
-    section = _build_section(
-        "A股核心因子结构",
-        [
-            ("north_nps", "北向资金代理"),
-            ("turnover", "成交额流动性"),
-            ("margin", "两融杠杆"),
-            ("sector_rotation", "板块轮动"),
-        ],
-        factors,
-    )
-    if section:
-        body.append(section)
-        body.append("")
+    lines.append("")
 
-    # 5️⃣ 技术结构
-    section = _build_section(
-        "技术结构",
-        [("index_tech", "指数技术面")],
-        factors,
-    )
-    if section:
-        body.append(section)
-        body.append("")
+    # ==============================================================
+    # 二、结构证据层（因子）
+    # ==============================================================
+    lines.append("【结构证据（Factor）】")
 
-    # 6️⃣ 预测总结
-    if isinstance(prediction, PredictionBlock):
-        lines: list[str] = []
-        lines.append("综合风险判断")
-        lines.append("-" * 14)
+    if _factor_exists(factors, "north_nps_raw"):
+        m = factors["north_nps_raw"].details or {}
+        lines.append("北向代理：")
+        lines.append(f"- strength_today：{_fmt_num(m.get('strength_today'))}")
+        lines.append(f"- trend_5d：{_fmt_num(m.get('trend_5d'))}")
+        lines.append(f"- _raw_data: {m.get('_raw_data')}")
+    else:
+        lines.append("北向代理：DATA_NOT_CONNECTED")
+    lines.append("")
 
-        lines.append(
-            f"综合风险得分：{prediction.overall_score:.2f}（{prediction.overall_level.value}）"
-        )
+    if _factor_exists(factors, "margin"):
+        m = factors["margin"].details or {}
+        lines.append("两融：")
+        lines.append(f"- trend_10d：{_fmt_num(m.get('trend_10d'))}")
+        lines.append(f"- acc_3d：{_fmt_num(m.get('acc_3d'))}")
+        lines.append(f"- _raw_data: {m.get('_raw_data')}")
+    else:
+        lines.append("两融：DATA_NOT_CONNECTED")
+    lines.append("")
 
-        # diagnostics 只做轻量展示
-        if prediction.diagnostics.get("degraded"):
-            lines.append("⚠️ 注意：因子不足，预测结果已降级")
+    # ==============================================================
+    # 三、数据源链路审计（DS 事实层）
+    # ==============================================================
+    lines.append("【📌 数据源链路检查（DS Raw）】")
 
-        body.append("\n".join(lines))
-        body.append("")
+    # --- Breadth DS ---
+    bd = snapshot.get("breadth")
+    if isinstance(bd, dict):
+        lines.append("Breadth DS：")
+        lines.append(f"- new_low_ratio：{_fmt_pct(bd.get('new_low_ratio'))}")
+        lines.append(f"- count_new_low：{bd.get('count_new_low')}")
+        lines.append(f"- count_total：{bd.get('count_total')}")
+    else:
+        lines.append("Breadth DS：MISSING")
+    lines.append("")
 
-    # 清理多余空行
-    while body and not body[-1].strip():
-        body.pop()
+    # --- North Proxy DS ---
+    if _factor_exists(factors, "north_nps_raw"):
+        m = factors["north_nps_raw"].details or {}
+        lines.append("北向代理：")
+        lines.append(f"- _raw_data: {m.get('_raw_data')}")
+    else:
+        lines.append("北向代理：DATA_NOT_CONNECTED")
+    lines.append("")
 
-    text = "\n".join(header + body).rstrip() + "\n"
-    LOG.info("AshareDailyReporter: 报告文本构建完成，长度=%s", len(text))
+    # --- Turnover DS ---
+    if _factor_exists(factors, "turnover_raw"):
+        m = factors["turnover_raw"].details or {}
+        lines.append("TurnOver：")
+        lines.append(f"- _raw_data: {m.get('_raw_data')}")
+    else:
+        lines.append("TurnOver： DS：MISSING")
+    lines.append("")
+
+    # ==============================================================
+    # Step-3 Evidence（新增展示：只展示，不计算、不修正）
+    # ==============================================================
+    lines.append("【Step-3 Evidence】")
+
+    pred_dict: Dict[str, Any] = {}
+    try:
+        if prediction is None:
+            pred_dict = {}
+        elif hasattr(prediction, "to_dict"):
+            pred_dict = prediction.to_dict()  # type: ignore[attr-defined]
+        elif isinstance(prediction, dict):
+            pred_dict = prediction
+    except Exception:
+        pred_dict = {}
+
+    diag = {}
+    try:
+        diag = pred_dict.get("diagnostics") or {}
+    except Exception:
+        diag = {}
+
+    if not isinstance(diag, dict) or not diag:
+        lines.append("- diagnostics: N/A")
+        lines.append("")
+    else:
+        pol = diag.get("policy", {})
+        if not isinstance(pol, dict):
+            pol = {}
+
+        lines.append(f"- policy.result: {pol.get('result', 'N/A')}")
+        lines.append(f"- used: {diag.get('used', [])}")
+        lines.append(f"- used_in_aggregation: {diag.get('used_in_aggregation', [])}")
+        lines.append(f"- missing_factors: {list((diag.get('missing_factors') or {}).keys())}")
+        lines.append(f"- degraded_factors: {list((diag.get('degraded_factors') or {}).keys())}")
+        lines.append(f"- raw_weight_total: {diag.get('raw_weight_total', 'N/A')}")
+        lines.append(f"- normalized_weight_total: {diag.get('normalized_weight_total', 'N/A')}")
+        lines.append(f"- zero_weight_used: {diag.get('zero_weight_used', [])}")
+
+        raw_w = diag.get("raw_weights", {})
+        norm_w = diag.get("normalized_weights", {})
+
+        if isinstance(raw_w, dict) and raw_w:
+            lines.append("- raw_weights:")
+            for k in sorted(raw_w.keys()):
+                lines.append(f"    · {k}: {raw_w.get(k)}")
+
+        if isinstance(norm_w, dict) and norm_w:
+            lines.append("- normalized_weights:")
+            for k in sorted(norm_w.keys()):
+                lines.append(f"    · {k}: {norm_w.get(k)}")
+
+        lines.append("")
+
+    # ==============================================================
+    # 四、风险提示
+    # ==============================================================
+    lines.append("【风险与前瞻提示】")
+    lines.append("- 当前为开发调试报告，DS 数据已显式展示")
+    lines.append("- 结构裁决仅依赖 Breadth + Participation")
+    lines.append("")
+
+    lines.append("（本报告为结构风险监测，不构成交易建议）")
+
+    text = "\n".join(lines)
+    if not text.strip():
+        LOG.warning("build_daily_report_text generated EMPTY text")
+
     return text
 
 
 # ----------------------------------------------------------------------
-# 保存报告
+# 2️⃣ 保存日报
 # ----------------------------------------------------------------------
-from datetime import datetime, timedelta, timezone
+def save_daily_report(trade_date: str, text: str) -> None:
+    if not text or not text.strip():
+        LOG.warning("save_daily_report called with empty text")
+        return
 
+    ensure_dir(REPORT_ROOT)
 
-def save_daily_report_v0(market: str, trade_date, text: str) -> str:
-    """
-    保存日报文本到 reports/{market}/daily/
-    """
-    if not trade_date or str(trade_date).lower() == "none":
-        bj_tz = timezone(timedelta(hours=8))
-        trade_date_str = datetime.now(bj_tz).strftime("%Y-%m-%d")
-    else:
-        trade_date_str = str(trade_date)
+    fname = f"ashare_daily_{trade_date}.txt"
+    path = os.path.join(REPORT_ROOT, fname)
 
-    root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-    reports_root = os.path.join(root, "reports", market, "daily")
-    os.makedirs(reports_root, exist_ok=True)
-
-    filename = f"AShares-{trade_date_str}.txt" if market.lower() == "cn" else f"{market.upper()}-{trade_date_str}.txt"
-    path = os.path.join(reports_root, filename)
-
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(text)
-        
-
-    LOG.info("AshareDailyReporter: 报告已保存到文件: %s", path)
-    
-    print("############################")
-    print(text)
-    print("############################")
-    return path
-
-def save_daily_report(market: str, trade_date, text: str) -> str:
-    """
-    保存日报文本（V12 正式版）
-    - 文件名仅包含日期
-    - 同日覆盖，符合“日报”语义
-    """
-    if trade_date and str(trade_date).lower() != "none":
-        trade_date_str = str(trade_date)
-    else:
-        bj_tz = timezone(timedelta(hours=8))
-        trade_date_str = datetime.now(bj_tz).strftime("%Y-%m-%d")
-
-    root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-    reports_root = os.path.join(root, "reports", market, "daily")
-    os.makedirs(reports_root, exist_ok=True)
-
-    if market.lower() == "cn":
-        filename = f"AShares-{trade_date_str}.txt"
-    else:
-        filename = f"{market.upper()}-{trade_date_str}.txt"
-
-    path = os.path.join(reports_root, filename)
-
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(text)
-
-    LOG.info("AshareDailyReporter: 报告已保存到文件: %s", path)
-
-    print("############################")
-    print(text)
-    print("############################")
- 
-    return path
+    try:
+        print("##################################")
+        print(text)
+        print("##################################")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text)
+        LOG.info("Daily report saved: %s", path)
+    except Exception as e:
+        LOG.error("Failed to save daily report: %s", e, exc_info=True)
+        raise

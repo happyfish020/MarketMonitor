@@ -1,9 +1,10 @@
 from typing import Dict, Any
 import json
-from core.factors.factor_base import BaseFactor, FactorResult
+from core.factors.factor_base import FactorBase
+from core.factors.factor_result import FactorResult
 
 
-class GlobalLeadFactor(BaseFactor):
+class GlobalLeadFactor(FactorBase):
     """
     V12 GlobalLeadFactor（瘦因子版）
 
@@ -14,7 +15,7 @@ class GlobalLeadFactor(BaseFactor):
     """
 
     def __init__(self):
-        super().__init__("global_lead")
+        super().__init__("global_lead_raw")
 
     @staticmethod
     def _safe_pct(info: Dict[str, Any]) -> float:
@@ -33,7 +34,17 @@ class GlobalLeadFactor(BaseFactor):
         return 0.0
 
     def compute(self, input_block: Dict[str, Any]) -> FactorResult:
-        data = self.pick(input_block, "global_lead", {})
+        data = self.pick(input_block, "global_lead_raw", {})
+        if not data:
+            return FactorResult(
+                name = self.name,
+                score=50.0,
+                level="NEUTRAL",
+                details={
+                    "data_status": "DATA_NOT_CONNECTED",
+                    "reason": "global_lead_raw data missing",
+                } 
+            )
 
         a50 = self._safe_pct(data.get("a50", {}))
         es  = self._safe_pct(data.get("es", {}))
@@ -60,6 +71,7 @@ class GlobalLeadFactor(BaseFactor):
                 "hsi_pct": hsi,
                 "btc_pct": btc,
                 "lead_signal": signal,
+                "data_status": "OK",
                 "_raw_data": json.dumps(data)[:160] + "...",
             },
         )

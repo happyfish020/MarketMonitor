@@ -1,5 +1,5 @@
 # core/adapters/transformers/cn/unified_emotion_tr.py
-# UnifiedRisk V12 - Unified Emotion Transformer
+# UnifiedRisk V12 - Unified Emotion BlockBuilder
 #
 # 作用：
 # - 将 Turnover + MarketSentiment 整合为“情绪结构块”
@@ -10,15 +10,15 @@ from __future__ import annotations
 
 from typing import Dict, Any
 
-from core.adapters.transformers.transformer_base import TransformerBase
+from core.adapters.block_builder.block_builder_base import FactBlockBuilderBase
 from core.utils.logger import get_logger
 
 LOG = get_logger("TR.UnifiedEmotion")
 
 
-class UnifiedEmotionTransformer(TransformerBase):
+class UnifiedEmotionBlockBuilder(FactBlockBuilderBase):
     """
-    UnifiedEmotionTransformer
+    UnifiedEmotionBlockBuilder
     -------------------------
     输入：
         snapshot["turnover"]
@@ -36,9 +36,9 @@ class UnifiedEmotionTransformer(TransformerBase):
         super().__init__(name="UnifiedEmotion")
 
     # -------------------------------------------------
-    def transform(self, snapshot: Dict[str, Any], refresh_mode: str = "none") -> Dict[str, Any]:
-        sentiment = snapshot.get("market_sentiment") or {}
-        turnover = snapshot.get("turnover") or {}
+    def build_block(self, snapshot: Dict[str, Any], refresh_mode: str = "none") -> Dict[str, Any]:
+        sentiment = snapshot.get("market_sentiment_raw") or {}
+        turnover = snapshot.get("turnover_raw") or {}
 
         if not sentiment and not turnover:
             LOG.warning("[UnifiedEmotion] empty inputs")

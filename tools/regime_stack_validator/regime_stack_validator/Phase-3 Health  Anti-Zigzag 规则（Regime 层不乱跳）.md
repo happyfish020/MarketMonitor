@@ -493,7 +493,7 @@ Fail 风险：Regime 变成“慢半拍指标”，失去背景意义
 
  不新增 DataSource
 
- 不在 Fetcher / Transformer 偷做逻辑
+ 不在 Fetcher / BlockBuilder 偷做逻辑
 
  Phase-3 的输入只来自 Snapshot（容器）
 
@@ -780,7 +780,7 @@ UnifiedRisk V12 是一个
 2️⃣ 五层清晰分工（不可越界）
 [ DataSource ]
       ↓
-[ Transformer ]
+[ BlockBuilder ]
       ↓
 [ Snapshot (Block Registry) ]
       ↓
@@ -791,7 +791,7 @@ UnifiedRisk V12 是一个
 各层一句话定义
 层	定义
 DataSource	只负责真实数据，强缓存
-Transformer	多序列 / 横截面 → 结构事实
+BlockBuilder	多序列 / 横截面 → 结构事实
 Snapshot	被动容器，只装 block
 Factor	解释 block，给出风险与环境
 Prediction	在“允许的环境”下才运行
@@ -893,7 +893,7 @@ for symbol / for sector
 排名 / 分组 / 分位
 
 👉 一律删除
-👉 这些只能存在于 Transformer
+👉 这些只能存在于 BlockBuilder
 
 ❌ A2：SnapshotBuilder 中的“聪明逻辑”
 
@@ -926,7 +926,7 @@ SectorRotationFactor
 展示 → Report
 
 🛠 B. 必须重写 / 重构的对象（但不急着现在）
-⚠️ B1：任何“单序列假设”的 Transformer
+⚠️ B1：任何“单序列假设”的 BlockBuilder
 
 只支持一个 symbol
 
@@ -1079,18 +1079,18 @@ Index–Sector Correlation Regime（Priority 2）：回答“市场是齐涨齐�
 
 用 Priority 1 反向验证 V12 架构是否承载（Step 2 的前置检查点）
 
-你已经明确要验证的是 Transformer 与 Snapshot 的边界。用 Breadth Damage 这个因子做压力测试，结论如下：
+你已经明确要验证的是 BlockBuilder 与 Snapshot 的边界。用 Breadth Damage 这个因子做压力测试，结论如下：
 
-A) Transformer 必须允许“多 symbol / 多序列 → 结构化输出”
+A) BlockBuilder 必须允许“多 symbol / 多序列 → 结构化输出”
 
 Breadth Damage 天然需要“universe 横截面 + N日回看”。
-因此 Transformer 层要能：
+因此 BlockBuilder 层要能：
 
 接收多个 symbol 的序列（或更本质：接收一个“universe 数据块”）
 
 产出结构化字段：nl_ratio, delta_3, persistence, universe_size, n_used
 
-✅ 这符合你对 Transformer 的定义：聚合、结构化，不做评分。
+✅ 这符合你对 BlockBuilder 的定义：聚合、结构化，不做评分。
 
 B) Snapshot 只能当“容器”，但必须支持“因子所需的结构化块”
 
@@ -1098,17 +1098,17 @@ Snapshot 不应该计算 nl_ratio，但必须能装下类似：
 
 snapshot["breadth_damage_inputs"]（原始或半结构化）
 
-或 snapshot["breadth_metrics"]（Transformer 输出的结构化中间结果）
+或 snapshot["breadth_metrics"]（BlockBuilder 输出的结构化中间结果）
 
 关键边界：
 
 如果把 nl_ratio 计算放在 SnapshotBuilder：Snapshot 变“智能”，会侵蚀分层
 
-放在 Transformer：合理（它就是聚合/计算结构性统计）
+放在 BlockBuilder：合理（它就是聚合/计算结构性统计）
 
-Factor 只读取 Transformer 的输出并评分：符合铁律
+Factor 只读取 BlockBuilder 的输出并评分：符合铁律
 
-所以这里反向证明：Transformer 是必要层，不仅允许多序列，还必须承担“统计聚合/结构指标计算”。
+所以这里反向证明：BlockBuilder 是必要层，不仅允许多序列，还必须承担“统计聚合/结构指标计算”。
 
 C) 哪些层不该动（再次锁定）
 
@@ -1157,7 +1157,7 @@ A股可能存在“权重股护盘导致指数相关性假高/假低”的问题
 
 窗口长度：W（例如 20/60 两档，但当前阶段先定义为“短窗+中窗”，不定死数值）
 
-Transformer 输出结构化中间量（建议）
+BlockBuilder 输出结构化中间量（建议）
 
 corr_matrix（或其摘要）
 
@@ -1287,7 +1287,7 @@ Priority 3 = “好的扩散（上涨家数/参与）”
 
 可选：中位数收益 vs 指数收益（用于识别“权重托举”）
 
-Transformer 输出结构化中间量
+BlockBuilder 输出结构化中间量
 
 adv, dec, unchanged, total
 
@@ -1339,7 +1339,7 @@ div = r_index - r_median_stock
 或下跌扩散（adv_ratio 很低且 thrust 负）
 
 Step 2：用 3 个因子反向验证 V12 架构是否承载（结论清单）
-结论 1：Transformer 层“必须”支持两种聚合形态
+结论 1：BlockBuilder 层“必须”支持两种聚合形态
 
 横截面聚合（全A/成分股统计：adv/dec、新低占比）
 
@@ -1347,13 +1347,13 @@ Step 2：用 3 个因子反向验证 V12 架构是否承载（结论清单）
 
 这两种都属于“结构化计算”，但不是评分，因此：
 
-✅ 应放在 Transformer
+✅ 应放在 BlockBuilder
 
 ❌ 不应放在 SnapshotBuilder（避免 snapshot 变智能）
 
 ❌ 不应放在 Factor（避免 factor 变数据工程层）
 
-结论 2：Snapshot 需要支持“按主题块”存放 Transformer 输出
+结论 2：Snapshot 需要支持“按主题块”存放 BlockBuilder 输出
 
 建议快照里出现类似结构（只是概念，不是代码）：
 
@@ -1383,16 +1383,16 @@ Step 3：是否需要改架构？只指出“哪一层 + 为什么”
 
 基于以上定义，我目前只看到一条潜在的架构风险点需要你重点审视（不写代码，只定原则）：
 
-风险点：Transformer 的输入如果只能“单 symbol”
+风险点：BlockBuilder 的输入如果只能“单 symbol”
 
 这三个因子都要求：
 
 多 symbol（行业指数集合）或
 
 universe 级横截面（全A）
-如果 Transformer 目前的接口设计过于“单序列→单输出”，会卡住。
+如果 BlockBuilder 目前的接口设计过于“单序列→单输出”，会卡住。
 
-因此可能需要的调整只在：Transformer 接口契约层
+因此可能需要的调整只在：BlockBuilder 接口契约层
 
 允许传入 “symbol list / series dict / universe block”
 

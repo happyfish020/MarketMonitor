@@ -14,20 +14,21 @@ UnifiedEmotionFactor (CN A-Share)
 from typing import Dict, Any
 import json
 
-from core.factors.factor_base import BaseFactor, FactorResult
+from core.factors.factor_base import FactorBase
+from core.factors.factor_result import FactorResult
  
 from core.utils.logger import get_logger
 
 LOG = get_logger("Factor.UnifiedEmotion")
 
 
-class UnifiedEmotionFactor(BaseFactor):
+class UnifiedEmotionFactor(FactorBase):
     """
     综合情绪因子（V12 定稿）
     """
 
     def __init__(self):
-        super().__init__("unified_emotion")
+        super().__init__("unified_emotion_raw")
 
     # ------------------------------------------------------------------
     def compute(self, input_block: Dict[str, Any]) -> FactorResult:
@@ -40,9 +41,9 @@ class UnifiedEmotionFactor(BaseFactor):
             FactorResult(name="unified_emotion", ...)
         """
 
-        market_sentiment = input_block.get("market_sentiment") or {}
-        emotion = input_block.get("emotion") or {}
-
+        market_sentiment = input_block.get("market_sentiment_raw") or {}
+        emotion = input_block.get("emotion_raw") or {}
+        # Todom
         # ---------------- 原始数据透传 ----------------
         raw_data = {
             "market_sentiment": market_sentiment,
@@ -84,6 +85,7 @@ class UnifiedEmotionFactor(BaseFactor):
             score=score,
             level=level,
             details={
+                "data_status": "OK",
                 "_raw_data": raw_data,
                 "adv_ratio": adv_ratio,
             },

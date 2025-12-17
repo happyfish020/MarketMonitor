@@ -5,7 +5,7 @@ import pandas as pd
 from typing import Dict, Any, Tuple
 
 from core.utils.logger import get_logger
-from core.datasources.datasource_base import DataSourceConfig,BaseDataSource
+from core.datasources.datasource_base import DataSourceConfig,DataSourceBase
 from core.adapters.datasources.cn.market_sentiment_source import MarketSentimentDataSource
 
 LOG = get_logger("DS.UnifiedEmotion")
@@ -162,7 +162,7 @@ class UnifiedEmotionDataSource:
         # ============================================================
         # 4) 北向资金强弱
         # ============================================================
-        north = snapshot.get("north_nps", {}) or {}
+        north = snapshot.get("north_nps_raw", {}) or {}
 
         raw_strength = (
             north.get("strength")

@@ -1,9 +1,10 @@
 from typing import Dict, Any
 import json
-from core.factors.factor_base import BaseFactor, FactorResult
+from core.factors.factor_base import FactorBase
+from core.factors.factor_result import FactorResult
 
 
-class GlobalMacroFactor(BaseFactor):
+class GlobalMacroFactor(FactorBase):
     """
     V12 GlobalMacroFactor（瘦因子版）
 
@@ -14,7 +15,7 @@ class GlobalMacroFactor(BaseFactor):
     """
 
     def __init__(self):
-        super().__init__("global_macro")
+        super().__init__("global_macro_raw")
 
     @staticmethod
     def _safe_pct(info: Dict[str, Any]) -> float:
@@ -33,7 +34,18 @@ class GlobalMacroFactor(BaseFactor):
         return 0.0
 
     def compute(self, input_block: Dict[str, Any]) -> FactorResult:
-        data = self.pick(input_block, "global_macro", {})
+        data = self.pick(input_block, "global_macro_raw", {})
+        if not data:
+            return FactorResult(
+                name = self.name,
+                score=50.0,
+                level="NEUTRAL",
+                details={
+                    "data_status": "DATA_NOT_CONNECTED",
+                    "reason": "global_macro_raw data missing",
+                } 
+            )
+
 
         bond10 = self._safe_pct(data.get("bond10", {}))
         bond05 = self._safe_pct(data.get("bond05", {}))
@@ -57,6 +69,7 @@ class GlobalMacroFactor(BaseFactor):
                 "dxy_pct": dxy,
                 "nas_pct": nas,
                 "macro_signal": signal,
+                "data_status": "OK",
                 "_raw_data": json.dumps(data)[:160] + "...",
             },
         )

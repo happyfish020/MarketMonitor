@@ -1,4 +1,4 @@
-# core/engines/prediction_engine.py
+# core/predictors/prediction_engine.py
 # -*- coding: utf-8 -*-
 """
 UnifiedRisk V12 - PredictionEngine
@@ -10,123 +10,136 @@ UnifiedRisk V12 - PredictionEngine
 3. 生成最终 UnifiedPrediction 结构体（供 Reporter / Engine 使用）
 4. 不读 snapshot、DS、外部文件（松耦合）
 5. 日志完全遵守 V12 规范
+
+Step-3（制度补强）：
+- 当 factor.details['data_status'] != 'OK' 或缺失时：
+  * 不允许被当成 NEUTRAL 参与加权（避免误导）
+  * 剩余权重必须归一化（可审计）
+- 输出 diagnostics：缺失/降级因子清单、使用因子、权重归一证据链
 """
-from dataclasses import dataclass
-from typing import Dict, Any
+
+from dataclasses import dataclass, field
+from typing import Dict, Any, Mapping, Optional, Tuple, List
 
 from core.utils.config_loader import load_weights
 from core.utils.logger import get_logger
 
-logger = get_logger("PredictionEngine")
+logger = get_logger(__name__)
 
+from typing import Dict, Any
+from core.factors.factor_result import FactorResult
+from core.factors.factor_base import RiskLevel
+ 
+#import logging
+ 
 
-# ----------------------------------------------------------------------
-# 数据结构：预测结果
-# ----------------------------------------------------------------------
-@dataclass
-class UnifiedPrediction:
-    weighted_score: float
-    scores: Dict[str, float]
-    weights: Dict[str, float]
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "weighted_score": self.weighted_score,
-            "scores": self.scores,
-            "weights": self.weights,
-        }
-
-
-# ----------------------------------------------------------------------
-# 预测引擎核心类
-# ----------------------------------------------------------------------
 class PredictionEngine:
     """
-    V12 Prediction Engine
-    - 单一入口：predict(factors)
-    - factors 是 dict，例如：
-        {
-            "north_nps": FactorResult,
-            "unified_emotion": FactorResult,
-           # "turnover": FactorResult,
-            "margin": FactorResult,
-            "index_tech": FactorResult,
-            ...
-        }
+    UnifiedRisk V12 – PredictionEngine (Step-3 CLEAN)
+
+    关键冻结：
+    - 不再构造“all factors”
+    - 不再使用默认 50 分 NEUTRAL 占位
+    - 只基于 PolicySlotBinder 实际交付的 factors
     """
-    def __init__(self):
+
+    def __init__(self, weights: Dict[str, float] | None = None):
+        self.weights = weights or self._load_weights()
+
+    def _load_weights(self) -> Dict[str, float]:
+        # 原有加载逻辑，保持不变
+        from core.utils.config_loader import load_weights
         cfg = load_weights()
-        self.weights: Dict[str, float] = cfg.get("prediction_weights", {})
-        logger.info("[PredictionEngine] Loaded weights: %s", self.weights)
 
-    # ------------------------------------------------------------------
-    # 计算预测得分
-    # ------------------------------------------------------------------
-    def predict(self, factors: Dict[str, Any]) -> UnifiedPrediction:
+        if "prediction_weights" not in cfg:
+            raise ValueError("weights.yaml missing 'prediction_weights' section")
+
+        return cfg["prediction_weights"]
+
+    def predict(self, factors: Dict[str, FactorResult]) -> Dict[str, Any]:
         """
-        主入口
-        :param factors: dict[str → FactorResult]
+        factors:
+          key = 制度槽位名（不带 _raw）
+          value = FactorResult
         """
-        logger.info("[PredictionEngine] Start prediction using factors: %s", list(factors.keys()))
 
-        # --------------------------------------------------------------
-        # 1. 读取因子得分（松耦合：只读 factor.score）
-        # --------------------------------------------------------------
-        def _safe_score(name: str) -> float:
-            if name not in factors:
-                logger.warning("[PredictionEngine] Factor '%s' missing, use 50 (neutral)", name)
-                return 50.0
-            try:
-                return float(factors[name].score)
-            except Exception as e:
-                logger.error("[PredictionEngine] Cannot read score of '%s'. error=%s", name, e)
-                return 50.0  # neutral fallback
-
-        scores = {
-            "unified_emotion": _safe_score("unified_emotion"),
-            "north_nps": _safe_score("north_nps"),
-            #"turnover": _safe_score("turnover"),
-            "margin": _safe_score("margin"),
-            "sector_rotation": _safe_score("sector_rotation"),
-            "index_tech": _safe_score("index_tech"),
-            "index_global": _safe_score("index_global"),
-            "global_lead": _safe_score("global_lead"),
+        evidence: Dict[str, Any] = {
+            "used": [],
+            "used_in_aggregation": [],
+            "missing_factors": [],
+            "degraded_factors": [],
+            "raw_weights": dict(self.weights),
+            "normalized_weights": {},
+            "raw_weight_total": 0.0,
+            "normalized_weight_total": 0.0,
+            "policy": "STEP3_ONLY_BOUND_FACTORS",
         }
-        logger.info("[PredictionEngine] Collected factor scores: %s", scores)
 
-        # --------------------------------------------------------------
-        # 2. 加权平均
-        # --------------------------------------------------------------
         weighted_sum = 0.0
-        weight_total = 0.0
+        raw_weight_sum = 0.0
 
-        for name, score in scores.items():
-            w = float(self.weights.get(name, 0.0))
-            if w <= 0:
-                # 忽略权重为 0 的因子
-                logger.debug("[PredictionEngine] weight[%s]=0, skip", name)
+        for slot, weight in self.weights.items():
+            fr = factors.get(slot)
+
+            if fr is None:
+                evidence["missing_factors"].append(slot)
                 continue
-            weighted_sum += score * w
-            weight_total += w
-            logger.debug("[PredictionEngine] + %s: score=%.2f weight=%.3f → part=%.2f",
-                         name, score, w, score * w)
 
-        # --------------------------------------------------------------
-        # 3. 防止除零（极端情况）
-        # --------------------------------------------------------------
-        if weight_total <= 0:
-            logger.warning("[PredictionEngine] Total weight=0, fallback=50")
-            final_score = 50.0
-        else:
-            final_score = weighted_sum / weight_total
+            data_status = fr.details.get("data_status") if fr.details else "OK"
+            if data_status != "OK":
+                evidence["degraded_factors"].append(slot)
+                continue
 
-        logger.info("[PredictionEngine] Final weighted score = %.2f", final_score)
+            evidence["used"].append(slot)
+            evidence["used_in_aggregation"].append(slot)
 
-        # --------------------------------------------------------------
-        # 4. 输出预测结构体
-        # --------------------------------------------------------------
-        return UnifiedPrediction(
-            weighted_score=round(final_score, 2),
-            scores=scores,
-            weights=self.weights,
+            weighted_sum += fr.score * weight
+            raw_weight_sum += weight
+
+        evidence["raw_weight_total"] = round(raw_weight_sum, 4)
+
+        # 极端情况：无可用因子
+        if raw_weight_sum <= 0:
+            logger.warning("[PredictionEngine] NO_EFFECTIVE_FACTORS")
+            return {
+                "final_score": 50.0,
+                "risk_level": "NEUTRAL",
+                "evidence": {
+                    **evidence,
+                    "normalized_weight_total": 0.0,
+                    "reason": "NO_EFFECTIVE_FACTORS",
+                },
+            }
+
+        # 权重归一
+        normalized_weights = {}
+        for slot in evidence["used_in_aggregation"]:
+            normalized_weights[slot] = round(
+                self.weights[slot] / raw_weight_sum, 6
+            )
+
+        evidence["normalized_weights"] = normalized_weights
+        evidence["normalized_weight_total"] = 1.0
+
+        final_score = weighted_sum / raw_weight_sum
+        risk_level: RiskLevel = self._level_from_score(final_score)
+
+        logger.info(
+            "[PredictionEngine] used=%s raw_weight_total=%.4f final_score=%.2f",
+            evidence["used_in_aggregation"],
+            raw_weight_sum,
+            final_score,
         )
+
+        return {
+            "final_score": round(final_score, 2),
+            "risk_level": risk_level,
+            "evidence": evidence,
+        }
+
+    def _level_from_score(self, score: float) -> RiskLevel:
+        if score >= 66:
+            return "LOW"
+        if score <= 33:
+            return "HIGH"
+        return "NEUTRAL"

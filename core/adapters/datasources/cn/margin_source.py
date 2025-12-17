@@ -9,7 +9,7 @@ from typing import Dict, Any, List
 
 from core.datasources.datasource_base import (
     DataSourceConfig,
-    BaseDataSource,
+    DataSourceBase,
 )
 from core.adapters.providers.provider_router import ProviderRouter
 from core.utils.ds_refresh import apply_refresh_cleanup
@@ -18,7 +18,7 @@ from core.utils.logger import get_logger
 LOG = get_logger("DS.Margin")
 
 
-class MarginDataSource(BaseDataSource):
+class MarginDataSource(DataSourceBase):
     """
     两融 DataSource
     - provider: em

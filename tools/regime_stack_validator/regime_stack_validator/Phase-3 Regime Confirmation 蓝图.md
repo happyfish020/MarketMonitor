@@ -209,7 +209,7 @@ Phase-3 成功的标志不是：
 
 Phase-3 天然适合：
 
-作为 Transformer → Snapshot → Factor 的“上层解释模块”
+作为 BlockBuilder → Snapshot → Factor 的“上层解释模块”
 
 输出到：
 

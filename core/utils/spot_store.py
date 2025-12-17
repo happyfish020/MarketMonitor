@@ -17,7 +17,7 @@ from functools import lru_cache
 import pandas as pd
 import akshare as ak
 
-from core.datasources.datasource_base import DataSourceConfig,BaseDataSource
+from core.datasources.datasource_base import DataSourceConfig,DataSourceBase
 from core.utils.logger import get_logger
 from core.adapters.cache.symbol_cache import normalize_ashare_symbol
 

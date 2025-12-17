@@ -10,7 +10,7 @@ import pandas as pd
 from core.utils.logger import get_logger
 from core.datasources.datasource_base import (
     DataSourceConfig,
-    BaseDataSource,
+    DataSourceBase,
 )
 from core.utils.ds_refresh import apply_refresh_cleanup
 from core.utils.spot_store import get_spot_daily
@@ -18,7 +18,7 @@ from core.utils.spot_store import get_spot_daily
 LOG = get_logger("DS.Sentiment")
 
 
-class MarketSentimentDataSource(BaseDataSource):
+class MarketSentimentDataSource(DataSourceBase):
     """
     V12 市场情绪（宽度）数据源：
     - 依赖 SpotStore 全行情（zh_spot）

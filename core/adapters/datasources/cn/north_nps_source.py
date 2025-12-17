@@ -14,7 +14,7 @@ from typing import Dict, Any
 import pandas as pd
 
 from core.utils.logger import get_logger
-from core.datasources.datasource_base import DataSourceConfig,BaseDataSource
+from core.datasources.datasource_base import DataSourceConfig,DataSourceBase
 from core.adapters.cache.symbol_cache import normalize_symbol
 from core.utils.config_loader import load_symbols
 from core.utils.ds_refresh import apply_refresh_cleanup
@@ -23,7 +23,7 @@ from core.adapters.providers.symbol_series_store import SymbolSeriesStore
 LOG = get_logger("DS.NorthNPS")
 
 
-class NorthNPSSource(BaseDataSource):
+class NorthNPSDataSource(DataSourceBase):
     """
     V12.1 北向资金代理数据源（ETF-based）
 
@@ -32,7 +32,7 @@ class NorthNPSSource(BaseDataSource):
     - 统一通过 SymbolSeriesStore 拉取
 
     本 DS 职责：
-    - 构建 snapshot["north_nps"] 的 raw 数据块
+    - 构建 snapshot["north_nps_raw"] 的 raw 数据块
     - 不进行任何评分、趋势、强弱判断
     """
 
@@ -76,7 +76,7 @@ class NorthNPSSource(BaseDataSource):
     # ---------------------------------------------------------
     def get_nps_block(self, trade_date: str, refresh_mode: str) -> Dict[str, Any]:
         """
-        返回 snapshot["north_nps"]：
+        返回 snapshot["north_nps_raw"]：
 
         {
             "hs300": {

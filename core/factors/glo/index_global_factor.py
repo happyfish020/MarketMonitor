@@ -1,10 +1,11 @@
 from typing import Dict, Any
 import json
 
-from core.factors.factor_base import BaseFactor, FactorResult
+from core.factors.factor_base import FactorBase
+from core.factors.factor_result import FactorResult
 
 
-class IndexGlobalFactor(BaseFactor):
+class IndexGlobalFactor(FactorBase):
     """
     V12 IndexGlobalFactor（瘦因子版）
 
@@ -15,11 +16,20 @@ class IndexGlobalFactor(BaseFactor):
     """
 
     def __init__(self):
-        super().__init__("index_global")
+        super().__init__("index_global_raw")
 
     def compute(self, input_block: Dict[str, Any]) -> FactorResult:
-        data = self.pick(input_block, "index_global", {})
-
+        data = self.pick(input_block, "index_global_raw", {})
+        if not data:
+            return FactorResult(
+                name = self.name,
+                score=50.0,
+                level="NEUTRAL",
+                details={
+                    "data_status": "DATA_NOT_CONNECTED",
+                    "reason": "index_global_raw data missing",
+                } 
+            )    
         # 统一 key 为小写
         ig = {str(k).lower(): v for k, v in data.items()} if isinstance(data, dict) else {}
 
@@ -53,6 +63,7 @@ class IndexGlobalFactor(BaseFactor):
                     "vix_score": score_vix,
                     "dxy_score": score_dxy,
                 },
+                "data_status": "OK",
                 "_raw_data": json.dumps(data)[:160] + "...",
             },
         )

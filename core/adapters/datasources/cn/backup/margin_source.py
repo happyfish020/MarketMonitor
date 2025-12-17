@@ -18,7 +18,7 @@ import requests
 import json
 from typing import Dict, Any, List
 
-from core.datasources.datasource_base import BaseDataSource, DataSourceConfig
+from core.datasources.datasource_base import DataSourceBase, DataSourceConfig
 from core.utils.logger import get_logger
 from core.utils.ds_refresh import apply_refresh_cleanup
 from core.utils.units import yuan_to_e9
@@ -26,7 +26,7 @@ from core.utils.units import yuan_to_e9
 LOG = get_logger("DS.Margin")
 
 
-class MarginDataSource(BaseDataSource):
+class MarginDataSource(DataSourceBase):
 
     def __init__(self, config: DataSourceConfig):
         """

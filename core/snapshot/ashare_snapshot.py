@@ -48,12 +48,18 @@ class AshareSnapshotBuilder(SnapshotBuilderBase):
         snapshot.setdefault("emotion", {})
         snapshot.setdefault("turnover", {})
         snapshot.setdefault("margin", {})
-        snapshot.setdefault("north_nps", {})
+        snapshot.setdefault("north_nps_raw", {})
         snapshot.setdefault("index_tech", {})
         snapshot.setdefault("index_global", {})
         snapshot.setdefault("global_lead", {})
         snapshot.setdefault("global_macro", {})
         snapshot.setdefault("sector_rotation", {})
+
+        # Phase-2 structural pillars (append-only defaults)
+        snapshot.setdefault("breadth_damage", None)
+        snapshot.setdefault("participation", None)
+        #snapshot.setdefault("index_sector_corr_raw", {})
+        snapshot.setdefault("index_sector_corr", None)
 
     def _fix_unified_emotion(self, snapshot: Dict[str, Any]) -> None:
         """
@@ -63,7 +69,7 @@ class AshareSnapshotBuilder(SnapshotBuilderBase):
         规则：
         - unified_emotion 是上游聚合结果（完整保留）
         - 下游标准字段只在为空时填充
-        - 不覆盖 DS / Transformer 已有结果
+        - 不覆盖 DS / BlockBuilder 已有结果
         """
 
         ue = snapshot.get("unified_emotion")

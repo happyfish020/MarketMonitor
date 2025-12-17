@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 UnifiedRisk V12
-Sector Rotation Transformer (CN A-Share)
+Sector Rotation BlockBuilder (CN A-Share)
 
 最小可用版（B方案）：
 - 使用 snapshot 中已有的板块/指数强弱信息
@@ -10,14 +10,15 @@ Sector Rotation Transformer (CN A-Share)
 """
 
 from typing import Dict, Any, Optional
+from core.adapters.block_builder.block_builder_base import FactBlockBuilderBase
 from core.utils.logger import get_logger
 import json
-LOG = get_logger("Transformer.SectorRotation")
+LOG = get_logger("BlockBuilder.SectorRotation")
 
 
-class SectorRotationTransformer:
+class SectorRotationBlockBuilder(FactBlockBuilderBase):
     """
-    板块轮动 Transformer（V12）
+    板块轮动 BlockBuilder（V12）
 
     输入（来自 snapshot，必须已有）：
     - snapshot["index_tech"]       # 技术强弱（如科技/成长）

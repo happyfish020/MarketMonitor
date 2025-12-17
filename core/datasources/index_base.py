@@ -27,14 +27,14 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
-from core.datasources.datasource_base import BaseDataSource
+from core.datasources.datasource_base import DataSourceBase
 from core.adapters.cache.symbol_cache import normalize_symbol
 from core.utils.logger import get_logger
 
 LOG = get_logger("DS.BaseIndex")
 
 
-class BaseIndexSource(BaseDataSource):
+class IndexSourceBase(DataSourceBase):
     """
     指数 DS 的通用父类
     """

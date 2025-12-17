@@ -89,7 +89,7 @@ class DataSourceConfig:
             except Exception as e:
                 LOG.error("EnsureDirError: path=%s err=%s", path, e)
 
-class BaseDataSource:
+class DataSourceBase:
     """
     所有 DataSource 的基础类（可选）
     目前主要用于统一日志格式

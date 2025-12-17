@@ -1,9 +1,10 @@
 from typing import Dict, Any
 import json
-from core.factors.factor_base import BaseFactor, FactorResult
+from core.factors.factor_base import FactorBase
+from core.factors.factor_result import FactorResult
 
 
-class SectorRotationFactor(BaseFactor):
+class SectorRotationFactor(FactorBase):
     def __init__(self):
         super().__init__("sector_rotation")
 
@@ -16,6 +17,7 @@ class SectorRotationFactor(BaseFactor):
         return self.build_result(
             score=score,
             details={"rotation_diff": diff,
+                    "data_status": "OK",
                     "_raw_data": json.dumps(data)[:160] + "...",
                     },
         )

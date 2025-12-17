@@ -4,13 +4,15 @@
 
 prediction_weights:
   north_nps: 0.20
-  unified_emotion: 0.20
+  unified_emotion: 0.10
   turnover: 0.15
-  margin: 0.15
+  margin: 0.10
   index_tech: 0.10
-  sector_rotation: 0.10
+  sector_rotation: 0.05
   global_lead: 0.05
   index_global: 0.05
+  breadth: 0.10
+  global_macro: 0.10
 
 #    
 # 预留扩展

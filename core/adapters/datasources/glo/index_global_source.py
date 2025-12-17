@@ -10,7 +10,7 @@ from typing import Dict, Any
 import pandas as pd
 
 from core.utils.logger import get_logger
-from core.datasources.datasource_base import DataSourceConfig,BaseDataSource
+from core.datasources.datasource_base import DataSourceConfig,DataSourceBase
 from core.adapters.cache.symbol_cache import normalize_symbol
 from core.utils.config_loader import load_symbols
 from core.utils.ds_refresh import apply_refresh_cleanup
@@ -19,7 +19,7 @@ from core.adapters.providers.symbol_series_store import SymbolSeriesStore
 LOG = get_logger("DS.IndexGlobal")
 
 
-class IndexGlobalSource(BaseDataSource):
+class IndexGlobalDataSource(DataSourceBase):
     """
     全球指数日线数据源（基于 SymbolSeriesStore）。
 

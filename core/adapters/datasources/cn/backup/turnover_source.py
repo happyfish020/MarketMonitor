@@ -8,7 +8,7 @@ from typing import Dict, Any
 import pandas as pd
 
 from core.utils.logger import get_logger
-from core.datasources.datasource_base import DataSourceConfig,BaseDataSource
+from core.datasources.datasource_base import DataSourceConfig,DataSourceBase
 from core.utils.spot_store import get_spot_daily
 from core.utils.ds_refresh import apply_refresh_cleanup
 

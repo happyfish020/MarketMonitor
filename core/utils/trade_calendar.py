@@ -1,5 +1,5 @@
 from datetime import date, datetime, timedelta
-from typing import Set
+from typing import Set, List
 
 HOLIDAYS: Set[date] = set()
 
@@ -60,3 +60,22 @@ def get_trade_date_daily(bj_now: datetime) -> date:
     else:
         # 非交易日：一律用最近一个过去的交易日
         return get_last_trade_date(bj_now)
+
+
+def get_last_n_trading_days(end: date, n: int) -> List[date]:
+    """Return the last N trading days up to and including `end`.
+
+    This utility is used by time-series DataSources to validate missing
+    trading dates. It is intentionally simple (weekends + HOLIDAYS).
+    """
+    if n <= 0:
+        return []
+
+    days: List[date] = []
+    cur = end
+    while len(days) < n:
+        if is_trading_day(cur):
+            days.append(cur)
+        cur = cur - timedelta(days=1)
+
+    return list(reversed(days))

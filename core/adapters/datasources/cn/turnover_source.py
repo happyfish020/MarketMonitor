@@ -10,7 +10,7 @@ import pandas as pd
 from core.utils.logger import get_logger
 from core.datasources.datasource_base import (
     DataSourceConfig,
-    BaseDataSource,
+    DataSourceBase,
 )
 from core.utils.spot_store import get_spot_daily
 from core.utils.ds_refresh import apply_refresh_cleanup
@@ -18,7 +18,7 @@ from core.utils.ds_refresh import apply_refresh_cleanup
 LOG = get_logger("DS.Turnover")
 
 
-class TurnoverDataSource(BaseDataSource):
+class TurnoverDataSource(DataSourceBase):
     """
     V12 成交额数据源：
     - 使用 SpotStore 提供的全行情（zh_spot）

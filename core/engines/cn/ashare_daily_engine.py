@@ -13,59 +13,46 @@ UnifiedRisk V12 - CN AShare Daily Engine
 from __future__ import annotations
 
 from typing import Dict, Any
-from datetime import datetime, timezone, timedelta
+from datetime import datetime
 
 from core.utils.logger import get_logger
 from core.adapters.fetchers.cn.ashare_fetcher import AshareDataFetcher
-from core.predictors.prediction_engine import PredictionEngine
 
-# factors
 from core.factors.cn.unified_emotion_factor import UnifiedEmotionFactor
 from core.factors.cn.margin_factor import MarginFactor
 from core.factors.cn.north_nps_factor import NorthNPSFactor
+from core.factors.cn.turnover_factor import TurnoverFactor
 from core.factors.cn.sector_rotation_factor import SectorRotationFactor
 from core.factors.cn.index_tech_factor import IndexTechFactor
+from core.factors.cn.participation_factor import ParticipationFactor
 
-# global / macro factors（真实目录是 glo）
 from core.factors.glo.global_macro_factor import GlobalMacroFactor
 from core.factors.glo.global_lead_factor import GlobalLeadFactor
 from core.factors.glo.index_global_factor import IndexGlobalFactor
+from core.factors.cn.breadth_factor import BreadthFactor
 
-# reporter（唯一输出层）
-from core.reporters.cn.ashare_daily_reporter import (
-    build_daily_report_text,
-    save_daily_report,
-)
+from core.factors.factor_result import FactorResult
+from core.adapters.policy_slot_binders.cn.ashares_policy_slot_binder import ASharesPolicySlotBinder
+from core.predictors.prediction_engine import PredictionEngine
+
+
+from core.predictors.prediction_engine import PredictionEngine
+from core.reporters.cn.ashare_daily_reporter import build_daily_report_text, save_daily_report
+
 
 LOG = get_logger("Engine.AshareDaily")
 
 
-# ----------------------------------------------------------------------
-# 工具：trade_date 统一
-# ----------------------------------------------------------------------
 def _normalize_trade_date(trade_date: str | None) -> str:
     if trade_date:
-        return str(trade_date)
+        s = str(trade_date).strip()
+        if len(s) == 8 and s.isdigit():
+            return f"{s[:4]}-{s[4:6]}-{s[6:]}"
+        return s
+    return datetime.now().strftime("%Y-%m-%d")
 
-    bj_tz = timezone(timedelta(hours=8))
-    return datetime.now(bj_tz).strftime("%Y-%m-%d")
 
-
-# ----------------------------------------------------------------------
-# 主入口（被 main.py 调用）
-# ----------------------------------------------------------------------
-def run_cn_ashare_daily(
-    *,
-    trade_date: str | None = None,
-    refresh_mode: str = "readonly",
-) -> None:
-    """
-    CN AShare 日度运行入口（V12）
-
-    - 不返回任何业务数据
-    - 不抛出非致命异常
-    """
-
+def run_cn_ashare_daily(trade_date: str | None = None, refresh_mode: str = "auto") -> None:
     trade_date_str = _normalize_trade_date(trade_date)
 
     LOG.info(
@@ -74,79 +61,67 @@ def run_cn_ashare_daily(
         refresh_mode,
     )
 
-    # ------------------------------------------------------------------
-    # 1️⃣ Snapshot（Fetcher）
-    # ------------------------------------------------------------------
-    fetcher = AshareDataFetcher(trade_date_str, refresh_mode=refresh_mode)
+    # 1️⃣ Fetch snapshot
+    fetcher = AshareDataFetcher(trade_date=trade_date_str, refresh_mode=refresh_mode)
     snapshot: Dict[str, Any] = fetcher.prepare_daily_market_snapshot()
 
-    meta = snapshot.get("meta", {})
-    meta.setdefault("trade_date", trade_date_str)
-
-    # ------------------------------------------------------------------
-    # 2️⃣ Factors（严格 V12：compute(input_block)）
-    # ------------------------------------------------------------------
+    # 2️⃣ Factors
     factor_list = [
         UnifiedEmotionFactor(),
+        ParticipationFactor(),
         GlobalMacroFactor(),
         IndexGlobalFactor(),
         GlobalLeadFactor(),
         NorthNPSFactor(),
-        #TurnoverFactor(),
+        TurnoverFactor(),
         MarginFactor(),
         SectorRotationFactor(),
         IndexTechFactor(),
+        BreadthFactor(),
     ]
 
     factors: Dict[str, Any] = {}
 
+     # 1️⃣ 计算所有 Factor（raw）
+    factors: dict[str, FactorResult] = {}
+    
     for factor in factor_list:
         try:
             fr = factor.compute(snapshot)
-            factors[fr.name] = fr
+            factors[factor.name] = fr
+            assert factors[factor.name] , f"{factor.name} is missing" 
+            LOG.info("[Factor.%s] score=%.2f level=%s", factor.name, fr.score, fr.level)
+        except Exception as e:
+            LOG.error("[Factor.%s] compute failed: %s", factor.name, e, exc_info=True)
+    
+    # 2️⃣ PolicySlotBinder（raw → 制度槽位）
+    binder = ASharesPolicySlotBinder()
+    factors_bound = binder.bind(factors)
+    
+    # 3️⃣ Prediction（只吃制度槽位）
+    prediction_engine = PredictionEngine()
+    prediction = prediction_engine.predict(factors_bound)
 
-            # Engine 日志：不假设 level 类型
-            level = (
-                fr.level.value
-                if hasattr(fr.level, "value")
-                else str(fr.level)
-            )
+    # meta
+    meta = {
+        "market": "cn",
+        "trade_date": trade_date_str,
+    }
 
-            LOG.info(
-                "[Factor.%s] score=%.2f level=%s",
-                fr.name,
-                fr.score,
-                level,
-            )
-
-        except Exception:
-            LOG.exception(
-                "Factor compute failed: %s",
-                getattr(factor, "name", factor.__class__.__name__),
-            )
-
-    # ------------------------------------------------------------------
-    # 3️⃣ Prediction（不解构）
-    # ------------------------------------------------------------------
-    predictor = PredictionEngine()
-    prediction = predictor.predict(factors)
-
-    LOG.info(
-        "Prediction generated: %s",
-        type(prediction).__name__,
-    )
-
-    # ------------------------------------------------------------------
-    # 4️⃣ Reporter（唯一输出层）
-    # ------------------------------------------------------------------
+    # 4️⃣ Reporter
     report_text = build_daily_report_text(
         meta=meta,
         factors=factors,
         prediction=prediction,
+        snapshot=snapshot,
     )
 
+    if not report_text:
+        LOG.error("[Engine.AshareDaily] report_text is EMPTY, skip saving")
+        LOG.info("CN AShare Daily finished successfully.")
+        return
+
     save_daily_report(
-        market="cn",
         trade_date=trade_date_str,
         text=report_text,
     )

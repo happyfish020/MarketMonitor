@@ -29,6 +29,15 @@ def load_symbols() -> Dict[str, Any]:
 def load_weights() -> Dict[str, Any]:
     return _load_yaml("weights.yaml")
 
+
+@lru_cache()
+def load_config() -> Dict[str, Any]:
+    """Load root config/config.yaml.
+
+    Append-only addition for V12 Phase-2 runtime integration.
+    """
+    return _load_yaml("config.yaml")
+
 def logs_path(*p):
     return os.path.join(ROOT_DIR, "logs", *p)
 

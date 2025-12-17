@@ -24,7 +24,7 @@ Phase-2 冻结规则（后续升级不得破坏）
 
 在做 sector_rotation 时暴露出典型矛盾：
 
-Snapshot/Transformer 是否能承载多 symbol / 多序列聚合？
+Snapshot/BlockBuilder 是否能承载多 symbol / 多序列聚合？
 
 如果把逻辑塞进 Snapshot，系统会“过度智能、难审计”；
 

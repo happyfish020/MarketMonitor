@@ -1,4 +1,5 @@
 data_dir: "data/"
 cache_dir: "data/cache/"
-log_dir: "data/logs/"
+log_dir: "logs/"
 output_dir: "data/output/"
+cn_report_dir: "reports/cn/daily"

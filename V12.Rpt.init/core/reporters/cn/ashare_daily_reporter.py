@@ -18,14 +18,14 @@ from typing import Dict, Any, List
 
 from core.utils.logger import get_logger
 from core.utils.path_utils import ensure_dir
-
+from core.utils.config_loader import load_paths
 
 LOG = get_logger("Reporter.AShareDaily")
 
 # ----------------------------------------------------------------------
 # 路径规范（V12 冻结）
 # ----------------------------------------------------------------------
-from core.utils.config_loader import load_paths
+
 _paths = load_paths()
 REPORT_ROOT = _paths.get("cn_report_dir", "data/reports/cn/daily/")
 

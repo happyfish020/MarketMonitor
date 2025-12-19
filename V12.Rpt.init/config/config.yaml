@@ -1,0 +1,20 @@
+dev_mode: true
+
+# ------------------------------------------------------------
+# DB Config (Phase-2 Breadth / Index-Sector Correlation)
+# NOTE: credentials are intentionally placed here per V12 iron rule.
+# ------------------------------------------------------------
+db:
+  type: oracle  # oracle | mysql
+
+  oracle:
+    user: "SECOPR"
+    password: "secopr"
+    host: "localhost"
+    port: 1521
+    service: "xe"
+    schema: "SECOPR"
+    tables:
+      stock_daily: "CN_STOCK_DAILY_PRICE"
+      index_daily: "CN_INDEX_DAILY_PRICE"
+      universe: "CN_UNIVERSE_SYMBOLS"

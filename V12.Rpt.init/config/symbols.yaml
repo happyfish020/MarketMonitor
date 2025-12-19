@@ -1,0 +1,251 @@
+# =================================================================
+# UnifiedRisk V12 - Symbol Configuration
+# Provider Routing + Submethod (method) 版本
+# =================================================================
+
+# ---------------------------------------------------------------
+# 中国市场核心指数（A 股）
+# ---------------------------------------------------------------
+ 
+
+north_nps:
+  hs300:
+    symbol: "510300.SS"
+    provider: "yf"
+    method: "etf"
+    alias: "沪深300ETF"
+
+  sz50:
+    symbol: "510050.SS"
+    provider: "yf"
+    method: "etf"
+    alias: "上证50ETF"
+
+  cyb:
+    symbol: "159915.SZ"
+    provider: "yf"
+    method: "etf"
+    alias: "创业板ETF"
+      
+cn_index:
+
+  etf_sh:
+    symbol: "510300.SS"
+    provider: "yf"
+    alias: "沪深300ETF"
+  etf_sz:
+    symbol: "159901.SZ"
+    provider: "yf"
+    alias: "深成指ETF"
+ 
+index_core:
+  sh:
+    symbol: "000001.SS"
+    provider: "yf"
+    method: "index"      # 用于拉取 A 股大盘指数
+    alias: "上证指数"
+
+  sz:
+    symbol: "399001.SZ"
+    provider: "yf"
+    method: "index"
+    alias: "深证成指"
+
+  hs300:
+    symbol: "000300.SS"
+    provider: "yf"
+    method: "index"      # YF index 方法
+    alias: "沪深300"
+
+  zz500:
+    symbol: "sh.000905"  # baostock 格式
+    provider: "bs"        # 使用 BaostockProvider
+    method: "index"       # bs.index
+    alias: "中证500"
+
+  kc50:
+    symbol: "sz.000688"
+    provider: "bs"
+    method: "index"
+    alias: "科创50"
+
+
+# ---------------------------------------------------------------
+# 海外指数（Global Index）
+# ---------------------------------------------------------------
+
+global_index:
+  spx:
+    symbol: "^GSPC"
+    provider: "yf"
+    method: "equity"     # 标普500 → equity 方法
+    alias: "标普500"
+
+  ndx:
+    symbol: "^NDX"
+    provider: "yf"
+    method: "equity"
+    alias: "纳斯达克100"
+
+  dji:
+    symbol: "^DJI"
+    provider: "yf"
+    method: "equity"
+    alias: "道琼斯指数"
+
+  vix:
+    symbol: "^VIX"
+    provider: "yf"
+    method: "equity"     # vix 通常使用 equity API
+    alias: "VIX"
+
+  dxy:
+    symbol: "DX-Y.NYB"
+    provider: "yf"
+    method: "equity"
+    alias: "美元指数"
+
+  hsi:
+    symbol: "^HSI"
+    provider: "yf"
+    method: "equity"
+    alias: "恒生指数"
+
+  n225:
+    symbol: "^N225"
+    provider: "yf"
+    method: "equity"
+    alias: "日经225"
+
+
+# ---------------------------------------------------------------
+# 早盘 Lead（Global Lead）
+# ---------------------------------------------------------------
+
+global_lead:
+  a50:
+    symbol: "2822.HK"
+    provider: "yf"
+    method: "equity"
+    alias: "A50 港股 ETF"
+
+  es:
+    symbol: "ES=F"
+    provider: "yf"
+    method: "future"     # 期货 → 使用 future 方法
+    alias: "标普期货"
+
+  nq:
+    symbol: "NQ=F"
+    provider: "yf"
+    method: "future"
+    alias: "纳指期货"
+
+  hsi:
+    symbol: "^HSI"
+    provider: "yf"
+    method: "equity"
+    alias: "恒生指数"
+
+  btc:
+    symbol: "BTC-USD"
+    provider: "yf"
+    method: "crypto"     # 数字货币 → crypto 方法
+    alias: "比特币"
+
+
+# ---------------------------------------------------------------
+# ETF 系列（用于 Turnover / Emotion / NPS）
+# ---------------------------------------------------------------
+
+etf_proxy:
+  csi300:
+    symbol: "510300.SS"
+    provider: "yf"
+    method: "equity"
+    alias: "沪深300 ETF"
+
+  csi500:
+    symbol: "510500.SS"
+    provider: "yf"
+    method: "equity"
+    alias: "中证500 ETF"
+
+  csi1000:
+    symbol: "159845.SZ"
+    provider: "yf"
+    method: "equity"
+    alias: "中证100"
+
+# ---------------------------------------------------------------
+# 全球指数（日线） - index_global
+# ---------------------------------------------------------------
+index_global:
+  spx:
+    symbol: "^GSPC"
+    provider: "yf"
+    method: "equity"
+    alias: "标普500"
+
+  ndx:
+    symbol: "^NDX"
+    provider: "yf"
+    method: "equity"
+    alias: "纳斯达克100"
+
+  dxy:
+    symbol: "DX-Y.NYB"
+    provider: "yf"
+    method: "equity"
+    alias: "美元指数"
+
+  hsi:
+    symbol: "^HSI"
+    provider: "yf"
+    method: "equity"
+    alias: "恒生指数"
+
+  n225:
+    symbol: "^N225"
+    provider: "yf"
+    method: "equity"
+    alias: "日经225"
+
+  vix:
+    symbol: "^VIX"
+    provider: "yf"
+    method: "equity"
+    alias: "VIX 恐慌指数"
+
+global_macro:
+  bond10:
+    symbol: "^TNX"
+    provider: "yf"
+    method: "index"
+    alias: "美债10Y"
+  bond05:
+    symbol: "^FVX"
+    provider: "yf"
+    method: "index"
+    alias: "美债5Y"
+  dxy:
+    symbol: "DX-Y.NYB"
+    provider: "yf"
+    method: "index"
+    alias: "美元指数"
+  nas:
+    symbol: "^IXIC"
+    provider: "yf"
+    method: "index"
+    alias: "纳指综合"
+
+core_theme:
+  ai_index:
+    symbol: "^NDX"
+    provider: yf
+    method: index
+
+  ai_etf:
+    symbol: "159819.SZ"
+    provider: yf
+    method: index

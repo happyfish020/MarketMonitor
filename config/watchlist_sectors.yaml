@@ -1,0 +1,13 @@
+# config/watchlist_sectors.yaml
+
+watchlist_sectors:
+  growth:
+    - AI
+    - 通信设备
+    - 半导体
+  defensive:
+    - 红利
+    - 公用事业
+  cyclical:
+    - 有色
+    - 化工

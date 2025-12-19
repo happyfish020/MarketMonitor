@@ -16,20 +16,40 @@ from typing import Dict, Any
 from datetime import datetime
 
 from core.utils.logger import get_logger
- 
-##########
-from core.snapshot.ashare_snapshot  import AshareSnapshotBuilder
-from core.policy.cn.ashare_policy_compute import AsharePolicyCompute
-from core.actionhint.cn.ashare_actionhint_builder import AshareActionHintBuilder
-from core.reporters.cn.ashare_report_pipeline import AshareReportPipeline
+from core.adapters.fetchers.cn.ashare_fetcher import AshareDataFetcher
+
+from core.factors.cn.unified_emotion_factor import UnifiedEmotionFactor
+from core.factors.cn.margin_factor import MarginFactor
+from core.factors.cn.north_nps_factor import NorthNPSFactor
+from core.factors.cn.turnover_factor import TurnoverFactor
+from core.factors.cn.sector_rotation_factor import SectorRotationFactor
+from core.factors.cn.index_tech_factor import IndexTechFactor
+from core.factors.cn.etf_index_sync_factor import ETFIndexSyncFactor
+from core.factors.cn.participation_factor import ParticipationFactor
+
+from core.factors.glo.global_macro_factor import GlobalMacroFactor
+from core.factors.glo.global_lead_factor import GlobalLeadFactor
+from core.factors.glo.index_global_factor import IndexGlobalFactor
+from core.factors.cn.breadth_factor import BreadthFactor
+
+from core.factors.factor_result import FactorResult
+from core.adapters.policy_slot_binders.cn.ashares_policy_slot_binder import ASharesPolicySlotBinder
+from core.predictors.prediction_engine import PredictionEngine
 
 
+from core.predictors.prediction_engine import PredictionEngine
+from core.reporters.cn.ashare_daily_reporter import build_daily_report_text, save_daily_report
+from core.regime.ashares_gate_decider import ASharesGateDecider
 
+from core.regime.observation.structure.structure_facts_builder import (
+    StructureFactsBuilder
+)
+
+from core.regime.observation.watchlist.watchlist_state_builder import (
+    WatchlistStateBuilder
+)
 
 LOG = get_logger("Engine.AshareDaily")
-
-
-
 
 
 def _normalize_trade_date(trade_date: str | None) -> str:
@@ -172,11 +192,11 @@ def _build_report_engine() -> ReportEngine:
             "scenarios.forward": ScenariosForwardBlock().render,
             "dev.evidence": DevEvidenceBlock().render,
         },
-    )  
+    )
 ##### report section to  be added above  
 
 
-def _execute_report_pipeline1(
+def _execute_report_pipeline(
     *,
     trade_date: str,
     gate_decision,
@@ -214,206 +234,146 @@ def _execute_report_pipeline1(
     return report_path
 
 
-#######33
 def run_cn_ashare_daily(trade_date: str | None = None, refresh_mode: str = "auto") -> None:
-    trade_date = _normalize_trade_date(trade_date)
+    trade_date_str = _normalize_trade_date(trade_date)
 
     LOG.info(
         "Run CN AShare Daily | trade_date=%s refresh=%s",
-        trade_date,
+        trade_date_str,
         refresh_mode,
     )
 
-    # ===============================
-    # 构建 Policy 计算器（制度层）
-    # ===============================
-    from core.policy.cn.ashare_policy_compute import AsharePolicyCompute
-    from core.policy.cn.ashare_factor_compute import AshareFactorCompute
-    from core.policy.cn.ashare_regime_compute import AshareRegimeCompute
-    from core.policy.cn.ashare_gate_compute import AshareGateCompute
+    # 1️⃣ Fetch snapshot
+    fetcher = AshareDataFetcher(trade_date=trade_date_str, refresh_mode=refresh_mode)
+    snapshot: Dict[str, Any] = fetcher.prepare_daily_market_snapshot()
 
-    factor_compute = AshareFactorCompute()
+    # 2️⃣ Factors
+    factor_list = [
+        UnifiedEmotionFactor(),
+        ParticipationFactor(),
+        GlobalMacroFactor(),
+        IndexGlobalFactor(),
+        GlobalLeadFactor(),
+        NorthNPSFactor(),
+        TurnoverFactor(),
+        MarginFactor(),
+        SectorRotationFactor(),
+        IndexTechFactor(),
+        BreadthFactor(),
+        ETFIndexSyncFactor(),
+    ]
 
-    policy_compute = AsharePolicyCompute(
-        factor_compute=factor_compute,
-        regime_compute=AshareRegimeCompute(),
-        gate_compute=AshareGateCompute(),
+    #factors: Dict[str, Any] = {}
+    ###
+    # 1️⃣ 计算所有 Factor（raw）
+    factors: dict[str, FactorResult] = {}
+    
+    for factor in factor_list:
+        try:
+            fr = factor.compute(snapshot)
+            factors[fr.name] = fr
+    
+            assert factors[fr.name], f"{fr.name} is missing"
+            LOG.info("[Factor.%s] score=%.2f level=%s", fr.name, fr.score, fr.level)
+        except Exception as e:
+            LOG.error("[Factor.%s] compute failed: %s", fr.name, e, exc_info=True)
+    
+    
+    # 2️⃣ PolicySlotBinder（raw → 制度槽位）
+    binder = ASharesPolicySlotBinder()
+    factors_bound = binder.bind(factors)
+    
+    assert factors_bound.get("watchlist"), 'factors_bound["watchlist"] missing'
+    
+    
+    # 3️⃣ Phase-2 · Structure Facts（Observation 层）
+    from core.regime.observation.structure.structure_facts_builder import (
+        StructureFactsBuilder
+    )
+    
+    structure_builder = StructureFactsBuilder()
+    structure_facts = structure_builder.build(factors=factors)
+    
+    # 写入 Phase-2 制度槽位
+
+    factors_bound["structure"] = structure_facts
+
+
+
+
+    watchlist_config = factors_bound.get("watchlist")
+    
+    watchlist_builder = WatchlistStateBuilder()
+    watchlist_state = watchlist_builder.build(
+        factors=factors,
+        structure=structure_facts,
+        watchlist_config=watchlist_config,
+    )
+    
+    # 覆盖 / 丰富 watchlist 槽位（只读给 Phase-3）
+    factors_bound["watchlist"] = watchlist_state
+    
+    ################ above is phase-2 ################
+    
+    
+    # 4️⃣ Gate 决策（只读 structure / watchlist）
+    decider = ASharesGateDecider()
+    gate_decision = decider.decide(snapshot, factors_bound)
+    
+    snapshot["gate"] = {
+        "level": gate_decision.level,
+        "reasons": gate_decision.reasons,
+        "evidence": gate_decision.evidence,
+    }
+    
+
+
+
+    ###
+    LOG.info(
+        "[ASharesEngine] Gate | level=%s | reasons=%s | evidence=%s",
+        gate_decision.level,
+        gate_decision.reasons,
+        gate_decision.evidence,
     )
 
-    # ===============================
-    # Snapshot Pipeline
-    # ===============================
-    from core.snapshot.cn.ashare_snapshot_pipeline import AshareSnapshotPipeline
-    snapshot_pipeline = AshareSnapshotPipeline()
 
-    # ===============================
-    # ActionHint / Report Pipeline
-    # ===============================
-    from core.actionhint.cn.ashare_actionhint_builder import AshareActionHintBuilder
-    from core.reporters.cn.ashare_report_pipeline import AshareReportPipeline
-
-    # ===============================
-    # 构建 Orchestration Engine
-    # ===============================
-    engine = AshareDailyEngine(
-        snapshot_builder=snapshot_pipeline.build,          # ✅ 只负责 snapshot
-        factor_compute=factor_compute.compute,             # ✅ 注入 factor 计算
-        policy_compute=policy_compute.compute,             # ✅ 只读 snapshot["factors"]
-        actionhint_builder=AshareActionHintBuilder().build,
-        report_pipeline=AshareReportPipeline(),
-    )
-
-    # ===============================
-    # 执行（Engine 内完成完整编排）
-    # ===============================
-    engine.run(
-        trade_date=trade_date,
-        refresh_mode=refresh_mode,
-    )
-
-    LOG.info("CN AShare Daily finished successfully.")
-
-####################
+# Phase-2 已完成
  
 
-
-"""
-UnifiedRisk V12 FULL
-A-share Daily Engine (Orchestration Only)
-
-本文件职责（冻结）：
-- 仅承担系统编排（Orchestration）
-- 不包含任何制度计算逻辑
-- 不拼装报告字段
-- 不做 Gate / Regime / Factor 判断
-- 只负责按顺序调用外部注入的功能模块，并传递对象
-
-设计原则：
-- Interface First
-- Dependency Injection（不假设任何实现存在）
-- 单向数据流
-"""
-
-from typing import Callable, Dict, Any, Optional
-
-
-class AshareDailyEngine:
-    """
-    A股日度运行编排器（Orchestrator）
-
-    ⚠️ 注意：
-    - 本类不感知任何制度细节
-    - 所有功能模块必须由外部注入
-    """
-
-    def __init__(
-        self,
-        *,
-        snapshot_builder: Callable[..., Any],
-        factor_compute,  
-        policy_compute: Callable[..., Any],
-        actionhint_builder: Callable[..., Any],
-        report_pipeline: Callable[..., Any],
-    ) -> None:
-        """
-        参数说明（全部为依赖注入）：
-
-        snapshot_builder:
-            - 负责构建 MarketSnapshot
-            - Engine 不关心其内部实现
-
-        policy_compute:
-            - 负责制度计算（Factor / Regime / Gate）
-            - 返回 PolicyDecisionBundle
-
-        actionhint_builder:
-            - 负责生成 ActionHintResult（仅解释与建议）
-
-        report_pipeline:
-            - 负责生成最终 DailyReport（表达层）
-        """
-        self._snapshot_builder = snapshot_builder
-        self._factor_compute = factor_compute
-        self._policy_compute = policy_compute
-        self._actionhint_builder = actionhint_builder
-        self._report_pipeline = report_pipeline
-
-    def run(
-        self,
-        *,
-        trade_date: str,
-        refresh_mode: str,
-        market: str = "CN_A",
-        context: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
-        """
-        运行一次 A 股日度流程（Orchestration）
-
-        输入参数（冻结）：
-        - trade_date: 交易日（YYYY-MM-DD）
-        - refresh_mode: 数据刷新模式（如 full / incremental / cache_only）
-        - market: 市场标识（默认 CN_A）
-        - context: 运行上下文（可选，Engine 只透传，不解析）
-
-        输出（冻结）：
-        - Dict[str, Any]：
-            {
-                "trade_date": ...,
-                "market": ...,
-                "snapshot": MarketSnapshot,
-                "policy_result": PolicyDecisionBundle,
-                "action_hint": ActionHintResult,
-                "report": DailyReport,
-            }
-        """
-
-        # -------- 1. 构建结构事实（Snapshot）--------
-        snapshot = self._snapshot_builder(
-            trade_date=trade_date,
-            refresh_mode=refresh_mode,
-            market=market,
-            context=context,
-        )
-
-        # -------- 2. 制度计算（Policy / Regime / Gate）--------
-        policy_result = self._policy_compute(
-            snapshot=snapshot,
-            trade_date=trade_date,
-            market=market,
-            context=context,
-        )
-
-        # -------- 3. 行为建议构建（ActionHint）--------
-        action_hint = self._actionhint_builder(
-            snapshot=snapshot,
-            policy_result=policy_result,
-            trade_date=trade_date,
-            market=market,
-            context=context,
-        )
-
-        # -------- 4. 报告表达（Report Pipeline）--------
-        report = self._report_pipeline(
-            snapshot=snapshot,
-            policy_result=policy_result,
-            action_hint=action_hint,
-            trade_date=trade_date,
-            market=market,
-            context=context,
-        )
-
-        # -------- 5. 汇总输出（Engine 只做对象封装）--------
-        return {
-            "trade_date": trade_date,
-            "market": market,
-            "snapshot": snapshot,
-            "policy_result": policy_result,
-            "action_hint": action_hint,
-            "report": report,
-        }
+    # Phase-3 Action Governance
+    from core.actions.action_hint_builder import build_action_hint
+    action_hint = build_action_hint(snapshot)
+    snapshot["action_hint"] = action_hint
 
 
 
-##############
+    # 3️⃣ Prediction（只吃制度槽位）
+    prediction_engine = PredictionEngine()
+    prediction = prediction_engine.predict(factors_bound)
 
+    # meta
+    meta = {
+        "market": "cn",
+        "trade_date": trade_date_str,
+    }
 
+    # 4️⃣ Reporter
+
+    ##### report ############
+    # 4️⃣ Phase-3 Report (NEW)
+
+    report_path = _execute_report_pipeline(
+        trade_date=trade_date_str,
+        gate_decision=gate_decision,
+        factors_bound=factors_bound,
+        kind="PRE_OPEN",
+    )
+
+    LOG.info("[Engine.AshareDaily] Phase-3 report generated: %s", report_path)
+    if not report_path:
+        LOG.error("[Engine.AshareDaily] report_text is EMPTY, skip saving")
+        LOG.info("CN AShare Daily finished successfully.")
+        return
+ 
+    LOG.info("CN AShare Daily finished successfully.")

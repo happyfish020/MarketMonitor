@@ -64,6 +64,7 @@ def build_daily_report_text(
     lines: List[str] = []
 
     snapshot = snapshot or {}
+    LOG.info("DEBUG slots keys: %s", list(factors.keys()))
 
     # ==============================================================
     # Header

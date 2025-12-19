@@ -7,75 +7,100 @@ from core.reporters.report_context import ReportContext
 from core.reporters.report_types import ReportBlock
 from core.reporters.report_blocks.report_block_base import ReportBlockRendererBase
 
-
 LOG = logging.getLogger("ReportBlock.StructureFacts")
 
 
 class StructureFactsBlock(ReportBlockRendererBase):
     """
-    Block 2 · 结构事实（Fact → 含义）
+    Block · 结构事实（技术轨）
 
-    职责：
+    职责（冻结）：
     - 展示 Phase-2 已冻结的结构性事实
-    - 仅用于解释 Gate / ActionHint 的制度背景
-    - 不参与任何预测、裁决或评分
+    - 以「状态 + 含义 + 证据」形式输出
+    - 仅用于解释 Gate / ActionHint
+    - ❌ 不参与裁决
+    - ❌ 不做预测
     """
 
-    #block_id = "2"
     block_alias = "structure.facts"
-    title = "结构事实（Fact → 含义）"
+    title = "结构事实（Structure Facts · 技术轨）"
 
     def render(
         self,
         context: ReportContext,
         doc_partial: Dict[str, Any],
     ) -> ReportBlock:
-        """
-        Render structure facts block.
-
-        设计要点：
-        - 只读 context.slots["structure"]
-        - slot 缺失 → warning + 占位 payload
-        - 永不返回 None
-        """
-
         warnings: List[str] = []
-        assert "structure" in context.slots, \
-                    "structure.facts missing: Phase-2 wiring error" 
-        
+
         structure = context.slots.get("structure")
-          
-        if structure is None:
-            warnings.append("empty:structure")
-            self.logger.error(
-                    "[DEPRECATED][StructureFactsBlock] "
-                    "context.slots['structure'] is missing. "
-                    "This indicates Phase-2 → Phase-3 wiring failure. "
-                    "Current behavior falls back to placeholder payload. "
-                    "This fallback will be removed in a future version."
-                )
+        if not isinstance(structure, dict):
+            warnings.append("structure_missing_or_invalid")
             payload = {
                 "note": (
-                    "⚠️ 结构性事实缺失（structure slot 未生成）。\n"
-                    "该情况不应在正常流程中出现，"
-                    "请检查 Phase-2 结构聚合与接线是否正确。"
+                    "⚠️ structure slot 缺失或非法。\n"
+                    "该区块应由 Phase-2 结构观测层生成，"
+                    "请检查 Phase-2 → Phase-3 接线。"
+                )
+            }
+            return ReportBlock(
+                block_alias=self.block_alias,
+                title=self.title,
+                payload=payload,
+                warnings=warnings,
+            )
+
+        rows: List[Dict[str, Any]] = []
+
+        for key, item in structure.items():
+            if not isinstance(item, dict):
+                continue
+
+            state = item.get("state") or item.get("status")
+            reason = item.get("reason") or item.get("meaning")
+            evidence = {}
+
+            # 只挑“关键证据”，避免 raw data 灾难
+            for k in (
+                "adv_ratio",
+                "new_low_ratio",
+                "count_new_low",
+                "trend",
+                "signal",
+                "score",
+            ):
+                if k in item:
+                    evidence[k] = item.get(k)
+
+            rows.append(
+                {
+                    "structure": key,
+                    "state": state,
+                    "meaning": reason,
+                    "evidence": evidence if evidence else None,
+                }
+            )
+
+        if not rows:
+            warnings.append("structure_empty")
+            payload = {
+                "note": (
+                    "structure slot 存在，但未解析出可用结构项。\n"
+                    "请检查 StructureFactsBuilder 的输出格式。"
                 )
             }
         else:
             payload = {
-                "structure": structure,
+                "rows": rows,
                 "note": (
-                    "Phase-2 冻结后的结构事实，仅用于解释当前 Gate / ActionHint，"
+                    "以上为 Phase-2 冻结后的结构性事实，"
+                    "仅用于解释当前 Gate / ActionHint 的制度背景，"
                     "不构成新的判断、预测或操作建议。"
                 ),
             }
 
-        block = ReportBlock(
-            #block_id=self.block_id,
+        return ReportBlock(
             block_alias=self.block_alias,
             title=self.title,
             payload=payload,
             warnings=warnings,
         )
-
-        return block

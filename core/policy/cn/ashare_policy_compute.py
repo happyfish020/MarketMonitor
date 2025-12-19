@@ -1,51 +1,49 @@
+# -*- coding: utf-8 -*-
 """
-UnifiedRisk V12 FULL
-A-share Policy Compute Aggregator
+UnifiedRisk V12
+CN A-Share PolicyCompute (Policy Orchestrator)
 
-制度定位（冻结）：
-- 制度计算层的唯一聚合入口
-- 负责顺序触发：
-    1) Factor 计算
-    2) Regime 判定
-    3) Gate 决策
-- 不关心任何数据来源
-- 不参与任何表达 / 报告拼装
+职责（冻结）：
+- 作为 Policy 层唯一编排入口
+- 顺序调用：
+    1) FactorCompute  → PolicySlots
+    2) RegimeCompute  → RegimeResult
+    3) GateCompute    → GateDecision
+- 不参与任何制度判断
+- 不拼装 Report / ActionHint
+- 对 Engine 暴露稳定的 compute() 接口
 """
 
-from typing import Dict, Any, Callable, Optional
+from __future__ import annotations
+
+from typing import Any, Dict, Optional
+
+from core.utils.logger import get_logger
+
+from core.policy.cn.ashare_factor_compute import AshareFactorCompute
+from core.policy.cn.ashare_regime_compute import AshareRegimeCompute
+from core.policy.cn.ashare_gate_compute import AshareGateCompute
+
+LOG = get_logger("Policy.AsharePolicyCompute")
 
 
 class AsharePolicyCompute:
     """
-    A股制度计算聚合器（Policy Compute）
+    A股 PolicyCompute（制度编排器）
 
-    ⚠️ 铁律：
-    - 本类是 Gate / Regime / Factor 的唯一产生源
-    - 所有制度模块通过依赖注入提供
+    构造器（冻结）：
+        factor_compute : AshareFactorCompute
+        regime_compute : AshareRegimeCompute
+        gate_compute   : AshareGateCompute
     """
 
     def __init__(
         self,
         *,
-        factor_compute: Callable[..., Dict[str, Any]],
-        regime_compute: Callable[..., Any],
-        gate_compute: Callable[..., Any],
+        factor_compute: AshareFactorCompute,
+        regime_compute: AshareRegimeCompute,
+        gate_compute: AshareGateCompute,
     ) -> None:
-        """
-        依赖注入说明（不假设任何实现存在）：
-
-        factor_compute:
-            - 输入 snapshot
-            - 输出 Dict[str, FactorResult]
-
-        regime_compute:
-            - 输入 factor_results + snapshot
-            - 输出 RegimeResult
-
-        gate_compute:
-            - 输入 regime_result + factor_results
-            - 输出 GateDecision
-        """
         self._factor_compute = factor_compute
         self._regime_compute = regime_compute
         self._gate_compute = gate_compute
@@ -53,67 +51,79 @@ class AsharePolicyCompute:
     def compute(
         self,
         *,
-        snapshot: Any,
+        snapshot: Dict[str, Any],
         trade_date: str,
-        market: str = "CN_A",
+        market: str,
         context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
-        执行一次完整制度计算（冻结流程）
+        执行完整 Policy 计算流程
 
         输入（冻结）：
-        - snapshot: MarketSnapshot（结构事实，只读）
+        - snapshot: MarketSnapshot（只读，必须已包含 factors）
         - trade_date: 交易日
         - market: 市场标识
         - context: 运行上下文（仅透传）
 
         输出（冻结）：
-        - PolicyDecisionBundle（Dict[str, Any]）
+        PolicyDecisionBundle = {
+            "policy_slots": Dict[str, Any],
+            "regime_result": Dict[str, Any],
+            "gate_decision": Any,
+        }
         """
+        if not isinstance(snapshot, dict):
+            raise TypeError("snapshot must be dict")
 
-        # ---------------------------
-        # 1. Factor 计算（制度证据）
-        # ---------------------------
-        factor_results = self._factor_compute(
-            snapshot=snapshot,
-            trade_date=trade_date,
-            market=market,
-            context=context,
+        factors = snapshot.get("factors")
+        if not isinstance(factors, dict):
+            raise ValueError("snapshot['factors'] must exist and be dict")
+
+        # ==================================================
+        # 1️⃣ FactorCompute → PolicySlots
+        # ==================================================
+        policy_slots = self._factor_compute.compute(factors=factors)
+
+        # ==================================================
+        # 2️⃣ RegimeCompute → RegimeResult
+        # ==================================================
+        regime_result = self._regime_compute.compute(
+            factors=factors,
+            policy_slots=policy_slots,
         )
 
-        # ---------------------------
-        # 2. Regime 判定（制度状态）
-        # ---------------------------
-        regime_result = self._regime_compute(
+        # ==================================================
+        # 3️⃣ GateCompute → GateDecision
+        # ==================================================
+        gate_decision = self._gate_compute.compute(
             snapshot=snapshot,
-            factor_results=factor_results,
-            trade_date=trade_date,
-            market=market,
-            context=context,
-        )
-
-        # ---------------------------
-        # 3. Gate 决策（制度门控）
-        # ---------------------------
-        gate_decision = self._gate_compute(
+            policy_slots=policy_slots,
             regime_result=regime_result,
-            factor_results=factor_results,
-            trade_date=trade_date,
-            market=market,
-            context=context,
         )
 
-        # ---------------------------
-        # 4. 制度裁决结果封装（不解释、不加工）
-        # ---------------------------
-        policy_result: Dict[str, Any] = {
-            "factor_results": factor_results,
+        LOG.info(
+            "[AsharePolicyCompute] done | gate=%s",
+            getattr(gate_decision, "level", None),
+        )
+
+        return {
+            "policy_slots": policy_slots,
             "regime_result": regime_result,
             "gate_decision": gate_decision,
-            "policy_notes": {
-                "engine": "AsharePolicyCompute",
-                "version": "V12",
-            },
         }
 
-        return policy_result
+    # 支持 callable 注入（给 Engine 用）
+    def __call__(
+        self,
+        *,
+        snapshot: Dict[str, Any],
+        trade_date: str,
+        market: str,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        return self.compute(
+            snapshot=snapshot,
+            trade_date=trade_date,
+            market=market,
+            context=context,
+        )

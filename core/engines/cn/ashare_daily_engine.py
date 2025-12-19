@@ -16,47 +16,7 @@ from typing import Dict, Any
 from datetime import datetime
 
 from core.utils.logger import get_logger
-from core.adapters.fetchers.cn.ashare_fetcher import AshareDataFetcher
-
-from core.factors.cn.unified_emotion_factor import UnifiedEmotionFactor
-from core.factors.cn.margin_factor import MarginFactor
-from core.factors.cn.north_nps_factor import NorthNPSFactor
-from core.factors.cn.turnover_factor import TurnoverFactor
-from core.factors.cn.sector_rotation_factor import SectorRotationFactor
-from core.factors.cn.index_tech_factor import IndexTechFactor
-from core.factors.cn.etf_index_sync_factor import ETFIndexSyncFactor
-from core.factors.cn.participation_factor import ParticipationFactor
-
-from core.factors.glo.global_macro_factor import GlobalMacroFactor
-from core.factors.glo.global_lead_factor import GlobalLeadFactor
-from core.factors.glo.index_global_factor import IndexGlobalFactor
-from core.factors.cn.breadth_factor import BreadthFactor
-
-from core.factors.factor_result import FactorResult
-from core.adapters.policy_slot_binders.cn.ashares_policy_slot_binder import ASharesPolicySlotBinder
-from core.predictors.prediction_engine import PredictionEngine
-
-
-from core.predictors.prediction_engine import PredictionEngine
-from core.reporters.cn.ashare_daily_reporter import build_daily_report_text, save_daily_report
-from core.regime.ashares_gate_decider import ASharesGateDecider
-
-from core.policy.cn.ashare_policy_compute import AsharePolicyCompute
-from core.policy.cn.ashare_policy_compute import AshareFactorCompute
-from core.policy.cn.ashare_policy_compute import AshareRegimeCompute
-from core.policy.cn.ashare_policy_compute import AshareGateCompute
-
-
-
-from core.regime.observation.structure.structure_facts_builder import (
-    StructureFactsBuilder
-)
-
-from core.regime.observation.watchlist.watchlist_state_builder import (
-    WatchlistStateBuilder
-)
-
-
+ 
 ##########
 from core.snapshot.ashare_snapshot  import AshareSnapshotBuilder
 from core.policy.cn.ashare_policy_compute import AsharePolicyCompute
@@ -212,11 +172,11 @@ def _build_report_engine() -> ReportEngine:
             "scenarios.forward": ScenariosForwardBlock().render,
             "dev.evidence": DevEvidenceBlock().render,
         },
-    )
+    )  
 ##### report section to  be added above  
 
 
-def _execute_report_pipeline(
+def _execute_report_pipeline1(
     *,
     trade_date: str,
     gate_decision,
@@ -256,44 +216,65 @@ def _execute_report_pipeline(
 
 #######33
 def run_cn_ashare_daily(trade_date: str | None = None, refresh_mode: str = "auto") -> None:
-    trade_date_str = _normalize_trade_date(trade_date)
+    trade_date = _normalize_trade_date(trade_date)
 
     LOG.info(
         "Run CN AShare Daily | trade_date=%s refresh=%s",
-        trade_date_str,
+        trade_date,
         refresh_mode,
     )
 
     # ===============================
-    # 构建 V12 Orchestration Engine
+    # 构建 Policy 计算器（制度层）
     # ===============================
+    from core.policy.cn.ashare_policy_compute import AsharePolicyCompute
+    from core.policy.cn.ashare_factor_compute import AshareFactorCompute
+    from core.policy.cn.ashare_regime_compute import AshareRegimeCompute
+    from core.policy.cn.ashare_gate_compute import AshareGateCompute
+
+    factor_compute = AshareFactorCompute()
+
     policy_compute = AsharePolicyCompute(
-        factor_compute=AshareFactorCompute(),
+        factor_compute=factor_compute,
         regime_compute=AshareRegimeCompute(),
         gate_compute=AshareGateCompute(),
     )
+
+    # ===============================
+    # Snapshot Pipeline
+    # ===============================
+    from core.snapshot.cn.ashare_snapshot_pipeline import AshareSnapshotPipeline
+    snapshot_pipeline = AshareSnapshotPipeline()
+
+    # ===============================
+    # ActionHint / Report Pipeline
+    # ===============================
+    from core.actionhint.cn.ashare_actionhint_builder import AshareActionHintBuilder
+    from core.reporters.cn.ashare_report_pipeline import AshareReportPipeline
+
+    # ===============================
+    # 构建 Orchestration Engine
+    # ===============================
     engine = AshareDailyEngine(
-        snapshot_builder=AshareSnapshotBuilder().build,
-        policy_compute=AsharePolicyCompute().compute,
+        snapshot_builder=snapshot_pipeline.build,          # ✅ 只负责 snapshot
+        factor_compute=factor_compute.compute,             # ✅ 注入 factor 计算
+        policy_compute=policy_compute.compute,             # ✅ 只读 snapshot["factors"]
         actionhint_builder=AshareActionHintBuilder().build,
-        report_pipeline=AshareReportPipeline(),   # ⭐ 新 pipeline 接入点
+        report_pipeline=AshareReportPipeline(),
     )
 
     # ===============================
-    # 执行（Engine 统一编排）
+    # 执行（Engine 内完成完整编排）
     # ===============================
     engine.run(
-        trade_date=trade_date_str,
+        trade_date=trade_date,
         refresh_mode=refresh_mode,
-        market="cn",
-        context={
-            "kind": "PRE_OPEN",
-            "dev_mode": True,
-        },
     )
 
     LOG.info("CN AShare Daily finished successfully.")
 
+####################
+ 
 
 
 """
@@ -329,6 +310,7 @@ class AshareDailyEngine:
         self,
         *,
         snapshot_builder: Callable[..., Any],
+        factor_compute,  
         policy_compute: Callable[..., Any],
         actionhint_builder: Callable[..., Any],
         report_pipeline: Callable[..., Any],
@@ -351,6 +333,7 @@ class AshareDailyEngine:
             - 负责生成最终 DailyReport（表达层）
         """
         self._snapshot_builder = snapshot_builder
+        self._factor_compute = factor_compute
         self._policy_compute = policy_compute
         self._actionhint_builder = actionhint_builder
         self._report_pipeline = report_pipeline
@@ -428,3 +411,9 @@ class AshareDailyEngine:
             "action_hint": action_hint,
             "report": report,
         }
+
+
+
+##############
+
+

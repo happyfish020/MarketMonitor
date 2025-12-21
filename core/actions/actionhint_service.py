@@ -1,87 +1,87 @@
-# core/actions/actionhint_service.py
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Optional, TypedDict, Literal
+
 from core.actions.summary_mapper import SummaryMapper
 
-Action = Literal["HOLD", "ETF_COND_ADD", "ETF_LADDER", "FREEZE"]
+logger = logging.getLogger(__name__)
 
-ActionHint = Dict[str, Any] 
+# ===============================
+# 类型定义（冻结）
+# ===============================
 
-logger = logging.getLogger("UnifiedRisk.ActionHintService")
+GateLevel = Literal["NORMAL", "CAUTION", "FREEZE"]
+Action = Literal["BUY", "HOLD", "SELL", "FREEZE"]
+SummaryCode = Literal["A", "N", "D"]
 
 
+class ActionHint(TypedDict):
+    gate: GateLevel
+    action: Action
+    summary: SummaryCode
+    reason: str
+    allowed: List[str]
+    forbidden: List[str]
+    limits: str
+    conditions: str
 
-@dataclass(frozen=True)
-class ActionPolicy:
-    """
-    可注入的裁决策略（不改接口，不越权）。
-    """
-    normal_action: Action = "HOLD"
-    caution_action: Action = "HOLD"
-    freeze_action: Action = "FREEZE"
+
+# ===============================
+# ActionHintService（冻结）
+# ===============================
 
 class ActionHintService:
-    def __init__(self, *, policy: Optional[ActionPolicy] = None) -> None:
-        self._policy = policy or ActionPolicy()
+    """
+    UnifiedRisk V12 · ActionHintService（冻结版）
 
- 
-##3
+    制度铁律：
+    1. ActionHint 是【行为裁决】，不是结构裁决
+    2. gate 在此层只能是 str（NORMAL / CAUTION / FREEZE）
+    3. 本服务不创建、不修改、不推断结构性 gate dict
+    4. 所有输出必须是“给人看的中文”
+    """
+
+    # ===============================
+    # Public API
+    # ===============================
     def build_actionhint(
         self,
         *,
-        gate: Any,
-        structure: Any,
-        watchlist: Any,
-        conditions_runtime: Any,
+        gate: GateLevel,
+        structure: Optional[Dict[str, Any]],
+        watchlist: Optional[Dict[str, Any]],
+        conditions_runtime: Optional[Any],
     ) -> ActionHint:
         """
-        Phase-3 ActionHint 构建（冻结版，兼容 gate=str / gate=dict）
-    
-        设计原则：
-        - 兼容旧路径 gate=str
-        - 内部统一为 dict 形态
-        - 不在此层强制上游重构
+        构建最终 ActionHint（给用户 / 报告使用）
         """
-    
-        # -------- ① 统一 gate 形态（关键修复点）--------
-        if isinstance(gate, str):
-            gate = {
-                "level": gate,
-                "reasons": [],
-                "evidence": {},
-            }
-        elif isinstance(gate, dict):
-            if "level" not in gate:
-                raise ValueError("gate dict missing required field: level")
-        else:
-            raise TypeError(f"invalid gate type: {type(gate)}")
-    
-        # -------- 输入校验（原有）--------
+
+        # -------- 输入校验（严格）--------
         self._validate_inputs(
             gate=gate,
             structure=structure,
             watchlist=watchlist,
             conditions_runtime=conditions_runtime,
         )
-    
-        # -------- 动作裁决 --------
-        action = self._decide_action(gate=gate, structure=structure)
-    
-        # -------- Summary（A / N / D）--------
-        summary = SummaryMapper().map_gate_to_summary(gate=gate["level"])
-    
-        # -------- Reason（人话）--------
+
+        # -------- 行为裁决 --------
+        action = self._decide_action(gate)
+
+        # -------- Summary（制度映射）--------
+        summary = SummaryMapper().map_gate_to_summary(gate)
+
+        # -------- 中文裁决理由 --------
         reason = self._build_reason_text(gate=gate)
-    
-        # -------- 其余字段 --------
+
+        # -------- 行为边界 --------
+        allowed = self._build_allowed(action)
+        forbidden = self._build_forbidden(action)
         limits = self._build_limits(action=action, gate=gate)
-        allowed = self._build_allowed(action=action, gate=gate)
-        forbidden = self._build_forbidden(action=action, gate=gate)
-        conditions = self._build_conditions(conditions_runtime=conditions_runtime)
-    
+
+        # -------- 执行时点说明 --------
+        conditions = self._build_conditions_text(conditions_runtime)
+
         hint: ActionHint = {
             "gate": gate,
             "action": action,
@@ -92,41 +92,20 @@ class ActionHintService:
             "limits": limits,
             "conditions": conditions,
         }
-    
-        self._validate_actionhint(hint)
-    
+
         logger.info(
-            "ActionHint built gate=%s action=%s summary=%s",
-            gate["level"],
+            "[ActionHint] gate=%s action=%s summary=%s",
+            gate,
             action,
             summary,
         )
-    
+
         return hint
-     
-    # ----------------- internal (frozen hooks) -----------------
 
-    def _build_reason_text(self, *, gate: Any) -> str:
-        """
-        将 Gate 中的 reasons 精简为 ActionHint 可读原因（≤2 条）
-        gate = snapshot["gate"]，必须包含 level / reasons
-        """
-    
-        level = gate.get("level")
-        reasons = gate.get("reasons", [])
-    
-        if not reasons:
-            return f"Gate={level}。未触发明确的风险或放行条件。"
-    
-        trimmed = reasons[:2]
-    
-        if len(trimmed) == 1:
-            return f"Gate={level}。原因：{trimmed[0]}。"
-    
-        return f"Gate={level}。主要原因：{trimmed[0]}；{trimmed[1]}。"
-    
+    # ===============================
+    # 内部逻辑（冻结）
+    # ===============================
 
-###
     def _validate_inputs(
         self,
         *,
@@ -135,117 +114,73 @@ class ActionHintService:
         watchlist: Any,
         conditions_runtime: Any,
     ) -> None:
-        """
-        Phase-3 输入校验（冻结版）
-    
-        原则：
-        - 校验“是否明显非法”
-        - 不强制 Phase-2 的具体数据结构
-        """
-    
-        # ---- gate ----
-        if not isinstance(gate, dict):
-            raise ValueError(f"gate must be dict, got {type(gate)}")
-    
-        level = gate.get("level")
-        if level not in ("NORMAL", "CAUTION", "FREEZE"):
-            raise ValueError(f"Invalid gate level: {level}")
-    
-        reasons = gate.get("reasons")
-        if reasons is not None and not isinstance(reasons, list):
-            raise ValueError("gate.reasons must be list")
-    
-        evidence = gate.get("evidence")
-        if evidence is not None and not isinstance(evidence, dict):
-            raise ValueError("gate.evidence must be dict")
-    
-        # ---- structure ----
-        if structure is not None and not isinstance(structure, dict):
-            raise ValueError("structure must be dict or None")
-    
-        # ---- watchlist ----
-        if watchlist is not None and not isinstance(watchlist, dict):
-            raise ValueError("watchlist must be dict or None")
-    
-        # ---- conditions_runtime ----
-        # 允许 dict / list / None（仅展示用途）
-        if conditions_runtime is not None and not isinstance(
-            conditions_runtime, (dict, list)
-        ):
+        if not isinstance(gate, str):
             raise ValueError(
-                f"conditions_runtime must be dict, list or None, got {type(conditions_runtime)}"
+                f"ActionHintService expects gate as str, got {type(gate)}"
             )
-    
 
-###
-    def _decide_action(self, *, gate: Any, structure: Any) -> Action:
-        g = str(gate).upper()
-        if g == "FREEZE":
-            return self._policy.freeze_action
-        if g == "CAUTION":
-            return self._policy.caution_action
-        return self._policy.normal_action
+        if gate not in ("NORMAL", "CAUTION", "FREEZE"):
+            raise ValueError(f"Invalid gate level: {gate}")
 
-    def _build_reason(self, *, gate: Any, structure: Any) -> str:
-        g = str(gate).upper()
+        # 其余参数允许 None（报告阶段可能尚未启用）
+        # 不在此层强制结构完整性
 
-        # Only read “conclusion-like” fields if present; do NOT read factor/prediction/raw.
-        summary_bits: List[str] = []
-        if isinstance(structure, dict):
-            for key in ("participation", "breadth", "regime", "correlation", "note"):
-                v = structure.get(key)
-                if v is not None:
-                    summary_bits.append(f"{key}={v}")
+    # -------------------------------
+    # 行为裁决（最小规则，冻结）
+    # -------------------------------
+    def _decide_action(self, gate: GateLevel) -> Action:
+        if gate == "NORMAL":
+            return "HOLD"
+        if gate == "CAUTION":
+            return "HOLD"
+        if gate == "FREEZE":
+            return "FREEZE"
+        # 理论不可达
+        return "HOLD"
 
-        core = f"Gate={g}. Phase-3 action is derived from frozen Phase-2 Gate/Structure slots only."
-        if summary_bits:
-            core += " Structure: " + ", ".join(summary_bits[:6])
-        return core
+    # -------------------------------
+    # 中文裁决理由
+    # -------------------------------
+    def _build_reason_text(self, *, gate: GateLevel) -> str:
+        if gate == "NORMAL":
+            return "当前结构稳定，未触发风险限制，可正常持有。"
+        if gate == "CAUTION":
+            return "结构偏谨慎，未触发明确放行条件，不建议主动扩大风险敞口。"
+        if gate == "FREEZE":
+            return "风险结构恶化，进入防御状态，暂停风险敞口变更。"
+        return "当前状态无法识别，采取保守处理。"
 
-    def _build_limits(self, *, action: Action, gate: Any) -> Dict[str, Any]:
-        # Keep it explicit & auditable. Real numeric limits should be injected later (policy/config).
-        g = str(gate).upper()
-        return {
-            "gate": g,
-            "action": action,
-            "notes": "Limits are policy-defined. This default implementation is conservative and non-prescriptive.",
-        }
+    # -------------------------------
+    # 行为允许 / 禁止
+    # -------------------------------
+    def _build_allowed(self, action: Action) -> List[str]:
+        if action == "HOLD":
+            return ["维持现有风险敞口"]
+        if action == "FREEZE":
+            return ["仅允许被动持有，不允许任何主动调整"]
+        return []
 
-    def _build_allowed(self, *, action: Action, gate: Any) -> Dict[str, Any]:
-        # Allowed is structural: what category of actions are allowed.
-        return {"action": action}
+    def _build_forbidden(self, action: Action) -> List[str]:
+        if action == "HOLD":
+            return ["主动加仓", "情绪化追涨"]
+        if action == "FREEZE":
+            return ["任何新增风险敞口", "抄底式操作"]
+        return []
 
-    def _build_forbidden(self, *, action: Action, gate: Any) -> List[str]:
-        g = str(gate).upper()
-        if g == "FREEZE":
-            return [
-                "Any new risk add",
-                "Any ladder add",
-                "Any discretionary override outside ActionHint",
-            ]
-        return [
-            "Bypass ActionHint with manual interpretation",
-        ]
+    # -------------------------------
+    # 行为边界说明
+    # -------------------------------
+    def _build_limits(self, *, action: Action, gate: GateLevel) -> str:
+        return (
+            f"当前 Gate={gate}，行为裁决为 {action}。"
+            "该裁决用于限制风险敞口变更，不构成收益预测。"
+        )
 
-    def _build_conditions(self, *, conditions_runtime: Any) -> List[Any]:
-        # conditions_runtime is precomputed upstream (Phase-2/bridge). We only pass through.
+    # -------------------------------
+    # 执行时点说明（中文）
+    # -------------------------------
+    def _build_conditions_text(self, conditions_runtime: Any) -> str:
         if conditions_runtime is None:
-            return []
-        if isinstance(conditions_runtime, list):
-            return conditions_runtime
-        return [conditions_runtime]
+            return "当前未启用执行时点校验，仅依据结构性裁决给出行为边界。"
 
-    def _validate_actionhint(self, hint: ActionHint) -> None:
-        required = {"action", "reason", "allowed", "forbidden", "limits", "conditions"}
-        missing = required - set(hint.keys())
-        if missing:
-            raise ValueError(f"ActionHint missing keys: {sorted(list(missing))}")
-        
-        if hint.get("summary") not in ("A", "N", "D"):
-            raise ValueError(f"Invalid summary in ActionHint: {hint.get('summary')}")
-
-        a = hint["action"]
-        if a not in ("HOLD", "ETF_COND_ADD", "ETF_LADDER", "FREEZE"):
-            raise ValueError(f"ActionHint.action invalid: {a}")
-
-
+        return "执行时点校验功能已预留，当前尚未纳入强制判断。"

@@ -24,9 +24,12 @@ BLOCK_SPECS: List[BlockSpec] = [
     BlockSpec("summary", "简要总结"),
     BlockSpec("context.overnight", "隔夜维度"),
     BlockSpec("watchlist.sectors", "观察板块对象"),
-    BlockSpec("conditions.runtime", "即时验证条件"),
+    #BlockSpec("conditions.runtime", "即时验证条件"),
+    #BlockSpec("execution.timing",  "执行时点校验（风险敞口变更行为）"),
+    BlockSpec("exposure.boundary",  "下一交易日（T+1）风险敞口行为边界"),
     BlockSpec("scenarios.forward", "T+N 情景说明"),
     BlockSpec("dev.evidence", "审计证据链"),
+
 ]
 #### new block  to be added 
 
@@ -66,6 +69,7 @@ class ReportEngine:
         if "gate" not in slots:
             raise ValueError("missing required slot: gate")
 
+         
         actionhint = self.actionhint_service.build_actionhint(
             gate=slots["gate"],
             structure=slots.get("structure"),

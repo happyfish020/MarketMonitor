@@ -124,7 +124,8 @@ class AshareDataFetcher(FetcherBase):
             trade_date=self.trade_date,
             refresh_mode=self.refresh_mode,
         )
-        assert snapshot.get("breadth_raw"), "Breadth DS missing"
+        # weekend Sat no data --- to be handle !!! 
+        # # Todo assert snapshot.get("breadth_raw"), "Breadth DS missing"
 
         # ==========================================================
         # 2️⃣ Northbound Proxy (DS raw)

@@ -8,6 +8,8 @@ from core.utils.logger import get_logger
 
 
 logger = get_logger(__name__)
+from sqlalchemy.dialects import oracle
+
 
 
 def _to_date(x) -> date:
@@ -54,7 +56,8 @@ class DBOracleProvider:
             pool_pre_ping=True,
             future=True,
         )
-
+        
+         
     # ==================================================
     # low-level executor
     # ==================================================
@@ -143,3 +146,51 @@ class DBOracleProvider:
         """
 
         return self.execute(sql)
+
+
+    def fetch_daily_turnover_series(
+        self,
+        start_date: str,
+        look_back_days: int = 30,
+    ) -> pd.DataFrame:
+        """
+        获取指定日期区间内全市场每日成交额（亿元）时间序列
+
+        返回 columns:
+            trade_date (datetime)
+            total_turnover (float)  # 单位：亿元，已除 1e8
+        """
+        table = self.tables.get("stock_daily")
+        if not table:
+            raise RuntimeError("db.oracle.tables.stock_daily not configured")
+
+        sql = f"""
+        SELECT
+            TRADE_DATE,
+            SUM(TURNOVER) AS total_turnover
+        FROM {self.schema}.{table}
+        WHERE TRADE_DATE >= :start_date - :look_back_days
+              AND TRADE_DATE <= :start_date
+        GROUP BY TRADE_DATE
+        ORDER BY TRADE_DATE        
+        """
+
+        params = {
+            "start_date": _to_date(start_date),
+            "look_back_days": look_back_days,
+        }
+
+        #compiled = text(sql).compile(dialect=oracle.dialect(), compile_kwargs={"literal_binds": True})
+        #logger.info(f"[DEBUG SQL] 完整SQL:\n{compiled.string}")
+        raw = self.execute(sql, params)
+
+        if not raw:
+            return pd.DataFrame(columns=["trade_date", "total_turnover"])
+
+        df = pd.DataFrame(raw, columns=["trade_date", "total_turnover"])
+        df["trade_date"] = pd.to_datetime(df["trade_date"])
+        #df["total_turnover"] = (df["total_turnover"] / 1e8).round(2)  # 转为亿元，保留2位小数
+        df["total_turnover"] = (df["total_turnover"].astype(float) / 1e8).round(2)
+        df = df[["trade_date", "total_turnover"]].set_index("trade_date")
+
+        return df

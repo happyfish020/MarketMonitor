@@ -60,7 +60,7 @@ class MarketSentimentDataSource(DataSourceBase):
         )
 
         # cache 命中
-        if refresh_mode == "none" and os.path.exists(cache_file):
+        if refresh_mode in ("none", "readonly")  and os.path.exists(cache_file):
             try:
                 with open(cache_file, "r", encoding="utf-8") as f:
                     return json.load(f)
@@ -78,17 +78,17 @@ class MarketSentimentDataSource(DataSourceBase):
             LOG.error("[DS.Sentiment] Spot DF empty")
             return self._neutral_block(trade_date)
 
-        if "涨跌幅" not in df.columns:
-            LOG.error("[DS.Sentiment] '涨跌幅' column missing")
+        if "chg_pct" not in df.columns:
+            LOG.error("[DS.Sentiment] 'chg_pct' column missing")
             return self._neutral_block(trade_date)
 
         # 2) 统计宽度
-        adv = int((df["涨跌幅"] > 0).sum())
-        dec = int((df["涨跌幅"] < 0).sum())
-        flat = int((df["涨跌幅"] == 0).sum())
+        adv = int((df["chg_pct"] > 0).sum())
+        dec = int((df["chg_pct"] < 0).sum())
+        flat = int((df["chg_pct"] == 0).sum())
 
-        limit_up = int((df["涨跌幅"] >= 9.9).sum())
-        limit_down = int((df["涨跌幅"] <= -9.9).sum())
+        limit_up = int((df["chg_pct"] >= 9.9).sum())
+        limit_down = int((df["chg_pct"] <= -9.9).sum())
 
         total = adv + dec + flat
         adv_ratio = round(adv / total, 4) if total > 0 else 0.0

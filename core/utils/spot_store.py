@@ -52,7 +52,7 @@ def get_spot_daily(trade_date: str, refresh_mode: str = "none") -> pd.DataFrame:
 
     统一语义（按照你刚才说的）：
 
-    1) refresh_mode == "full":
+    1) refresh_mode in ("none", "readonly") "full":
         - 保险做法：如果 parquet 存在，先删除本地文件
         - 然后进入统一逻辑（读文件；如果文件不存在则拉 ak）
 

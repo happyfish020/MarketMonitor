@@ -44,7 +44,7 @@ class MarginDataSource(DataSourceBase):
             spot_path=None,
         )
 
-        if refresh_mode == "none" and os.path.exists(self.cache_file):
+        if refresh_mode in ("none", "readonly")  and os.path.exists(self.cache_file):
             return self._load(self.cache_file)
 
         # 1) provider 拉数据

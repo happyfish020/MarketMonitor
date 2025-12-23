@@ -38,13 +38,9 @@ class TurnoverFactor(FactorBase):
                 },
             )
 
-        sh = data.get("sh")
-        sz = data.get("sz")
-        total = data.get("total")
-        # 若 total 未提供，则尝试计算总成交额
-        if total is None and (sh is not None or sz is not None):
-            total = (sh or 0.0) + (sz or 0.0)
-
+        
+        total = data.get("total_turnover")
+         
         # 数据缺失处理
         if total is None:
             return FactorResult(
@@ -94,14 +90,10 @@ class TurnoverFactor(FactorBase):
 
         # 详细数据
         details: Dict[str, Any] = {}
-        if sh is not None:
-            details["sh_turnover"] = sh
-        if sz is not None:
-            details["sz_turnover"] = sz
         details["total_turnover"] = total
         details["data_status"] =  "OK"
         details["_raw_data"] = json.dumps(data)[:160] + "..."
-        LOG.info(f"[TurnoverFactor] sh={sh} sz={sz} total={total:.0f} score={score:.2f} level={level}")
+        LOG.info(f"[TurnoverFactor]  total={total:.0f} score={score:.2f} level={level}")
         
         return self.build_result(
             score=score,

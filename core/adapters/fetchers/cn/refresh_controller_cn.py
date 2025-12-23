@@ -35,15 +35,15 @@ class RefreshControllerCN:
 
     @property
     def is_snapshot(self) -> bool:
-        return self.refresh_mode == "snapshot"
+        return self.refresh_mode in ("none", "readonly") "snapshot"
 
     @property
     def is_full(self) -> bool:
-        return self.refresh_mode == "full"
+        return self.refresh_mode in ("none", "readonly") "full"
 
     @property
     def is_readonly(self) -> bool:
-        return self.refresh_mode == "readonly"
+        return self.refresh_mode in ("none", "readonly") "readonly"
 
     # ------------------------------------------------------------------
     # Snapshot 需要刷新哪些符号（minimal set）

@@ -162,7 +162,7 @@ class SymbolSeriesStore:
         key = normalize_symbol(symbol)
 
         # 1. memory
-        if key in self.memory_cache and refresh_mode == "none":
+        if key in self.memory_cache and refresh_mode in ("none", "readonly") :
             df = self.memory_cache[key]
             if len(df) >= window:
                 return df.tail(window).reset_index(drop=True).copy()
@@ -174,7 +174,7 @@ class SymbolSeriesStore:
             if hist else pd.DataFrame(columns=["date", "close", "pct"])
         )
 
-        if refresh_mode == "none" and len(df_hist) >= window:
+        if refresh_mode in ("none", "readonly")  and len(df_hist) >= window:
             df_hist = df_hist.sort_values("date")
             self.memory_cache[key] = df_hist.copy()
             return df_hist.tail(window).reset_index(drop=True).copy()

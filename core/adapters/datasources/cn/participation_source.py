@@ -125,7 +125,7 @@ class ParticipationDataSource(DataSourceBase):
         )
 
         # cache 命中
-        if refresh_mode == "none" and os.path.exists(cache_file):
+        if refresh_mode in ("none", "readonly")  and os.path.exists(cache_file):
             try:
                 with open(cache_file, "r", encoding="utf-8") as f:
                     return json.load(f)

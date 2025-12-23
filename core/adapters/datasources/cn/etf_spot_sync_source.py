@@ -37,7 +37,7 @@ class ETFSpotSyncDataSource(DataSourceBase):
     输出的是“事实统计”，供 Phase-2 因子使用：
     - 市场上涨/下跌比例
     - 成交额集中度
-    - 涨跌幅分化程度
+    - chg_pct分化程度
     """
 
     def __init__(self, config: DataSourceConfig):
@@ -71,7 +71,7 @@ class ETFSpotSyncDataSource(DataSourceBase):
         )
 
         # 命中 cache
-        if refresh_mode == "none" and os.path.exists(cache_file):
+        if refresh_mode in ("none", "readonly")  and os.path.exists(cache_file):
             try:
                 with open(cache_file, "r", encoding="utf-8") as f:
                     return json.load(f)
@@ -90,7 +90,7 @@ class ETFSpotSyncDataSource(DataSourceBase):
             return self._neutral_block(trade_date)
 
         # 必要字段检查
-        if "涨跌幅" not in df.columns or "成交额" not in df.columns:
+        if "chg_pct" not in df.columns or "成交额" not in df.columns:
             LOG.error("[DS.ETFSpotSync] required columns missing")
             return self._neutral_block(trade_date)
 
@@ -103,8 +103,8 @@ class ETFSpotSyncDataSource(DataSourceBase):
         # --------------------------------------------------------
 
         # 上涨 / 下跌比例
-        adv = (df["涨跌幅"] > 0).sum()
-        dec = (df["涨跌幅"] < 0).sum()
+        adv = (df["chg_pct"] > 0).sum()
+        dec = (df["chg_pct"] < 0).sum()
 
         adv_ratio = round(adv / total, 4)
         dec_ratio = round(dec / total, 4)
@@ -122,8 +122,8 @@ class ETFSpotSyncDataSource(DataSourceBase):
         else:
             top20_turnover_ratio = 0.0
 
-        # 涨跌幅分化（标准差）
-        dispersion = round(float(df["涨跌幅"].std(ddof=0)), 4)
+        # chg_pct分化（标准差）
+        dispersion = round(float(df["chg_pct"].std(ddof=0)), 4)
 
         block: Dict[str, Any] = {
             "trade_date": trade_date,

@@ -65,7 +65,7 @@ class IndexSectorCorrDataSource(DataSourceBase):
     def build_block(self, trade_date: str, refresh_mode: str = "none") -> Dict[str, Any]:
         cache_path = self._cache_path(trade_date)
 
-        if refresh_mode == "none" and os.path.exists(cache_path):
+        if refresh_mode in ("none", "readonly")  and os.path.exists(cache_path):
             try:
                 with open(cache_path, "r", encoding="utf-8") as f:
                     return json.load(f)

@@ -1125,7 +1125,7 @@ Priority 2：Index–Sector Correlation Regime Factor 设计定义（definition 
 
 现在的市场，是“齐涨齐跌”（相关性收敛、单一风险因子主导），还是“结构分化”（相关性发散、轮动/结构行情）？
 
-它不是用来预测涨跌幅，而是用来判断策略环境（regime）：
+它不是用来预测chg_pct，而是用来判断策略环境（regime）：
 
 指数策略是否可靠（比如抱指数/宽基）
 

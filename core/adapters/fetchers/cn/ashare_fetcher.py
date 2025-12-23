@@ -43,7 +43,7 @@ LOG = get_logger("Fetcher.Ashare")
 
 
 class AshareDataFetcher(FetcherBase):
-    def __init__(self, trade_date: str, refresh_mode:str):
+    def __init__(self, trade_date: str, is_intraday:bool= False, refresh_mode:str="none"):
         super().__init__(market="cn", trade_date=trade_date, refresh_mode=refresh_mode)
 
         # 刷新策略控制器
@@ -66,7 +66,7 @@ class AshareDataFetcher(FetcherBase):
         self.market_sentiment_ds = MarketSentimentDataSource(
             DataSourceConfig(market="cn", ds_name="market_sentiment")
         )
-
+         
         self.margin_ds = MarginDataSource(
             DataSourceConfig(market="cn", ds_name="margin")
         )

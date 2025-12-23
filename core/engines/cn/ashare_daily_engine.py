@@ -175,8 +175,8 @@ def _execute_report_pipeline(*, trade_date: str, gate_decision, factors_bound: d
 
 # ========================== 拆分后的小函数（保持原数据流） ==========================
 
-def _fetch_snapshot(trade_date_str: str, refresh_mode: str) -> Dict[str, Any]:
-    fetcher = AshareDataFetcher(trade_date=trade_date_str, refresh_mode=refresh_mode)
+def _fetch_snapshot(trade_date_str: str,  is_intraday:bool=False, refresh_mode: str="none") -> Dict[str, Any]:
+    fetcher = AshareDataFetcher(trade_date=trade_date_str, is_intraday =is_intraday,  refresh_mode=refresh_mode)
     snapshot: Dict[str, Any] = fetcher.prepare_daily_market_snapshot()
     return snapshot
 
@@ -307,7 +307,7 @@ def _generate_phase3_report(trade_date_str: str, gate_decision, factors_bound: d
 
 # ========================== 主函数（保持你要的清晰） ==========================
 
-def run_cn_ashare_daily(trade_date: str | None = None, refresh_mode: str = "auto") -> None:
+def run_cn_ashare_daily(trade_date: str | None = None, is_intraday: bool = False, refresh_mode: str = "auto") -> None:
     trade_date_str = _normalize_trade_date(trade_date)
     #
     #trade_date_str = "2025-12-18"

@@ -27,69 +27,85 @@ def get_refresh_mode(args):
 
 import baostock as bs
 import pandas as pd
-from datetime import datetime, timedelta
 import pytz
+from datetime import datetime, timedelta, time
+A_SHARE_OPEN = time(9, 30)   # 开盘时间
+A_SHARE_CLOSE = time(15, 0)  # 收盘时间
 
-def get_last_trading_day():
-    # 获取北京时间
+
+def get_intraday_status_and_last_trade_date() -> tuple[bool, str]:
+    """
+    判断当前是否为交易日盘中时间，并返回最近一个交易日
+
+    Returns:
+        (is_intraday: bool, last_trade_date: str)
+            - is_intraday: True 表示当前是交易日且在 9:30~15:00 之间
+            - last_trade_date: 最近的交易日（'YYYY-MM-DD'）
+    """
     tz = pytz.timezone('Asia/Shanghai')
     now = datetime.now(tz)
-    
-    # 如果在北京时间8:00前，取前一天作为参考日期
+
+    # 1. 确定参考日期（盘前8点前算前一天）
     if now.hour < 8:
         reference_date = (now - timedelta(days=1)).date()
     else:
         reference_date = now.date()
-    
-    print(f"当前北京时间: {now.strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"参考日期（调整后）: {reference_date}")
-    
-    # 处理周末：周六、周日取周五
-    weekday = reference_date.weekday()  # 0=周一, 5=周六, 6=周日
-    if weekday == 5:  # 周六
-        reference_date -= timedelta(days=1)
-    elif weekday == 6:  # 周日
-        reference_date -= timedelta(days=2)
-    
-    print(f"周末调整后参考日期: {reference_date}")
-    
-    # 登陆baostock（匿名登陆，无需注册）
+
+    # 2. 登录 baostock
     lg = bs.login()
     if lg.error_code != '0':
-        print('login fail! error_msg:', lg.error_msg)
-        return None
-    
-    # 查询最近足够多的交易日历（从参考日期往前推60天，确保覆盖所有节假日）
-    start_date = (reference_date - timedelta(days=60)).strftime('%Y-%m-%d')
-    end_date = reference_date.strftime('%Y-%m-%d')
-    
-    rs = bs.query_trade_dates(start_date=start_date, end_date=end_date)
-    if rs.error_code != '0':
-        print('query_trade_dates fail! error_msg:', rs.error_msg)
-        bs.logout()
-        return None
-    
-    data_list = []
-    while (rs.error_code == '0') & rs.next():
-        data_list.append(rs.get_row_data())
-    
-    trade_df = pd.DataFrame(data_list, columns=rs.fields)
-    bs.logout()
-    
-    # 过滤交易日
-    trade_df['calendar_date'] = pd.to_datetime(trade_df['calendar_date'])
-    trading_days = trade_df[trade_df['is_trading_day'] == '1'].sort_values('calendar_date', ascending=False)
-    
-    # 从参考日期开始往前找第一个交易日
-    candidate = reference_date
-    while candidate >= trading_days['calendar_date'].min().date():
-        if candidate in trading_days['calendar_date'].dt.date.values:
-            return candidate.strftime('%Y-%m-%d')
-        candidate -= timedelta(days=1)
-    
-    print("未找到交易日（异常情况）")
-    return None
+        print(f"baostock login failed: {lg.error_msg}")
+        # 降级处理：仅判断周末 + 时间段（不考虑节假日）
+        is_weekend = reference_date.weekday() >= 5
+        in_session = A_SHARE_OPEN <= now.time() < A_SHARE_CLOSE
+        fallback_last_date = reference_date - timedelta(days=(reference_date.weekday() + 2) % 7 if is_weekend else 0)
+        return (not is_weekend and in_session, fallback_last_date.strftime('%Y-%m-%d'))
 
+    try:
+        # 3. 查询最近60天的交易日历（足够覆盖节假日）
+        start_date = (reference_date - timedelta(days=60)).strftime('%Y-%m-%d')
+        end_date = reference_date.strftime('%Y-%m-%d')
+
+        rs = bs.query_trade_dates(start_date=start_date, end_date=end_date)
+        if rs.error_code != '0':
+            raise Exception(f"query_trade_dates failed: {rs.error_msg}")
+
+        data_list = []
+        while rs.next():
+            data_list.append(rs.get_row_data())
+
+        trade_df = pd.DataFrame(data_list, columns=rs.fields)
+        trade_df['calendar_date'] = pd.to_datetime(trade_df['calendar_date'])
+        trade_df['is_trading_day'] = trade_df['is_trading_day'].astype(int)
+
+        # 提取所有交易日并降序排列
+        trading_days = trade_df[trade_df['is_trading_day'] == 1]['calendar_date'].dt.date.values
+
+        if len(trading_days) == 0:
+            raise Exception("No trading days found in the past 60 days")
+
+        # 4. 找到最近的交易日（从 reference_date 往前找）
+        last_trade_date_obj = max(d for d in trading_days if d <= reference_date)
+        last_trade_date_str = last_trade_date_obj.strftime('%Y-%m-%d')
+
+        # 5. 判断是否为盘中时间
+        # 只有当今天就是交易日，且当前时间在开盘后收盘前，才算盘中
+        is_today_trading_day = last_trade_date_obj == now.date()
+        in_trading_hours = A_SHARE_OPEN <= now.time() < A_SHARE_CLOSE
+        is_intraday = is_today_trading_day and in_trading_hours
+
+        return is_intraday, last_trade_date_str
+
+    except Exception as e:
+        print(f"Error in get_intraday_status_and_last_trade_date: {e}")
+        # 降级：仅判断周末和时间段
+        is_weekend = reference_date.weekday() >= 5
+        in_session = A_SHARE_OPEN <= now.time() < A_SHARE_CLOSE
+        fallback_last = reference_date - timedelta(days=(reference_date.weekday() - 4) % 7)
+        return (not is_weekend and in_session, fallback_last.strftime('%Y-%m-%d'))
+
+    finally:
+        bs.logout()
 
 
 def main():
@@ -109,9 +125,9 @@ def main():
 
     if args.market == "cn" and args.mode == "ashare_daily":
         # ✅ V12：只调用，不接收，不解析
-        trade_date = get_last_trading_day()
+        is_intraday, trade_date = get_intraday_status_and_last_trade_date()
         assert trade_date, "定位最后交易日失败！"
-        run_cn_ashare_daily(trade_date = trade_date, refresh_mode=refresh_mode)
+        run_cn_ashare_daily(trade_date = trade_date, is_intraday = is_intraday , refresh_mode=refresh_mode)
 
     else:
         LOG.error("不支持的参数: market=%s mode=%s", args.market, args.mode)

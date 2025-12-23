@@ -55,6 +55,7 @@ class TurnoverDataSource(DataSourceBase):
 
     # ------------------------------------------------------------
     def build_block(self, trade_date: str, refresh_mode: str = "none") -> Dict[str, Any]:
+        
         cache_file = os.path.join(self.cache_root, f"turnover_{trade_date}.json")
         look_back_days = 20
 

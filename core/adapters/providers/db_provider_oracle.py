@@ -10,6 +10,7 @@ from core.utils.logger import get_logger
 logger = get_logger(__name__)
 from sqlalchemy.dialects import oracle
 
+LOG = get_logger("DS.provider.oracle")
 
 
 def _to_date(x) -> date:
@@ -68,7 +69,7 @@ class DBOracleProvider:
             return result.fetchall()
 
     # ==================================================
-    # stock daily prices (CLOSE -> close_price)
+    # stock daily prices (CLOSE -> CLOSE)
     # ==================================================
     def query_stock_closes(
         self,
@@ -84,7 +85,7 @@ class DBOracleProvider:
             SYMBOL        AS symbol,
             EXCHANGE      AS exchange,
             TRADE_DATE    AS trade_date,
-            CLOSE         AS close_price
+            CLOSE         AS CLOSE
         FROM {self.schema}.{table}
         WHERE TRADE_DATE >= :window_start
           AND TRADE_DATE <= :trade_date
@@ -98,7 +99,7 @@ class DBOracleProvider:
         return self.execute(sql, params)
 
     # ==================================================
-    # index daily prices (CLOSE -> close_price)
+    # index daily prices (CLOSE -> CLOSE)
     # ==================================================
     def query_index_closes(
         self,
@@ -114,7 +115,7 @@ class DBOracleProvider:
         SELECT
             INDEX_CODE    AS index_code,
             TRADE_DATE    AS trade_date,
-            CLOSE         AS close_price
+            CLOSE         AS CLOSE
         FROM {self.schema}.{table}
         WHERE INDEX_CODE = :index_code
           AND TRADE_DATE >= :window_start
@@ -194,3 +195,161 @@ class DBOracleProvider:
         df = df[["trade_date", "total_turnover"]].set_index("trade_date")
 
         return df
+    
+# core/adapters/providers/db_provider_oracle.py
+# 新增以下方法（放在类内部合适位置）
+
+    def fetch_stock_daily_chg_pct_raw(
+        self,
+        start_date: str,
+        look_back_days: int = 60,
+    ) -> pd.DataFrame:
+        """
+        获取指定交易日往前 look_back_days 天内的每日市场情绪统计汇总数据
+        直接在数据库层完成聚合，性能更优，避免传输大量个股明细
+
+        返回 DataFrame columns:
+            trade_date (datetime)
+            total_stocks (int)          -- 参与交易股票总数
+            adv (int)                   -- 上涨家数
+            dec (int)                   -- 下跌家数
+            flat (int)                  -- 平盘家数
+            limit_up (int)              -- 涨停家数 (≥9.9%)
+            limit_down (int)            -- 跌停家数 (≤-9.9%)
+            adv_ratio (float)      -- 正涨幅占比%（即情绪分数，保留2位小数）
+        """
+        table = self.tables.get("stock_daily") # 请根据你的实际配置调整表名
+        if not table:
+            raise RuntimeError("db.oracle.tables.CN_STOCK_DAILY_PRICE not configured")
+
+        sql = f"""
+        SELECT
+            TRADE_DATE,
+            COUNT(*) AS total_stocks,
+            SUM(CASE WHEN CHG_PCT > 0  THEN 1 ELSE 0 END) AS adv,
+            SUM(CASE WHEN CHG_PCT < 0  THEN 1 ELSE 0 END) AS dec,
+            SUM(CASE WHEN CHG_PCT = 0  THEN 1 ELSE 0 END) AS flat,
+            SUM(CASE WHEN CHG_PCT >= 9.9 THEN 1 ELSE 0 END) AS limit_up,
+            SUM(CASE WHEN CHG_PCT <= -9.9 THEN 1 ELSE 0 END) AS limit_down,
+            ROUND(SUM(CASE WHEN CHG_PCT > 0 THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 2) AS adv_ratio
+        FROM {self.schema}.{table}
+        WHERE TRADE_DATE >= TRUNC(:start_date) - :look_back_days
+          AND TRADE_DATE <= TRUNC(:start_date)
+          AND CHG_PCT IS NOT NULL
+        GROUP BY TRADE_DATE
+        ORDER BY TRADE_DATE DESC
+        FETCH FIRST 30 ROWS ONLY  -- 多取几行，确保有足够20个交易日
+        """
+
+        params = {
+            "start_date": _to_date(start_date),
+            "look_back_days": look_back_days,
+        }
+
+        raw = self.execute(sql, params)
+
+        if not raw:
+            LOG.warning("[DBProvider] fetch_stock_daily_sentiment_stats returned no data for %s", start_date)
+            return pd.DataFrame(columns=[
+                "trade_date", "total_stocks", "adv", "dec", "flat",
+                "limit_up", "limit_down", "adv_ratio"
+            ])
+
+        # 正确映射所有返回列
+        df = pd.DataFrame(
+            raw,
+            columns=[
+                "trade_date", "total_stocks", "adv", "dec", "flat",
+                "limit_up", "limit_down", "adv_ratio"
+            ]
+        )
+        df["trade_date"] = pd.to_datetime(df["trade_date"])
+
+        LOG.info(
+            "[DBProvider] fetch_stock_daily_sentiment_stats success: %d trading days for %s",
+            len(df),
+            start_date,
+        )
+
+        return df
+    
+
+    def fetch_daily_new_low_stats(
+        self,
+        trade_date: str,
+        look_back_days: int = 150,  # 建议150天，确保覆盖50个交易日 + 节假日
+    ) -> pd.DataFrame:
+        """
+        获取指定交易日往前 look_back_days 天内，每日创“50日新低”的市场广度统计
+
+        返回 DataFrame columns:
+            trade_date (datetime)
+            count_total (int)           -- 当日参与股票总数
+            count_new_low_50d (int)     -- 当日创50日新低股票家数
+            new_low_50d_ratio (float)   -- 新低比例%（保留2位小数）
+        """
+        table = self.tables.get("stock_daily")
+        if not table:
+            raise RuntimeError("db.oracle.tables.CN_STOCK_DAILY_PRICE not configured")
+
+        sql = f"""
+        WITH daily_data AS (
+            SELECT
+                TRADE_DATE,
+                SYMBOL,
+                CLOSE
+            FROM {self.schema}.{table}
+            WHERE TRADE_DATE >= TRUNC(:trade_date) - :look_back_days
+              AND TRADE_DATE <= TRUNC(:trade_date)
+              AND CLOSE IS NOT NULL
+        ),
+        with_50d_low AS (
+            SELECT
+                TRADE_DATE,
+                SYMBOL,
+                CLOSE,
+                MIN(CLOSE) OVER (
+                    PARTITION BY SYMBOL
+                    ORDER BY TRADE_DATE
+                    ROWS BETWEEN 49 PRECEDING AND CURRENT ROW
+                ) AS low_50d
+            FROM daily_data
+        )
+        SELECT
+            TRADE_DATE,
+            COUNT(*) AS count_total,
+            COUNT(CASE WHEN CLOSE = low_50d THEN 1 END) AS count_new_low_50d,
+            ROUND(
+                COUNT(CASE WHEN CLOSE = low_50d THEN 1 END) * 100.0 / COUNT(*),
+                2
+            ) AS new_low_50d_ratio
+        FROM with_50d_low
+        GROUP BY TRADE_DATE
+        ORDER BY TRADE_DATE DESC
+        FETCH FIRST 30 ROWS ONLY
+        """
+
+        params = {
+            "trade_date": _to_date(trade_date),
+            "look_back_days": look_back_days,
+        }
+
+        raw = self.execute(sql, params)
+
+        if not raw:
+            LOG.warning("[DBProvider] fetch_daily_new_low_stats returned no data for %s", trade_date)
+            return pd.DataFrame(columns=["trade_date", "count_total", "count_new_low_50d", "new_low_50d_ratio"])
+
+        df = pd.DataFrame(
+            raw,
+            columns=["trade_date", "count_total", "count_new_low_50d", "new_low_50d_ratio"]
+        )
+        df["trade_date"] = pd.to_datetime(df["trade_date"])
+
+        LOG.info(
+            "[DBProvider] fetch_daily_new_low_stats success: %d trading days for %s (50-day new low)",
+            len(df),
+            trade_date,
+        )
+
+        return df    

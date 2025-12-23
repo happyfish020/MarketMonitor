@@ -1,188 +1,123 @@
+# core/adapters/block_builders/cn/trend_facts_blkbd.py
 # -*- coding: utf-8 -*-
-"""
-UnifiedRisk V12 · TrendFactsBlockBuilder（冻结）
-
-职责：
-- 统一构建“趋势派生事实”（Trend Facts）
-- 支撑 Trend-in-Force / Failure-Rate Factor / DRS
-- 不判断、不裁决、不预测
-
-趋势对象（冻结）：
-1. index          —— 指数趋势
-2. capital_flow  —— 北向/北代资金趋势
-3. sector        —— 主导行业趋势（占位）
-
-设计铁律：
-- 不拉 Provider
-- 不在 DS / Factor 中计算趋势
-- 所有趋势只在 FactBlockBuilder 生成
-"""
 
 from __future__ import annotations
-from typing import Dict, Any, List, Optional
 
-from core.block_builders.block_builder_base import FactBlockBuilderBase
+import json
+import os
+from typing import Any, Dict, List
+
+from core.adapters.block_builder.block_builder_base import FactBlockBuilderBase
 from core.utils.logger import get_logger
+from core.utils.config_loader import load_paths
 
-LOG = get_logger("BB.TrendFacts")
+LOG = get_logger("BLKBD.TrendFacts")
 
-
+ 
 class TrendFactsBlockBuilder(FactBlockBuilderBase):
     """
-    趋势派生事实构建器（冻结）
+    TrendFactsBlockBuilder（冻结）
+
+    职责：
+    - 从 history 读取逐日原子事实
+    - 生成“趋势事实（facts）”
+    - 不做判断、不生成信号、不影响 Gate
     """
-
-    block_key = "trend_facts_raw"
-
-    # ===============================
-    # Public API
-    # ===============================
+    def __init__(self):
+        super().__init__(name="Trend_facts")
+         
+        _paths = load_paths()
+        self.base_dir = _paths.get("cn_history_dir", "data/cn/history")
+        
+    # ------------------------------------------------------------
     def build_block(
         self,
         snapshot: Dict[str, Any],
-        refresh_mode: str = "auto",
+        refresh_mode: str = "none",
     ) -> Dict[str, Any]:
-        warnings: List[str] = []
+        """
+        当前仅实现：Turnover 趋势事实
+        """
+        facts: Dict[str, Any] = {}
 
-        index_block = self._build_index_trend(snapshot, warnings)
-        capital_flow_block = self._build_capital_flow_trend(snapshot, warnings)
-        sector_block = self._build_sector_trend(snapshot, warnings)
+        turnover_trend = self._build_turnover_trend()
+        if turnover_trend:
+            facts["turnover"] = turnover_trend
 
-        return {
-            "index": index_block,
-            "capital_flow": capital_flow_block,
-            "sector": sector_block,
-            "_meta": {
-                "warnings": warnings,
-            },
-        }
+        return facts
 
-    # ===============================
-    # Index Trend（指数趋势）
-    # ===============================
-    def _build_index_trend(
-        self,
-        snapshot: Dict[str, Any],
-        warnings: List[str],
-    ) -> Dict[str, Any]:
-        price_raw = snapshot.get("index_price_raw")
-        turnover_raw = snapshot.get("turnover_raw")
-        price_series = snapshot.get("index_price_series")
-        turnover_series = snapshot.get("turnover_series")
+    # ------------------------------------------------------------
+    # Turnover trend
+    # ------------------------------------------------------------
+    def _build_turnover_trend(self) -> Dict[str, Any] | None:
+        """
+        从 history/turnover/*.json 读取数据，计算均值类趋势事实
+        """
+         
+        history_root = self.base_dir
 
-        close = price_raw.get("close") if price_raw else None
-        ma20 = self._calc_avg(self._last_n(price_series, "close", 20))
-        above_ma20 = (
-            close is not None and ma20 is not None and close >= ma20
-        )
-
-        turnover_ratio_5d = self._calc_ratio(
-            turnover_raw,
-            turnover_series,
-            key="turnover",
-            window=5,
-        )
-
-        if close is None:
-            warnings.append("index_price_missing")
-
-        return {
-            "close": close,
-            "ma20": ma20,
-            "above_ma20": above_ma20,
-            "turnover_ratio_5d": turnover_ratio_5d,
-        }
-
-    # ===============================
-    # Capital Flow Trend（资金趋势）
-    # ===============================
-    def _build_capital_flow_trend(
-        self,
-        snapshot: Dict[str, Any],
-        warnings: List[str],
-    ) -> Dict[str, Any]:
-        north_raw = snapshot.get("northbound_fund_raw")
-        north_series = snapshot.get("northbound_fund_series")
-
-        net_today = north_raw.get("net") if north_raw else None
-        avg_5d = self._calc_avg(self._last_n(north_series, "net", 5))
-
-        ratio = (
-            net_today / avg_5d
-            if net_today is not None and avg_5d not in (None, 0)
-            else None
-        )
-
-        direction = None
-        if net_today is not None:
-            if net_today > 0:
-                direction = "inflow"
-            elif net_today < 0:
-                direction = "outflow"
-            else:
-                direction = "flat"
-
-        if north_raw is None:
-            warnings.append("northbound_data_missing")
-
-        return {
-            "northbound": {
-                "net_today": net_today,
-                "avg_5d": avg_5d,
-                "ratio_to_avg_5d": ratio,
-                "direction": direction,
-            }
-        }
-
-    # ===============================
-    # Sector Trend（主导行业，占位）
-    # ===============================
-    def _build_sector_trend(
-        self,
-        snapshot: Dict[str, Any],
-        warnings: List[str],
-    ) -> Dict[str, Any]:
-        # 当前阶段仅做结构占位，避免后续返工
-        return {
-            "leading_sector": {
-                "name": None,
-                "fund_flow_ratio_5d": None,
-                "price_above_ma20": None,
-            }
-        }
-
-    # ===============================
-    # Helpers
-    # ===============================
-    @staticmethod
-    def _last_n(
-        series: Optional[List[Dict[str, Any]]],
-        key: str,
-        n: int,
-    ) -> List[float]:
-        if not series:
-            return []
-        values = [item.get(key) for item in series if item.get(key) is not None]
-        return values[-n:]
-
-    @staticmethod
-    def _calc_avg(values: List[float]) -> Optional[float]:
-        if not values:
+        if not history_root:
+            LOG.warning("[TrendFacts] history_dir not configured")
             return None
-        return sum(values) / len(values)
 
-    def _calc_ratio(
-        self,
-        today_raw: Optional[Dict[str, Any]],
-        series: Optional[List[Dict[str, Any]]],
-        *,
-        key: str,
-        window: int,
-    ) -> Optional[float]:
-        if not today_raw or not series:
+        turnover_dir = os.path.join(history_root, "turnover")
+        if not os.path.isdir(turnover_dir):
+            LOG.warning("[TrendFacts] turnover history dir missing: %s", turnover_dir)
             return None
-        today = today_raw.get(key)
-        avg = self._calc_avg(self._last_n(series, key, window))
-        if today is None or avg in (None, 0):
+
+        records = self._load_turnover_history(turnover_dir)
+        if len(records) < 10:
+            LOG.warning("[TrendFacts] insufficient turnover history: %d", len(records))
             return None
-        return today / avg
+
+        # 按日期排序（升序）
+        records.sort(key=lambda x: x["trade_date"])
+
+        totals: List[float] = [r["total"] for r in records if r.get("total") is not None]
+        if len(totals) < 10:
+            return None
+
+        last = totals[-1]
+        avg_5d = sum(totals[-5:]) / 5
+        avg_10d = sum(totals[-10:]) / 10
+
+        slope_5d = (totals[-1] - totals[-6]) / 5
+        slope_10d = (totals[-1] - totals[-11]) / 10
+        
+        return {
+            "last_value": round(last, 2),
+            "avg_5d": round(avg_5d, 2),
+            "avg_10d": round(avg_10d, 2),
+            "ratio_vs_5d": round(last / avg_5d, 4) if avg_5d > 0 else None,
+            "ratio_vs_10d": round(last / avg_10d, 4) if avg_10d > 0 else None,
+            "slope_5d": round(slope_5d, 2),
+            "slope_10d": round(slope_10d, 2),
+
+        }
+
+    # ------------------------------------------------------------
+    def _load_turnover_history(self, turnover_dir: str) -> List[Dict[str, Any]]:
+        """
+        读取 history 中的 turnover 单日原子事实
+        """
+        records: List[Dict[str, Any]] = []
+
+        for fname in os.listdir(turnover_dir):
+            
+            if not fname.endswith(".json"):
+                continue
+
+            fpath = os.path.join(turnover_dir, fname)
+            try:
+                with open(fpath, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if "trade_date" in data and "total" in data:
+                    records.append(data)
+                    print(fname)
+                else:
+                    print(f"{fname} is incorrect json history file.")
+            except Exception as e:
+                LOG.error("[TrendFacts] failed to load %s: %s", fname, e)
+                raise Exception("[TrendFacts] failed to load %s: %s", fname, e)
+        
+        return records

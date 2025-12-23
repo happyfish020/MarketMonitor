@@ -53,6 +53,7 @@ class BreadthDataSource(DataSourceBase):
         # === 🔴 关键修复：DB 返回的是 list[tuple] ===
         if df is None or len(df) == 0:
             LOG.warning("[DS.Breadth] empty data (raw)")
+            raise Exception("[DS.Breadth] empty data (raw)")
             return {}
         
         # tuple 结构必须与你 SQL 一致

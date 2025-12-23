@@ -24,18 +24,21 @@ class StructureFactsBuilder:
     def build(self, *, factors: Dict[str, FactorResult]) -> Dict[str, Dict[str, str]]:
         structure: Dict[str, Dict[str, str]] = {}
 
-        if "index_tech" in factors:
-            structure["index_tech"] = self._map_index_tech(factors["index_tech"])
+        if "index_tech_raw" in factors:
+            structure["index_tech"] = self._map_index_tech(factors["index_tech_raw"])
 
-        if "turnover" in factors:
-            structure["turnover"] = self._map_turnover(factors["turnover"])
+        if "turnover_raw" in factors:
+            structure["turnover"] = self._map_turnover(factors["turnover_raw"])
 
-        if "breadth" in factors:
-            structure["breadth"] = self._map_breadth(factors["breadth"])
+        if "breadth_raw" in factors:
+            structure["breadth"] = self._map_breadth(factors["breadth_raw"])
 
-        if "north_nps" in factors:
-            structure["north_nps"] = self._map_north_nps(factors["north_nps"])
+        if "north_nps_raw" in factors:
+            structure["north_nps"] = self._map_north_nps(factors["north_nps_raw"])
 
+        if "trend_in_force_raw" in factors:
+            structure["trend_in_force"] = self._map_north_nps(factors["trend_in_force_raw"])
+       
         # ---- 综合一句话（非计算，仅归纳）----
         structure["_summary"] = self._build_summary(structure)
 

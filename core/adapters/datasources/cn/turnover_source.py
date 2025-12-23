@@ -122,6 +122,17 @@ class TurnoverDataSource(DataSourceBase):
         except Exception as e:
             LOG.error("[DS.Turnover] save cache error: %s", e)
 
+        # ===============================
+        # 写 history（最小侵入新增）
+        # - 不依赖 cache 生命周期
+        # - 幂等：同 trade_date 已存在则跳过
+        # - 写失败不阻断 build_block 返回
+        # ===============================
+        try:
+            self._save_history_if_needed(trade_date=trade_date, block=block)
+        except Exception as e:
+            LOG.error("[DS.Turnover] save history error: %s", e)
+
         return block
 
     # ------------------------------------------------------------
@@ -133,3 +144,35 @@ class TurnoverDataSource(DataSourceBase):
             "bj": 0.0,
             "total": 0.0,
         }
+
+    # ------------------------------------------------------------
+    # History persistence（最小侵入新增）
+    # ------------------------------------------------------------
+    def _save_history_if_needed(self, trade_date: str, block: Dict[str, Any]) -> None:
+        """
+        冻结规范：history 作为“持久化事实”，由 DS 写入。
+
+        注意（冻结）：
+        - 本 DS 不负责 history 的多日计算，只做当日事实落地
+        - 幂等：存在即跳过，不做覆盖写
+        - 写失败不影响主流程
+        """
+        if not self.history_root:
+            return
+
+        # 目录已在 __init__ ensure，但这里再防御一次
+        try:
+            os.makedirs(self.history_root, exist_ok=True)
+        except Exception:
+            # 若目录创建失败，直接退出（不抛出给上层）
+            return
+
+        # 文件命名保持“最小侵入”：沿用 cache 的命名风格，避免影响其它工具链
+        history_file = os.path.join(self.history_root, f"turnover_{trade_date}.json")
+
+        # 幂等：已有则跳过（冻结：不覆盖）
+        if os.path.exists(history_file):
+            return
+
+        with open(history_file, "w", encoding="utf-8") as f:
+            json.dump(block, f, ensure_ascii=False, indent=2)

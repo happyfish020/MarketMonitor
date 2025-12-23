@@ -29,6 +29,7 @@ class ASharesPolicySlotBinder(PolicySlotBinderBase):
         "global_macro_raw": "global_macro",
         "global_lead_raw": "global_lead",
         "index_global_raw": "index_global",
+        "trend_in_force_raw": "trend_in_force",
         # 允许继续 append-only
     }
 
@@ -49,6 +50,7 @@ class ASharesPolicySlotBinder(PolicySlotBinderBase):
                 continue
 
             slot = self.bind_slot(raw_name, fr)
+            print(raw_name)
             if slot is None:
                 continue
             bound[slot] = fr

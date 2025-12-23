@@ -26,7 +26,7 @@ from core.factors.cn.sector_rotation_factor import SectorRotationFactor
 from core.factors.cn.index_tech_factor import IndexTechFactor
 from core.factors.cn.etf_index_sync_factor import ETFIndexSyncFactor
 from core.factors.cn.participation_factor import ParticipationFactor
-
+from core.factors.cn.trend_in_force_factor import TrendInForceFactor
 from core.factors.glo.global_macro_factor import GlobalMacroFactor
 from core.factors.glo.global_lead_factor import GlobalLeadFactor
 from core.factors.glo.index_global_factor import IndexGlobalFactor
@@ -195,6 +195,7 @@ def _compute_factors(snapshot: Dict[str, Any]) -> dict[str, FactorResult]:
         IndexTechFactor(),
         BreadthFactor(),
         ETFIndexSyncFactor(),
+        TrendInForceFactor(),
     ]
 
     factors: dict[str, FactorResult] = {}
@@ -309,7 +310,7 @@ def _generate_phase3_report(trade_date_str: str, gate_decision, factors_bound: d
 def run_cn_ashare_daily(trade_date: str | None = None, refresh_mode: str = "auto") -> None:
     trade_date_str = _normalize_trade_date(trade_date)
     #
-    trade_date_str = "2025-12-18"
+    #trade_date_str = "2025-12-18"
     LOG.info("Run CN AShare Daily | trade_date=%s refresh=%s", trade_date_str, refresh_mode)
 
     # Phase-1: Fetch

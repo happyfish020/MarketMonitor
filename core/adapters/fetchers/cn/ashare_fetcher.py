@@ -36,6 +36,7 @@ from core.adapters.datasources.glo.index_global_source import IndexGlobalDataSou
 from core.adapters.block_builder.cn.unified_emotion_blkbd import UnifiedEmotionBlockBuilder
 from core.adapters.block_builder.cn.index_tech_blkbd import IndexTechBlockBuilder
 from core.adapters.block_builder.cn.sector_rotation_blkbd import SectorRotationBlockBuilder
+from core.adapters.block_builder.cn.trend_facts_blkbd import TrendFactsBlockBuilder
 
 
 LOG = get_logger("Fetcher.Ashare")
@@ -103,8 +104,9 @@ class AshareDataFetcher(FetcherBase):
  
         self.unified_emotion_bb = UnifiedEmotionBlockBuilder()
         self.index_tech_bb = IndexTechBlockBuilder()
-        #self.sector_rotation_bb = SectorRotationBlockBuilder()
 
+        self.trend_facts_bb = TrendFactsBlockBuilder() 
+    
         #self.sector_rotation_bb = SectorRotationBlockBuilder()
         #self.index_sector_corr_ds = IndexSectorCorrSource(
         #    DataSourceConfig(market="cn", ds_name="index_sector_corr"),
@@ -125,8 +127,9 @@ class AshareDataFetcher(FetcherBase):
             refresh_mode=self.refresh_mode,
         )
         # weekend Sat no data --- to be handle !!! 
-        # # Todo assert snapshot.get("breadth_raw"), "Breadth DS missing"
-
+        # # Todo 
+        assert snapshot.get("breadth_raw"), "Breadth DS missing"
+       
         # ==========================================================
         # 2️⃣ Northbound Proxy (DS raw)
         # ==========================================================
@@ -158,7 +161,7 @@ class AshareDataFetcher(FetcherBase):
         assert snapshot.get("index_core_raw"), "index_core DS missing"
  
 
- 
+             
 
         # ==========================================================
         # 4️⃣ Margin (DS raw)
@@ -210,10 +213,11 @@ class AshareDataFetcher(FetcherBase):
         assert snapshot.get("unified_emotion_raw"), "unified_emotion raw missing"
 
 
-        snapshot["index_tech_raw"] = self.index_tech_bb.build_block(snapshot, refresh_mode=self.refresh_mode)
+        snapshot["index_tech_raw"] = self.index_tech_bb.build_block(snapshot)
         assert snapshot.get("index_tech_raw"), "index_tech bb missing"
 
-
+        snapshot["trend_in_force_raw"] = self.trend_facts_bb.build_block(snapshot)
+        assert snapshot.get("trend_in_force_raw"), "trend_in_force_raw bb missing"
 
         LOG.info("[AshareFetcher] Snapshot 数据源加载完成")
         return snapshot

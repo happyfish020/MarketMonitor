@@ -26,6 +26,7 @@ class TrendInForceFactor(FactorBase):
     """
 
     def __init__(self) -> None:
+        #super().__init__("trend_in_force_raw")
         super().__init__("trend_in_force_raw")
 
     # ------------------------------------------------------------

@@ -27,8 +27,99 @@ class TrendFactsBlockBuilder(FactBlockBuilderBase):
         super().__init__(name="Trend_facts")
          
         _paths = load_paths()
-        self.base_dir = _paths.get("cn_history_dir", "data/cn/history")
+        #self.base_dir = _paths.get("cn_history_dir", "data/cn/history")
         
+    def _build_turnover_trend(self, snapshot: dict) -> dict | None:
+        """
+        从 snapshot['turnover_raw']['windows'] 中读取时间序列
+        提取 total_turnover，计算成交额趋势指标
+        后续计算逻辑与原代码完全一致
+        """
+        windows = snapshot.get('turnover_raw', {}).get('windows', [])
+        assert windows, "snapsot - turnover_trend window is empty!"
+        if not windows:
+            return None
+
+        records = [
+            {
+                "trade_date": item["trade_date"],
+                "total": item.get("total_turnover")  # 键名改为 total_turnover
+            }
+            for item in windows
+            if item.get("total_turnover") is not None
+        ]
+
+        if len(records) < 10:
+            LOG.error("Turnover history records < 10")
+            raise Exception("Turnover history records < 10")
+            return None
+
+        # 按日期排序（升序）
+        records.sort(key=lambda x: x["trade_date"])
+
+        totals: list[float] = [r["total"] for r in records]
+
+        last = totals[-1]
+        avg_5d = sum(totals[-5:]) / 5
+        avg_10d = sum(totals[-10:]) / 10
+
+        slope_5d = (totals[-1] - totals[-6]) / 5
+        slope_10d = (totals[-1] - totals[-11]) / 10
+
+        return {
+            "last_value": round(last, 2),
+            "avg_5d": round(avg_5d, 2),
+            "avg_10d": round(avg_10d, 2),
+            "ratio_vs_5d": round(last / avg_5d, 4) if avg_5d > 0 else None,
+            "ratio_vs_10d": round(last / avg_10d, 4) if avg_10d > 0 else None,
+            "slope_5d": round(slope_5d, 2),
+            "slope_10d": round(slope_10d, 2),
+        }
+        
+    def _build_turnover_trend_no(self, snapshot: dict) -> dict | None:
+        """
+        从 snapshot['turnover_raw']['windows'] 中读取时间序列
+        提取 total_turnover，计算成交额趋势指标
+        后续计算逻辑与原代码完全一致
+        """
+        windows = snapshot.get('turnover_raw', {}).get('windows', [])
+        if not windows:
+            return None
+
+        records = [
+            {
+                "trade_date": item["trade_date"],
+                "total": item.get("total_turnover")  # 键名改为 total_turnover
+            }
+            for item in windows
+            if item.get("total_turnover") is not None
+        ]
+
+        if len(records) < 10:
+            return None
+
+        # 按日期排序（升序）
+        records.sort(key=lambda x: x["trade_date"])
+
+        totals: list[float] = [r["total"] for r in records]
+
+        last = totals[-1]
+        avg_5d = sum(totals[-5:]) / 5
+        avg_10d = sum(totals[-10:]) / 10
+
+        slope_5d = (totals[-1] - totals[-6]) / 5
+        slope_10d = (totals[-1] - totals[-11]) / 10
+
+        return {
+            "last_value": round(last, 2),
+            "avg_5d": round(avg_5d, 2),
+            "avg_10d": round(avg_10d, 2),
+            "ratio_vs_5d": round(last / avg_5d, 4) if avg_5d > 0 else None,
+            "ratio_vs_10d": round(last / avg_10d, 4) if avg_10d > 0 else None,
+            "slope_5d": round(slope_5d, 2),
+            "slope_10d": round(slope_10d, 2),
+        }
+            
     # ------------------------------------------------------------
     def build_block(
         self,
@@ -40,16 +131,19 @@ class TrendFactsBlockBuilder(FactBlockBuilderBase):
         """
         facts: Dict[str, Any] = {}
 
-        turnover_trend = self._build_turnover_trend()
+        turnover_trend = self._build_turnover_trend(snapshot)
+        assert turnover_trend, "turnover_trend is empty!"
         if turnover_trend:
             facts["turnover"] = turnover_trend
-
+        #
+        # Todo other  trend like market_sentiment....breadth trend
+        #
         return facts
 
     # ------------------------------------------------------------
     # Turnover trend
     # ------------------------------------------------------------
-    def _build_turnover_trend(self) -> Dict[str, Any] | None:
+    def _build_turnover_trend_no(self) -> Dict[str, Any] | None:
         """
         从 history/turnover/*.json 读取数据，计算均值类趋势事实
         """

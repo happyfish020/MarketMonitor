@@ -101,7 +101,7 @@ class BreadthDataSource(DataSourceBase):
             "count_new_low": current_new_low,           
             "count_total": current_total,          # 如果你原来在 block 中用了 count_total，可加
             "new_low_ratio": current_ratio, 
-            "window": window,
+            "windows": window,
         }
 
         LOG.info(

@@ -40,8 +40,18 @@ class ContextOvernightBlock(ReportBlockRendererBase):
 
         warnings: List[str] = []
 
+        trend_notice = None
+        trend = context.slots.get("structure", {}).get("trend_in_force")
+        if isinstance(trend, dict) and trend.get("state") == "broken":
+            trend_notice = self._render_trend_broken_notice()        
+
+
+        
+
         overnight = context.slots.get("overnight")
 
+
+        ###
         if overnight is None:
             warnings.append("empty:overnight")
             payload = {
@@ -51,6 +61,8 @@ class ContextOvernightBlock(ReportBlockRendererBase):
                     "不影响 Gate / ActionHint 的有效性。"
                 )
             }
+            if trend_notice:
+                payload["trend_notice"] = trend_notice
         else:
             payload = {
                 "overnight": overnight,
@@ -59,7 +71,11 @@ class ContextOvernightBlock(ReportBlockRendererBase):
                     "仅作为情境补充，不构成交易信号或操作建议。"
                 ),
             }
+            if trend_notice:
+                payload["trend_notice"] = trend_notice
+        
 
+        ###
         block = ReportBlock(
             #block_id=self.block_id,
             block_alias=self.block_alias,
@@ -69,3 +85,12 @@ class ContextOvernightBlock(ReportBlockRendererBase):
         )
 
         return block
+
+
+    def _render_trend_broken_notice(self) -> str:
+        return (
+            "趋势失效提示：当前趋势结构已被破坏，"
+            "原有趋势假设不再成立。"
+            "在此结构环境下，任何基于趋势延续的解读均不具备制度可信度。"
+        )
+    

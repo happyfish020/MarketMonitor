@@ -37,8 +37,12 @@ class StructureFactsBuilder:
             structure["north_nps"] = self._map_north_nps(factors["north_nps_raw"])
 
         if "trend_in_force_raw" in factors:
-            structure["trend_in_force"] = self._map_north_nps(factors["trend_in_force_raw"])
-       
+            structure["trend_in_force"] = self._map_trend_in_force(factors["trend_in_force_raw"])
+
+        # ---- Step-2B：FRF 结构映射（新增，不影响既有结构）----
+        if "failure_rate" in factors:
+            structure["failure_rate"] = self._map_frf(factors["failure_rate"])
+
         # ---- 综合一句话（非计算，仅归纳）----
         structure["_summary"] = self._build_summary(structure)
 
@@ -109,6 +113,58 @@ class StructureFactsBuilder:
         return {
             "state": "neutral",
             "meaning": "资金以调仓为主，未出现连续撤退"
+        }
+
+    def _map_trend_in_force(self, fr: FactorResult) -> Dict[str, str]:
+        """
+        Trend-in-Force → 结构事实映射（冻结）
+
+        仅做语义翻译，不参与判断、不影响 Gate
+        """
+        if fr.level == "HIGH":
+            return {
+                "state": "in_force",
+                "meaning": "趋势结构仍然成立，当前行情仍在有效趋势内运行"
+            }
+
+        if fr.level == "LOW":
+            return {
+                "state": "broken",
+                "meaning": "趋势结构已被破坏，原有趋势不再具备制度可信度"
+            }
+
+        return {
+            "state": "weakening",
+            "meaning": "趋势动能减弱，结构进入观察阶段"
+        }
+
+    # ===============================
+    # FRF → Structure（新增）
+    # ===============================
+    def _map_frf(self, fr: FactorResult) -> Dict[str, str]:
+        """
+        FRF（Failure-Rate Factor）→ 结构事实映射（P0 冻结）
+
+        含义：
+        - HIGH   ：失败率高，结构性失效压力显著
+        - NEUTRAL：偶发失败，结构进入观察
+        - LOW    ：未见失败迹象，结构稳定
+        """
+        if fr.level == "HIGH":
+            return {
+                "state": "elevated_risk",
+                "meaning": "AAAAAAAAAAAAAA近期趋势结构失效出现频繁，结构性风险压力上升"
+            }
+
+        if fr.level == "NEUTRAL":
+            return {
+                "state": "watch",
+                "meaning": "BBBBBBBBBBBBBB趋势结构存在失效迹象，但尚未形成连续破坏"
+            }
+
+        return {
+            "state": "stable",
+            "meaning": "CCCCCCCCCCCCc未观察到趋势结构失效迹象"
         }
 
     # ===============================

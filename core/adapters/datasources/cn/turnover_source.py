@@ -120,7 +120,7 @@ class TurnoverDataSource(DataSourceBase):
         block = {
             "trade_date": latest_trade_date,
             "total_turnover": current_total,
-            "window": window,  # 最新日期在列表最前面
+            "windows": window,  # 最新日期在列表最前面
         }
 
         LOG.info(
@@ -150,6 +150,6 @@ class TurnoverDataSource(DataSourceBase):
         return {
             "trade_date": trade_date,
             "total_turnover": 0.0,
-            "window": {}
+            "windows": {}
         }
  

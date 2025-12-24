@@ -31,6 +31,7 @@ from core.factors.glo.global_macro_factor import GlobalMacroFactor
 from core.factors.glo.global_lead_factor import GlobalLeadFactor
 from core.factors.glo.index_global_factor import IndexGlobalFactor
 from core.factors.cn.breadth_factor import BreadthFactor
+from core.factors.cn.frf_factor import FRFFactor
 
 from core.factors.factor_result import FactorResult
 from core.adapters.policy_slot_binders.cn.ashares_policy_slot_binder import ASharesPolicySlotBinder
@@ -80,6 +81,9 @@ def _prepare_report_slots(*, gate_decision, factors_bound: dict) -> dict:
     # Phase-2 结构事实：必须来自 factors_bound["structure"]
     structure = factors_bound.get("structure")
 
+    observations = factors_bound.get("observations")
+
+
     # 观察对象：Phase-2 生成后的 watchlist_state
     watchlist = factors_bound.get("watchlist")
 
@@ -124,6 +128,7 @@ def _prepare_report_slots(*, gate_decision, factors_bound: dict) -> dict:
         "gate": gate,
         "structure": structure,
         "watchlist": watchlist,
+        "observations": observations,   # ★★★ 关键新增
         "conditions_runtime": conditions_runtime,
         "overnight": overnight,
         "_meta": meta,
@@ -196,6 +201,7 @@ def _compute_factors(snapshot: Dict[str, Any]) -> dict[str, FactorResult]:
         BreadthFactor(),
         ETFIndexSyncFactor(),
         TrendInForceFactor(),
+        FRFFactor(),  # <-- Step-2A: 接入 FRF（Failure-Rate Factor）
     ]
 
     factors: dict[str, FactorResult] = {}
@@ -223,12 +229,16 @@ def _bind_policy_slots(factors: dict[str, FactorResult]) -> dict:
 
 
 def _build_phase2_structures(factors: dict[str, FactorResult], factors_bound: dict) -> dict:
-    # Structure facts
+    # -------------------------------------------------
+    # Phase-2: Structure facts（冻结）
+    # -------------------------------------------------
     structure_builder = StructureFactsBuilder()
     structure_facts = structure_builder.build(factors=factors)
     factors_bound["structure"] = structure_facts
 
-    # Watchlist state (结构验证/允许参与前提)
+    # -------------------------------------------------
+    # Phase-2: Watchlist state（冻结）
+    # -------------------------------------------------
     watchlist_config = factors_bound.get("watchlist")
     watchlist_builder = WatchlistStateBuilder()
     watchlist_state = watchlist_builder.build(
@@ -238,8 +248,30 @@ def _build_phase2_structures(factors: dict[str, FactorResult], factors_bound: di
     )
     factors_bound["watchlist"] = watchlist_state
 
-    return factors_bound
+    # -------------------------------------------------
+    # Phase-2: Observations（新增 · 冻结合规）
+    # -------------------------------------------------
+    observations = factors_bound.get("observations")
+    if not isinstance(observations, dict):
+        observations = {}
 
+    try:
+        from core.regime.observation.drs.drs_observation import DRSObservation
+
+        drs_observation = DRSObservation().build(
+            inputs=structure_facts,
+            asof=factors_bound.get("_meta", {}).get("trade_date", "NA"),
+        )
+        observations["drs"] = drs_observation
+
+    except Exception as e :
+        # 冻结铁律：Observation 构建失败不影响主流程
+        raise e
+
+    factors_bound["observations"] = observations
+
+    return factors_bound
+ 
 
 def _make_gate_decision(snapshot: Dict[str, Any], factors_bound: dict):
     decider = ASharesGateDecider()

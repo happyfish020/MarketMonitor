@@ -44,6 +44,7 @@ class ASharesPolicySlotBinder(PolicySlotBinderBase):
 
         # 1) raw -> slot
         for raw_name, fr in factors.items():
+            print(raw_name)
             if not isinstance(raw_name, str):
                 continue
             if not isinstance(fr, FactorResult):

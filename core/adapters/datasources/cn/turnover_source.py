@@ -56,8 +56,12 @@ class TurnoverDataSource(DataSourceBase):
     # ------------------------------------------------------------
     def build_block(self, trade_date: str, refresh_mode: str = "none") -> Dict[str, Any]:
         
+
+        #test 必须的
+        refresh_mode = "full"
+        
         cache_file = os.path.join(self.cache_root, f"turnover_{trade_date}.json")
-        look_back_days = 20
+        look_back_days = 30
 
         # 按 refresh_mode 清理 cache（如果需要）
         _ = apply_refresh_cleanup(
@@ -96,11 +100,11 @@ class TurnoverDataSource(DataSourceBase):
         # 降序排序（最新日期在前面）
         df = df.sort_index(ascending=False)
 
-        # 取最新的 20 个交易日
-        recent_df = df.head(20)
+        # 取最新的 20 look_back_days 个交易日
+        recent_df = df.head(look_back_days)
 
         if recent_df.empty:
-            LOG.error("[DS.Turnover] no recent data after head(20) for %s", trade_date)
+            LOG.error(f"[DS.Turnover] no recent data after head({look_back_days}) for %s", trade_date)
             return self._empty_block()
 
         # 当前值：第一行（即最新一天）
@@ -120,7 +124,7 @@ class TurnoverDataSource(DataSourceBase):
         block = {
             "trade_date": latest_trade_date,
             "total_turnover": current_total,
-            "windows": window,  # 最新日期在列表最前面
+            "window": window,  # 最新日期在列表最前面
         }
 
         LOG.info(
@@ -150,6 +154,6 @@ class TurnoverDataSource(DataSourceBase):
         return {
             "trade_date": trade_date,
             "total_turnover": 0.0,
-            "windows": {}
+            "window": {}
         }
  

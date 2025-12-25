@@ -15,7 +15,7 @@ from __future__ import annotations
 from typing import Dict, Any, Tuple
 from datetime import datetime
 
-from core.utils.logger import get_logger
+
 from core.adapters.fetchers.cn.ashare_fetcher import AshareDataFetcher
 
 from core.factors.cn.unified_emotion_factor import UnifiedEmotionFactor
@@ -40,12 +40,15 @@ from core.predictors.prediction_engine import PredictionEngine
 from core.regime.ashares_gate_decider import ASharesGateDecider
 from core.regime.observation.structure.structure_facts_builder import StructureFactsBuilder
 from core.regime.observation.watchlist.watchlist_state_builder import WatchlistStateBuilder
+from core.regime.observation.drs.drs_observation import DRSObservation
+
+from core.regime.observation.drs_continuity import DRSContinuity
 
 from core.reporters.report_context import ReportContext
 from core.reporters.report_engine import ReportEngine
 from core.reporters.renderers.markdown_renderer import MarkdownRenderer
 from core.reporters.report_writer import ReportWriter
-
+from core.regime.observation.drs_continuity import DRSContinuity
 from core.actions.actionhint_service import ActionHintService
 
 from core.reporters.report_blocks.structure_facts_blk import StructureFactsBlock
@@ -58,7 +61,7 @@ from core.reporters.report_blocks.scenarios_forward_blk import ScenariosForwardB
 from core.reporters.report_blocks.exposure_boundary_blk import  ExposureBoundaryBlock
 
 #from core.actions.action_hint_builder import build_action_hint
-
+from core.utils.logger import get_logger
 LOG = get_logger("Engine.AshareDaily")
 
 
@@ -75,7 +78,7 @@ def _normalize_trade_date(trade_date: str | None) -> str:
 # Phase-3 Report pipeline helpers (保留你原来的架构)
 # =========================================================
 
-def _prepare_report_slots(*, gate_decision, factors_bound: dict) -> dict:
+def _prepare_report_slots_drs_no(*, gate_decision, factors_bound: dict) -> dict:
     gate = gate_decision.level
 
     # Phase-2 结构事实：必须来自 factors_bound["structure"]
@@ -136,12 +139,71 @@ def _prepare_report_slots(*, gate_decision, factors_bound: dict) -> dict:
         #"_action_hint": action_hint,
     }
 
+def _prepare_report_slots(
+    *,
+    gate_decision,
+    factors_bound: dict,
 
-def _build_report_context(*, trade_date: str, slots: dict, kind: str) -> ReportContext:
+    # ===== 原有 pipeline 里可能还没传的，全部给默认 =====
+    actionhint: dict | None = None,
+    structure: dict | None = None,
+    observations: dict | None = None,
+    overnight: dict | None = None,
+    meta: dict | None = None,
+    prediction: dict | None = None,
+) -> dict:
+    """
+    Prepare report slots for ReportEngine.
+
+    ⚠️ 设计铁律：
+    - 本函数只做 glue，不做任何裁决
+    - 所有新增参数必须有默认值，保证向后兼容
+    """
+
+    # -----------------------------
+    # Gate（原有）
+    # -----------------------------
+    gate_pre = gate_decision.level
+
+    # -----------------------------
+    # Execution Summary（来自 ActionHint）
+    # -----------------------------
+    execution_summary = None
+    if isinstance(actionhint, dict):
+        execution_summary = actionhint.get("execution")
+        assert execution_summary, "execution_summary is none"
+
+    # -----------------------------
+    # 当前阶段：不在此处重新计算 overlay
+    # -----------------------------
+    gate_final = gate_pre
+
+    return {
+        # -------- 核心 --------
+        "gate": gate_final,
+        "gate_pre": gate_pre,
+        "gate_final": gate_final,
+
+        # -------- 结构 / 观察 --------
+        "structure": structure or {},
+        "observations": observations or {},
+        "overnight": overnight or {},
+
+        # -------- Phase-3 新增 --------
+        "execution_summary": execution_summary,
+
+        # -------- 元信息 --------
+        "_meta": meta or {},
+        "_prediction": prediction,
+    }
+
+
+def _build_report_context(*, trade_date, slots, kind, actionhint=None) -> ReportContext:
     return ReportContext(
         kind=kind,
         trade_date=trade_date,
         slots=slots,
+        actionhint=actionhint
     )
 
 
@@ -163,9 +225,51 @@ def _build_report_engine() -> ReportEngine:
     )
 
 
-def _execute_report_pipeline(*, trade_date: str, gate_decision, factors_bound: dict, kind: str) -> str:
+def _execute_report_pipeline_no(*, trade_date: str, gate_decision, factors_bound: dict, kind: str) -> str:
     slots = _prepare_report_slots(gate_decision=gate_decision, factors_bound=factors_bound)
     context = _build_report_context(trade_date=trade_date, slots=slots, kind=kind)
+
+    engine = _build_report_engine()
+    report_doc = engine.build_report(context=context)
+
+    renderer = MarkdownRenderer()
+    text = renderer.render(report_doc)
+
+    writer = ReportWriter()
+    report_path = writer.write(doc=report_doc, text=text)
+    return report_path
+
+def _execute_report_pipeline(
+    *,
+    trade_date: str,
+    gate_decision,
+    factors_bound: dict,
+    kind: str,
+) -> str:
+    from core.actions.actionhint_service import ActionHintService
+
+    actionhint_service = ActionHintService()
+    # ① 生成 ActionHint（你系统里一定已有）
+    
+    actionhint = actionhint_service.build_actionhint(
+        gate=gate_decision.level,
+        structure=None,
+        watchlist=None,
+        conditions_runtime=None,
+    )
+    # ② 关键：把 actionhint 接入 slots
+    slots = _prepare_report_slots(
+        gate_decision=gate_decision,
+        factors_bound=factors_bound,
+        actionhint=actionhint,    # ← execution_summary 从这里来
+    )
+
+    context = _build_report_context(
+        trade_date=trade_date,
+        slots=slots,
+        kind=kind,
+        actionhint=actionhint
+    )
 
     engine = _build_report_engine()
     report_doc = engine.build_report(context=context)
@@ -227,8 +331,11 @@ def _bind_policy_slots(factors: dict[str, FactorResult]) -> dict:
     assert factors_bound.get("watchlist"), 'factors_bound["watchlist"] missing'
     return factors_bound
 
-
-def _build_phase2_structures(factors: dict[str, FactorResult], factors_bound: dict) -> dict:
+def _build_phase2_structures(
+    factors: dict[str, FactorResult],
+    factors_bound: dict,
+    trade_date_str: str,
+) -> dict:
     # -------------------------------------------------
     # Phase-2: Structure facts（冻结）
     # -------------------------------------------------
@@ -256,23 +363,35 @@ def _build_phase2_structures(factors: dict[str, FactorResult], factors_bound: di
         observations = {}
 
     try:
-        from core.regime.observation.drs.drs_observation import DRSObservation
-
+        # 1) 单日 DRS（冻结：不改 DRSObservation 内部逻辑）
         drs_observation = DRSObservation().build(
             inputs=structure_facts,
-            asof=factors_bound.get("_meta", {}).get("trade_date", "NA"),
+            asof=trade_date_str,
         )
+
+        # 2) P0-2：DRS 连续性（Anti-Chop）
+        # 冻结：不使用 CacheManager；使用本地 state 文件持久化
+        import os
+        drs_observation = DRSContinuity.apply(
+            drs_obs=drs_observation,
+            asof=trade_date_str,
+            fallback_state_path=os.path.join("state", "drs_persistence.json"),
+        )
+
         observations["drs"] = drs_observation
 
-    except Exception as e :
+    except Exception as e:
         # 冻结铁律：Observation 构建失败不影响主流程
-        raise e
+        LOG.error("[Phase2.Observations] DRS build/continuity failed: %s", e, exc_info=True)
+        observations["drs"] = {
+            "meta": {"kind": "drs", "status": "error"},
+            "observation": {"signal": "NA", "meaning": "DRS 构建失败（不影响主流程），请查看日志。"},
+            "evidence": {"error": str(e)},
+        }
 
     factors_bound["observations"] = observations
-
     return factors_bound
  
-
 def _make_gate_decision(snapshot: Dict[str, Any], factors_bound: dict):
     decider = ASharesGateDecider()
     gate_decision = decider.decide(snapshot, factors_bound)
@@ -346,7 +465,7 @@ def run_cn_ashare_daily(trade_date: str | None = None, is_intraday: bool = False
     LOG.info("Run CN AShare Daily | trade_date=%s refresh=%s", trade_date_str, refresh_mode)
 
     # Phase-1: Fetch
-    snapshot = _fetch_snapshot(trade_date_str, refresh_mode)
+    snapshot = _fetch_snapshot(trade_date_str, is_intraday= is_intraday, refresh_mode=refresh_mode)
 
     # Phase-1 → Phase-2: Factors
     factors = _compute_factors(snapshot)
@@ -355,7 +474,7 @@ def run_cn_ashare_daily(trade_date: str | None = None, is_intraday: bool = False
     factors_bound = _bind_policy_slots(factors)
 
     # Phase-2: Structure & Watchlist
-    factors_bound = _build_phase2_structures(factors, factors_bound)
+    factors_bound = _build_phase2_structures( factors, factors_bound, trade_date_str)
 
     # Phase-2: Gate decision
     gate_decision, snapshot = _make_gate_decision(snapshot, factors_bound)

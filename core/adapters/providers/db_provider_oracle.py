@@ -152,7 +152,7 @@ class DBOracleProvider:
     def fetch_daily_turnover_series(
         self,
         start_date: str,
-        look_back_days: int = 30,
+        look_back_days: int = 60,
     ) -> pd.DataFrame:
         """
         获取指定日期区间内全市场每日成交额（亿元）时间序列

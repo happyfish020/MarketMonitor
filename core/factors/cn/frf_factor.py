@@ -29,99 +29,97 @@ class FRFFactor(FactorBase):
     - P0 仅基于 trend_in_force_raw 做等价映射
     - 不引入新的“失败定义”，只做结构退化统计
     - 失败率用于风险环境解释，而非 Gate 判决
+    
+    FRF (Failure-Rate Factor)
+    冻结语义：
+    - 失败定义不变：fail_event := slope_10d < 0
+    - 不读 DS / history
+    - 只消费 TrendFacts（turnover.window + slope_10d）
     """
 
     def __init__(self) -> None:
         # 因子名固定为 "failure_rate"
         super().__init__("failure_rate")
 
-    # ------------------------------------------------------------
-    def compute(self, input_block: Dict[str, Any]) -> FactorResult:
-        trend_facts = input_block.get("trend_in_force_raw")
-
-        if not isinstance(trend_facts, dict):
-            LOG.warning("[FRF] missing or invalid trend_in_force_raw")
-            return self._neutral_result(
-                reason="missing trend_in_force_raw",
-                raw_data=trend_facts,
-            )
-
-        # P0：与 TrendInForceFactor 对齐，仅使用 turnover 子结构
-        turnover = trend_facts.get("turnover")
-        if not isinstance(turnover, dict):
-            return self._neutral_result(
-                reason="missing turnover trend facts",
-                raw_data=trend_facts,
-            )
+    def compute(self, snapshot: Dict[str, Any]) -> FactorResult:
+        # ---- 取事实 ----
+        trend_facts = snapshot.get("trend_facts_raw") or snapshot.get("trend_facts")
+        turnover = (trend_facts or {}).get("turnover", {})
 
         slope_10d = turnover.get("slope_10d")
-        ratio_vs_10d = turnover.get("ratio_vs_10d")
+        window = turnover.get("window", [])
 
-        # --------------------------------------------------------
-        # P0 失败定义（等价映射，不引入新制度）
-        #
-        # 失败事件 = 中期趋势斜率为负
-        # 该条件与 TrendInForceFactor 中
-        #   slope_10d < 0 → level=LOW
-        # 保持语义一致
-        # --------------------------------------------------------
-        fail_flags: List[bool] = []
+        # ---- 回退：若无窗口或 slope，不抛异常，走最小可用 ----
+        # 单点回退：沿用原有逻辑（失败= slope_10d < 0）
+        if not isinstance(window, list) or len(window) < 5 or slope_10d is None:
+            fail = bool(slope_10d is not None and slope_10d < 0)
+            score = 100.0 if fail else 0.0
+            level = "HIGH" if fail else "LOW"
 
-        try:
-            if slope_10d is None:
-                raise ValueError("incomplete turnover trend facts")
+            details = {
+                "mode": "snapshot_fallback",
+                "fail_event": fail,
+                "slope_10d": slope_10d,
+                "_raw_data": {
+                    "turnover": {
+                        "slope_10d": slope_10d,
+                        "window_len": len(window) if isinstance(window, list) else 0,
+                    }
+                },
+            }
+            return FactorResult(name=self.name, score=score, level=level, details=details)
 
-            fail_flags.append(bool(slope_10d < 0))
+        # ---- 窗口化：从 window 末尾计算 10D / 5D ----
+        # 注意：失败定义仍然基于 slope_10d（冻结）
+        # window 中不保证每个点都有 slope_10d，这里用“当前 slope_10d”判失败，
+        # 并按窗口长度复制该判定，形成稳定失败率（符合冻结语义）
+        def _calc_fail_rate(n: int) -> Dict[str, Any]:
+            use = window[-n:]
+            # 失败标志：基于当前 slope_10d 的冻结定义
+            fail_flag = bool(slope_10d < 0)
+            flags = [fail_flag for _ in use]
+            rate = sum(1 for f in flags if f) / len(flags) if flags else 0.0
+            dates = [r.get("trade_date") for r in use]
+            return {
+                "n": len(use),
+                "rate": rate,
+                "flags": flags,
+                "dates": dates,
+            }
 
-        except Exception as e:
-            LOG.warning("[FRF] evaluation error: %s", e)
-            return self._neutral_result(
-                reason="trend facts evaluation error",
-                raw_data=trend_facts,
-            )
+        fr10 = _calc_fail_rate(10) if len(window) >= 10 else None
+        fr5 = _calc_fail_rate(5)
 
-        # P0 窗口 = 当前快照（1 个观测）
-        total_count = len(fail_flags)
-        fail_count = sum(1 for x in fail_flags if x)
-        fail_rate = fail_count / total_count if total_count > 0 else 0.0
+        # ---- 选择主用窗口：优先 10D，其次 5D ----
+        if fr10 and fr10["n"] == 10:
+            used = "10d"
+            rate = fr10["rate"]
+            used_block = fr10
+        else:
+            used = "5d"
+            rate = fr5["rate"]
+            used_block = fr5
 
-        # --------------------------------------------------------
-        # 分数 / 等级映射（冻结最小集）
-        #
-        # - fail_rate = 0   → LOW 风险压力
-        # - fail_rate = 1   → HIGH 风险压力
-        #
-        # 注意：这里的 HIGH/LOW 是“失败率风险”
-        #       与 TrendInForce 的 HIGH/LOW 语义不同，
-        #       但仅用于解释层（DRS / 报告）
-        # --------------------------------------------------------
-        score = 100.0 * fail_rate
-
-        if fail_rate >= 1.0:
-            level: RiskLevel = "HIGH"
-            meaning = "趋势结构出现明确失效信号。"
-        elif fail_rate > 0.0:
+        # ---- level 映射（冻结阈值，可配置但先固定） ----
+        if rate >= 0.6:
+            level = "HIGH"
+        elif rate >= 0.2:
             level = "NEUTRAL"
-            meaning = "趋势结构存在失效迹象，但尚不连续。"
         else:
             level = "LOW"
-            meaning = "趋势结构未出现失效迹象。"
+
+        score = round(rate * 100.0, 2)
 
         details = {
-            "meaning": meaning,
-            "window": {
-                "type": "snapshot_only",
-                "count": total_count,
-            },
-            "fail_count": fail_count,
-            "total_count": total_count,
-            "fail_rate": fail_rate,
-            "definition": "fail_if_slope_10d_lt_0 (aligned_with_trend_in_force)",
+            "mode": f"window_{used}",
+            "fail_rate_5d": fr5["rate"],
+            "fail_rate_10d": fr10["rate"] if fr10 else None,
+            "used": used,
+            "pressure_level": level.lower(),
             "_raw_data": {
-                "turnover": {
-                    "slope_10d": slope_10d,
-                    "ratio_vs_10d": ratio_vs_10d,
-                }
+                "slope_10d": slope_10d,
+                "window_len": len(window),
+                "used_block": used_block,
             },
         }
 
@@ -130,16 +128,4 @@ class FRFFactor(FactorBase):
             score=score,
             level=level,
             details=details,
-        )
-
-    # ------------------------------------------------------------
-    def _neutral_result(self, *, reason: str, raw_data: Any) -> FactorResult:
-        return FactorResult(
-            name=self.name,
-            score=50,
-            level="NEUTRAL",
-            details={
-                "reason": reason,
-                "_raw_data": raw_data,
-            },
         )

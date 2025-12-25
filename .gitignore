@@ -11,3 +11,4 @@ __init__.py
 test*.*
 .vscode/
 docs/
+state/

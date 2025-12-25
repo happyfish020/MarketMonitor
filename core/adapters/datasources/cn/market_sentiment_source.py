@@ -82,7 +82,7 @@ class MarketSentimentDataSource(DataSourceBase):
             block = daily_serise_block
         else:
             block = self.build_intraday_block(trade_date, refresh_mode)
-            block["windows"] = daily_serise_block["windows"]
+            block["window"] = daily_serise_block["window"]
 
 
         # 写 cache
@@ -150,7 +150,7 @@ class MarketSentimentDataSource(DataSourceBase):
             "limit_up": current_limit_up,
             "limit_down": current_limit_down,
             "adv_ratio":  current_adv_ratio,
-            "windows": window,
+            "window": window,
         }
         return block
     
@@ -203,7 +203,7 @@ class MarketSentimentDataSource(DataSourceBase):
             "limit_up": 0,
             "limit_down": 0,
             "adv_ratio": 0.0,
-            "windows": {}
+            "window": {}
         }
 
 

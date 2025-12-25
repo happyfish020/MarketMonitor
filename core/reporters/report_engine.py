@@ -56,26 +56,20 @@ class ReportEngine:
         #self.summary_mapper = summary_mapper
         self._builders_by_alias = dict(block_builders)
 
-    def build_report(self, *, context: ReportContext) -> ReportDocument:
+    def build_report_no(self, *, context: ReportContext) -> ReportDocument:
         meta = {
             "market": self.market,
             "trade_date": context.trade_date,
             "kind": context.kind,
+
             # "mode": context.mode,  # "DEV" or "PROD"
         }
 
         # -------- ActionHint --------
-        slots = context.slots
-        if "gate" not in slots:
-            raise ValueError("missing required slot: gate")
-
          
-        actionhint = self.actionhint_service.build_actionhint(
-            gate=slots["gate"],
-            structure=slots.get("structure"),
-            watchlist=slots.get("watchlist"),
-            conditions_runtime=slots.get("conditions_runtime"),
-        )
+        actionhint = context.actionhint
+        if actionhint is None:
+            raise ValueError("ReportContext missing actionhint (forbidden by V12)")
 
         gate = actionhint.get("gate")
         if gate is None:
@@ -115,3 +109,59 @@ class ReportEngine:
                 blocks.append(blk)
 
         return ReportDocument(meta, actionhint, summary, blocks)
+
+
+##
+    def build_report(self, *, context: ReportContext) -> ReportDocument:
+        meta = {
+            "market": self.market,
+            "trade_date": context.trade_date,
+            "kind": context.kind,
+            
+        }
+    
+        # -------- ActionHint（只读，来自主控）--------
+        actionhint = getattr(context, "actionhint", None)
+        if actionhint is None:
+            raise ValueError("ReportContext missing actionhint (forbidden by V12)")
+    
+        gate = actionhint.get("gate")
+        if gate is None:
+            raise ValueError("ActionHint missing gate")
+    
+        # -------- Summary（强制不为 None）--------
+        summary = actionhint.get("summary")
+        if summary is None:
+            raise ValueError("ActionHint missing summary (forbidden by V12)")
+    
+        # -------- Blocks（按 alias 顺序）--------
+        doc_partial = {
+            "actionhint": actionhint,
+            "summary": summary,
+        }
+    
+        blocks: List[ReportBlock] = []
+    
+        for spec in BLOCK_SPECS:
+            builder = self._builders_by_alias.get(spec.block_alias)
+            if builder is None:
+                LOG.warning("missing block builder: %s", spec.block_alias)
+                blocks.append(
+                    ReportBlock(
+                        block_alias=spec.block_alias,
+                        title=spec.title,
+                        payload={"note": "BLOCK_NOT_IMPLEMENTED"},
+                        warnings=[f"missing_builder:{spec.block_alias}"],
+                    )
+                )
+            else:
+                blk = builder(context, doc_partial)
+                if blk.block_alias != spec.block_alias:
+                    raise ValueError(
+                        f"block_alias mismatch: {blk.block_alias} != {spec.block_alias}"
+                    )
+                blocks.append(blk)
+    
+        return ReportDocument(meta, actionhint, summary, blocks)
+    
+##

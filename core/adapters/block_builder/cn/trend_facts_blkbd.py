@@ -29,7 +29,7 @@ class TrendFactsBlockBuilder(FactBlockBuilderBase):
         _paths = load_paths()
         #self.base_dir = _paths.get("cn_history_dir", "data/cn/history")
         
-    def _build_turnover_trend(self, snapshot: dict) -> dict | None:
+    def _build_turnover_trend_1(self, snapshot: dict) -> dict | None:
         """
         从 snapshot['turnover_raw']['windows'] 中读取时间序列
         提取 total_turnover，计算成交额趋势指标
@@ -76,50 +76,7 @@ class TrendFactsBlockBuilder(FactBlockBuilderBase):
             "slope_10d": round(slope_10d, 2),
         }
         
-    def _build_turnover_trend_no(self, snapshot: dict) -> dict | None:
-        """
-        从 snapshot['turnover_raw']['windows'] 中读取时间序列
-        提取 total_turnover，计算成交额趋势指标
-        后续计算逻辑与原代码完全一致
-        """
-        windows = snapshot.get('turnover_raw', {}).get('windows', [])
-        if not windows:
-            return None
-
-        records = [
-            {
-                "trade_date": item["trade_date"],
-                "total": item.get("total_turnover")  # 键名改为 total_turnover
-            }
-            for item in windows
-            if item.get("total_turnover") is not None
-        ]
-
-        if len(records) < 10:
-            return None
-
-        # 按日期排序（升序）
-        records.sort(key=lambda x: x["trade_date"])
-
-        totals: list[float] = [r["total"] for r in records]
-
-        last = totals[-1]
-        avg_5d = sum(totals[-5:]) / 5
-        avg_10d = sum(totals[-10:]) / 10
-
-        slope_5d = (totals[-1] - totals[-6]) / 5
-        slope_10d = (totals[-1] - totals[-11]) / 10
-
-        return {
-            "last_value": round(last, 2),
-            "avg_5d": round(avg_5d, 2),
-            "avg_10d": round(avg_10d, 2),
-            "ratio_vs_5d": round(last / avg_5d, 4) if avg_5d > 0 else None,
-            "ratio_vs_10d": round(last / avg_10d, 4) if avg_10d > 0 else None,
-            "slope_5d": round(slope_5d, 2),
-            "slope_10d": round(slope_10d, 2),
-        }
-            
+        
     # ------------------------------------------------------------
     def build_block(
         self,
@@ -140,78 +97,66 @@ class TrendFactsBlockBuilder(FactBlockBuilderBase):
         #
         return facts
 
-    # ------------------------------------------------------------
-    # Turnover trend
-    # ------------------------------------------------------------
-    def _build_turnover_trend_no(self) -> Dict[str, Any] | None:
+    def _build_turnover_trend(self, snapshot: dict) -> dict | None:
         """
-        从 history/turnover/*.json 读取数据，计算均值类趋势事实
+        从 snapshot['turnover_raw']['windows'] 中读取时间序列
+        提取 total_turnover，计算成交额趋势指标
+    
+        冻结原则：
+        - 这里只生成【事实 + 时间序列】
+        - 不做判断、不生成信号
+        - 不裁剪窗口长度（保留 30d 供下游使用）
         """
-         
-        history_root = self.base_dir
-
-        if not history_root:
-            LOG.warning("[TrendFacts] history_dir not configured")
+        windows = snapshot.get("turnover_raw", {}).get("window", [])
+        if not windows:
+            LOG.error("snapshot.turnover_raw.windows is empty")
             return None
-
-        turnover_dir = os.path.join(history_root, "turnover")
-        if not os.path.isdir(turnover_dir):
-            LOG.warning("[TrendFacts] turnover history dir missing: %s", turnover_dir)
-            return None
-
-        records = self._load_turnover_history(turnover_dir)
+    
+        # 过滤无效值，规范字段
+        records = [
+            {
+                "trade_date": item["trade_date"],
+                "total": item.get("total_turnover"),
+            }
+            for item in windows
+            if item.get("total_turnover") is not None
+        ]
+    
         if len(records) < 10:
-            LOG.warning("[TrendFacts] insufficient turnover history: %d", len(records))
+            LOG.error("Turnover history records < 10")
             return None
-
-        # 按日期排序（升序）
+    
+        # 按日期升序排列（最旧 → 最新）
         records.sort(key=lambda x: x["trade_date"])
-
-        totals: List[float] = [r["total"] for r in records if r.get("total") is not None]
-        if len(totals) < 10:
-            return None
-
+    
+        totals: List[float] = [r["total"] for r in records]
+    
+        # --- 核心统计（与你现有逻辑保持一致） ---
         last = totals[-1]
         avg_5d = sum(totals[-5:]) / 5
         avg_10d = sum(totals[-10:]) / 10
-
+    
         slope_5d = (totals[-1] - totals[-6]) / 5
         slope_10d = (totals[-1] - totals[-11]) / 10
-        
+    
         return {
+            # 单点事实
             "last_value": round(last, 2),
+    
+            # 均值
             "avg_5d": round(avg_5d, 2),
             "avg_10d": round(avg_10d, 2),
+    
+            # 比例
             "ratio_vs_5d": round(last / avg_5d, 4) if avg_5d > 0 else None,
             "ratio_vs_10d": round(last / avg_10d, 4) if avg_10d > 0 else None,
+    
+            # 斜率
             "slope_5d": round(slope_5d, 2),
             "slope_10d": round(slope_10d, 2),
-
+    
+            # ★ 新增：完整时间序列（冻结）
+            # 供 FRF / 其他 Observation 做窗口化分析
+            "window": records,
         }
-
-    # ------------------------------------------------------------
-    def _load_turnover_history(self, turnover_dir: str) -> List[Dict[str, Any]]:
-        """
-        读取 history 中的 turnover 单日原子事实
-        """
-        records: List[Dict[str, Any]] = []
-
-        for fname in os.listdir(turnover_dir):
-            
-            if not fname.endswith(".json"):
-                continue
-
-            fpath = os.path.join(turnover_dir, fname)
-            try:
-                with open(fpath, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                if "trade_date" in data and "total" in data:
-                    records.append(data)
-                    print(fname)
-                else:
-                    print(f"{fname} is incorrect json history file.")
-            except Exception as e:
-                LOG.error("[TrendFacts] failed to load %s: %s", fname, e)
-                raise Exception("[TrendFacts] failed to load %s: %s", fname, e)
-        
-        return records
+     

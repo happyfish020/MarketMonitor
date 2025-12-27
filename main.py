@@ -3,7 +3,7 @@
 import argparse
 
 from core.utils.logger import setup_logging, get_logger
-from core.engines.cn.ashare_daily_engine import run_cn_ashare_daily
+from core.engines.cn.ashare_daily_engine import AShareDailyEngine
 
 
 def parse_args():
@@ -127,11 +127,13 @@ def main():
         # ✅ V12：只调用，不接收，不解析
         is_intraday, trade_date = get_intraday_status_and_last_trade_date()
         assert trade_date, "定位最后交易日失败！"
-        run_cn_ashare_daily(trade_date = trade_date, is_intraday = is_intraday , refresh_mode=refresh_mode)
+        daily_engine = AShareDailyEngine(refresh_mode=refresh_mode)
+        daily_engine.run( )
 
     else:
         LOG.error("不支持的参数: market=%s mode=%s", args.market, args.mode)
 
 
+    
 if __name__ == "__main__":
     main()

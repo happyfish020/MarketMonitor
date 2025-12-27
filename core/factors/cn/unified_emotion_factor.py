@@ -28,7 +28,7 @@ class UnifiedEmotionFactor(FactorBase):
     """
 
     def __init__(self):
-        super().__init__("unified_emotion_raw")
+        super().__init__("unified_emotion")
 
     # ------------------------------------------------------------------
     def compute(self, input_block: Dict[str, Any]) -> FactorResult:

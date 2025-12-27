@@ -25,7 +25,10 @@ from core.adapters.datasources.cn.turnover_source import TurnoverDataSource
 from core.adapters.datasources.cn.margin_source import MarginDataSource
 from core.adapters.datasources.cn.market_sentiment_source import MarketSentimentDataSource
 from core.adapters.datasources.cn.core_theme_source import CoreThemeDataSource
+from core.adapters.datasources.cn.participation_source import ParticipationDataSource
 from core.adapters.datasources.cn.etf_spot_sync_source  import ETFSpotSyncDataSource
+from core.adapters.datasources.cn.etf_spot_sync_daily_source  import  ETFSpotSyncDailyDataSource
+
 from core.adapters.datasources.glo.global_macro_source import GlobalMacroDataSource
 from core.adapters.datasources.glo.global_lead_source import GlobalLeadDataSource
 from core.adapters.datasources.glo.index_global_source import IndexGlobalDataSource
@@ -51,7 +54,7 @@ class AshareDataFetcher(FetcherBase):
 
         # trade_date 允许显式传入，优先级高于 RefreshController.today
         self.trade_date = trade_date
-
+        self.is_intraday  = is_intraday
         LOG.info("[AshareFetcher] 使用 trade_date=%s", self.trade_date)
 
         # === 初始化数据源（全部使用 DataSourceConfig） ===
@@ -88,10 +91,20 @@ class AshareDataFetcher(FetcherBase):
         self.core_theme_ds =  CoreThemeDataSource(
             DataSourceConfig(market="cn", ds_name="core_theme")
         )     
+        
+        self.participation_ds = ParticipationDataSource(
+            DataSourceConfig(market="cn", ds_name="participation")
+        )    
 
         self.etf_spot_sync_ds =  ETFSpotSyncDataSource(
-            DataSourceConfig(market="cn", ds_name="core_theme")
+            DataSourceConfig(market="cn", ds_name="core_theme" ), is_intraday= self.is_intraday
         )     
+
+        self.etf_spot_sync_daily_ds =  ETFSpotSyncDailyDataSource(
+            DataSourceConfig(market="cn", ds_name="core_theme" )
+        )     
+ 
+
         self.global_macro_ds = GlobalMacroDataSource(
                 DataSourceConfig(market="glo", ds_name="global_macro")
             ) 
@@ -200,24 +213,39 @@ class AshareDataFetcher(FetcherBase):
             refresh_mode=self.refresh_mode,
         )
         assert snapshot.get("core_theme_raw"), "core_theme_raw missing"   
+       
 
-
-        snapshot["etf_spot_sync_raw"] = self.etf_spot_sync_ds.build_block(
-            trade_date=self.trade_date,
-            refresh_mode=self.refresh_mode,
-        )
-        assert snapshot.get("etf_spot_sync_raw"), "etf_spot_sync_raw missing"   
 
 
         snapshot["unified_emotion_raw"] = self.unified_emotion_bb.build_block(snapshot, refresh_mode=self.refresh_mode)
         assert snapshot.get("unified_emotion_raw"), "unified_emotion raw missing"
+ 
+        snapshot["participation_raw"] = self.participation_ds.build_block(
+            trade_date=self.trade_date,
+            refresh_mode=self.refresh_mode,
+        )
+        assert snapshot.get("participation_raw"), "participation_raw missing"  
 
 
-        snapshot["index_tech_raw"] = self.index_tech_bb.build_block(snapshot)
-        assert snapshot.get("index_tech_raw"), "index_tech bb missing"
+        snapshot["etf_spot_sync"] = self.etf_spot_sync_ds.build_block(
+            trade_date=self.trade_date,
+            refresh_mode=self.refresh_mode,
+        )
+        assert snapshot.get("etf_spot_sync"), "etf_spot_sync missing"   
 
-        snapshot["trend_in_force_raw"] = self.trend_facts_bb.build_block(snapshot)
-        assert snapshot.get("trend_in_force_raw"), "trend_in_force_raw bb missing"
+        snapshot["etf_spot_sync_daily"] = self.etf_spot_sync_daily_ds.build_block(
+            trade_date=self.trade_date,
+            refresh_mode=self.refresh_mode,
+        )
+        assert snapshot.get("etf_spot_sync_daily"), "etf_spot_synetf_spot_sync_dailyc missing"   
+        
+        
+
+        snapshot["index_tech"] = self.index_tech_bb.build_block(snapshot)
+        assert snapshot.get("index_tech"), "index_tech bb missing"
+
+        snapshot["trend_in_force"] = self.trend_facts_bb.build_block(snapshot)
+        assert snapshot.get("trend_in_force"), "trend_in_force_raw bb missing"
 
         LOG.info("[AshareFetcher] Snapshot 数据源加载完成")
         return snapshot

@@ -17,15 +17,39 @@ from core.adapters.providers.symbol_series_store import SymbolSeriesStore
 from core.adapters.block_builder.block_builder_base import FactBlockBuilderBase
 LOG = get_logger("TR.IndexTech")
 
+def _safe_closes(window):
+    if not isinstance(window, list) or not window:
+        return []
+    closes = []
+    for row in window:
+        if isinstance(row, dict) and isinstance(row.get("close"), (int, float)):
+            closes.append(float(row["close"]))
+    return closes
+
+def _ret(closes, n):
+    if len(closes) <= n:
+        return None
+    base = closes[-1 - n]
+    if base == 0:
+        return None
+    return closes[-1] / base - 1.0
+
+def _ma(closes, n):
+    if len(closes) < n:
+        return None
+    return sum(closes[-n:]) / n
+
+def _clip100(x):
+    if x is None:
+        return None
+    if x > 100:
+        return 100.0
+    if x < -100:
+        return -100.0
+    return float(x)
+
 
 class IndexTechBlockBuilder(FactBlockBuilderBase):
-
-
-
-
-
-
-
     """
     输入：
       snapshot["index_core"] = { name: {symbol, close, pct, window...}, ... }
@@ -56,26 +80,90 @@ class IndexTechBlockBuilder(FactBlockBuilderBase):
             LOG.warning("[TR.IndexTech] snapshot.index_core empty")
             return {}
 
-        out: Dict[str, Any] = {}
-
+         
 ####
+        out: Dict[str, Any] = {}
         sector_score: Dict[str, float] = {}
         
-        for name, feats in out.items():
-            if not isinstance(feats, dict) or not feats:
+        for name, core in index_core.items():
+            if not isinstance(core, dict):
                 continue
         
-            # 优先使用显式 score
-            if isinstance(feats.get("score"), (int, float)):
-                sector_score[name] = float(feats["score"])
-                continue
+            window = core.get("window", [])
+            closes = _safe_closes(window)
         
-            # 兜底：使用常见技术字段
-            for key in ("trend_score", "momentum", "strength"):
-                if isinstance(feats.get(key), (int, float)):
-                    sector_score[name] = float(feats[key])
-                    break
+            pct_1d = core.get("pct")
+            pct_1d = float(pct_1d) if isinstance(pct_1d, (int, float)) else None
         
+            ret_5d = _ret(closes, 5)
+            ret_10d = _ret(closes, 10)
+            ret_20d = _ret(closes, 20)
+        
+            ma5 = _ma(closes, 5)
+            ma10 = _ma(closes, 10)
+            ma20 = _ma(closes, 20)
+        
+            close = core.get("close")
+            close = float(close) if isinstance(close, (int, float)) else None
+        
+            # trend_score: 简单可解释版本（-100~100）
+            trend = 0.0
+            if close is not None and ma20 is not None and ma20 != 0:
+                # 价格相对 MA20
+                trend += (close / ma20 - 1.0) * 200.0  # 放大到大致 -100~100 的量级
+        
+            if ma5 is not None and ma10 is not None and ma20 is not None:
+                # 均线排列加分/扣分
+                if ma5 > ma10 > ma20:
+                    trend += 20.0
+                elif ma5 < ma10 < ma20:
+                    trend -= 20.0
+        
+            trend_score = _clip100(trend)
+        
+            # strength: 用收益动量做一个加权（-100~100）
+            strength = 0.0
+            if pct_1d is not None:
+                strength += pct_1d * 2000.0   # 0.5% -> 10 分量级
+            if ret_5d is not None:
+                strength += ret_5d * 600.0
+            if ret_20d is not None:
+                strength += ret_20d * 300.0
+        
+            strength = _clip100(strength)
+        
+            # score: 综合
+            score = None
+            if trend_score is not None and strength is not None:
+                score = _clip100(0.6 * trend_score + 0.4 * strength)
+        
+            feats = {
+                "symbol": core.get("symbol"),
+                "close": close,
+                "prev_close": core.get("prev_close"),
+                "pct_1d": pct_1d,
+                "ret_5d": ret_5d,
+                "ret_10d": ret_10d,
+                "ret_20d": ret_20d,
+                "ma5": ma5,
+                "ma10": ma10,
+                "ma20": ma20,
+                "trend_score": trend_score,
+                "strength": strength,
+                "score": score,
+                "_meta": {
+                    "window_len": len(closes),
+                    "source": "index_core_raw",
+                },
+            }
+        
+            out[name] = feats
+            if isinstance(score, (int, float)):
+                sector_score[name] = float(score)
+    
+    
+         
+    ########     
         # 作为标准出口挂载（不破坏原结构）
         out["_sector_score"] = sector_score
 
@@ -124,7 +212,7 @@ class IndexTechBlockBuilder(FactBlockBuilderBase):
             ),
         }        
         
-        ###
+        ### todo
         return out
 
    

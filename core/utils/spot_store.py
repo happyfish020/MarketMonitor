@@ -61,7 +61,7 @@ def get_spot_daily(trade_date: str, refresh_mode: str = "none") -> pd.DataFrame:
         - 如果本地文件不存在 → 调 ak.stock_zh_a_spot() 拉一次 & 写 parquet
     """
     path = _get_spot_path(trade_date)
-
+    # 时间戳 15:35:45
     LOG.info(f"[SpotStore] get_spot_daily trade_date={trade_date}, mode={refresh_mode}")
 
     # ========== 1) full 模式：先删文件，再走统一逻辑 ==========

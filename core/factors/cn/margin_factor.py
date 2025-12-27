@@ -23,7 +23,7 @@ class MarginFactor(FactorBase):
     }
 
     def __init__(self):
-        super().__init__(name="margin_raw")
+        super().__init__(name="margin")
 
     # ------------------------------------------------------------------
     # level 映射（V12 强约束）
@@ -83,7 +83,7 @@ class MarginFactor(FactorBase):
     # ------------------------------------------------------------------
     def compute(self, snapshot: Dict[str, Any]) -> FactorResult:
         data = snapshot.get("margin_raw") or {}
-
+        assert data, "margin_raw is empty"
         if not data:
             return self.build_result(
                 score=50.0,

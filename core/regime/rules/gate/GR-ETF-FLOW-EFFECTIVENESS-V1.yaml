@@ -1,0 +1,78 @@
+# =========================================================
+# UnifiedRisk V12
+# Phase-3 Regime Governance Rule
+# =========================================================
+
+rule_id: GR-ETF-FLOW-EFFECTIVENESS-V1
+type: gate_governance
+priority: L3
+status: frozen
+version: 1.0
+
+description: >
+  Detect ineffective ETF inflows under crowding or distribution structure.
+  Prevents risk expansion when ETF inflow is not absorbed by broad participation.
+
+# ---------------------------------------------------------
+# Inputs (read-only, flattened context keys)
+# ---------------------------------------------------------
+inputs:
+  - factor: etf_flow_effectiveness
+    fields: [state]
+  - factor: breadth
+    fields: [level]
+  - factor: etf_index_sync
+    fields: [level]
+  - factor: trend_in_force
+    fields: [state]
+
+# ---------------------------------------------------------
+# Rules
+# ---------------------------------------------------------
+rules:
+
+  # -------------------------------------------------------
+  # Distribution Risk (最危险但最隐蔽)
+  # -------------------------------------------------------
+  - name: distribution_risk_detected
+    if:
+      all:
+        - eq: ["etf_flow_effectiveness.state", "DISTRIBUTION_RISK"]
+    then:
+      actions:
+        - set_gate: CAUTION
+        - forbid_actions: [ADD_RISK, SCALE_IN]
+      reason: "ETF inflow ineffective under crowding; distribution risk."
+      stop: false
+
+  # -------------------------------------------------------
+  # Ineffective Inflow (次一级)
+  # -------------------------------------------------------
+  - name: ineffective_inflow_detected
+    if:
+      all:
+        - eq: ["etf_flow_effectiveness.state", "INEFFECTIVE"]
+    then:
+      actions:
+        - downgrade_gate_by: 1
+        - forbid_actions: [ADD_RISK]
+      reason: "ETF inflow ineffective; participation quality insufficient."
+      stop: false
+
+# ---------------------------------------------------------
+# Constraints (hard rules)
+# ---------------------------------------------------------
+constraints:
+  - name: no_gate_promotion
+    assert:
+      - not_allowed:
+          promote_gate: true
+    message: "ETF flow effectiveness rule cannot promote Gate."
+
+# ---------------------------------------------------------
+# Output
+# ---------------------------------------------------------
+output:
+  emits:
+    - gate_decision
+    - governance_reason

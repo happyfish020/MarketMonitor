@@ -20,16 +20,22 @@ class ASharesPolicySlotBinder(PolicySlotBinderBase):
     """
 
     SLOT_MAP = {
-        "breadth_raw": "breadth",
-        "north_nps_raw": "north_nps",
-        "turnover_raw": "turnover",
-        "unified_emotion_raw": "unified_emotion",
-        "index_tech_raw": "index_tech",
-        "sector_rotation_raw": "sector_rotation",
-        "global_macro_raw": "global_macro",
-        "global_lead_raw": "global_lead",
-        "index_global_raw": "index_global",
-        "trend_in_force_raw": "trend_in_force",
+        "breadth": "breadth",
+        "north_nps": "north_nps",
+        "turnover": "turnover",
+        "unified_emotion": "unified_emotion",
+        
+        "sector_rotation": "sector_rotation",
+        "global_macro": "global_macro",
+        "global_lead": "global_lead",
+        "index_global": "index_global",
+        
+        "index_tech": "index_tech",
+        "failure_rate": "failure_rate", 
+        "etf_index_sync_daily": "etf_index_sync_daily",
+        # ----- structure-level (慎用) -----
+        # 建议不要放 raw 映射；若保留请明确注释
+        "trend_in_force": "trend_in_force",
         # 允许继续 append-only
     }
 

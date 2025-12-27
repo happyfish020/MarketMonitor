@@ -1,58 +1,99 @@
-from typing import Dict, Any
-import json
+# -*- coding: utf-8 -*-
+"""
+UnifiedRisk V12
+Factor: north_nps
+
+Pre-Stable version (PASS-THROUGH)
+
+职责：
+- 校验 north_nps_raw 是否存在
+- 输出最小、稳定、可审计的结构性信息
+- 不做任何分析、不做趋势、不参与预测
+
+冻结规则：
+- 不计算 score
+- 不计算 level
+- 不引入 trend / strength
+"""
+
+from typing import Dict, Any, List
+
 from core.factors.factor_base import FactorBase
 from core.factors.factor_result import FactorResult
 
 
+
 class NorthNPSFactor(FactorBase):
     def __init__(self):
-        super().__init__("north_nps_raw")
+        # factor 名称必须与 raw key 区分
+        super().__init__("north_nps")
 
     def compute(self, input_block: Dict[str, Any]) -> FactorResult:
+        """
+        输入：
+        - input_block["north_nps_raw"]
+
+        输出（details）：
+        - data_status
+        - proxy_count
+        - window_len_min
+        - window_len_max
+        """
+
         data = self.pick(input_block, "north_nps_raw", {})
-        assert data, "north_nps_raw is missing"
-        # ① 数据完全缺失 → DATA_NOT_CONNECTED
+
+        # -------------------------------
+        # 1. 数据缺失处理（允许）
+        # -------------------------------
         if not data:
             return FactorResult(
                 name=self.name,
-                score=50.0,
-                level="NEUTRAL",
+                score=None,
+                level=None,
                 details={
                     "data_status": "DATA_NOT_CONNECTED",
-                    "reason": "north_nps data missing",
+                    "proxy_count": 0,
                 },
             )
 
-        # ② 数据存在，但字段异常 / 不完整（可选示例）
-        #    如果你以后要加 STALE / PARTIAL，就在这里判断
-        try:
-            strength = float(data.get("strength_today", 0.0))
-            trend = float(data.get("trend_5d", 0.0))
-        except Exception:
+        # -------------------------------
+        # 2. 基础结构统计（不做分析）
+        # -------------------------------
+        proxy_keys: List[str] = list(data.keys())
+
+        window_lengths: List[int] = []
+        for proxy_key in proxy_keys:
+            proxy = data.get(proxy_key, {})
+            window = proxy.get("window", [])
+            if isinstance(window, list):
+                window_lengths.append(len(window))
+
+        # window_lengths 为空的极端情况（理论上不该发生）
+        if not window_lengths:
             return FactorResult(
                 name=self.name,
-                score=50.0,
-                level="NEUTRAL",
+                score=None,
+                level=None,
                 details={
-                    "data_status": "STALE",
-                    "reason": "north_nps data parse failed",
+                    "data_status": "DATA_NOT_CONNECTED",
+                    "proxy_count": len(proxy_keys),
                 },
             )
 
-        # ③ 正常可用数据 → OK
-        score = 50.0 + strength * 5 + trend * 2
+        # -------------------------------
+        # 3. 输出冻结字段
+        # -------------------------------
+        details = {
+            "data_status": "OK",
+            "proxy_count": len(proxy_keys),
+            "window_len_min": min(window_lengths),
+            "window_len_max": max(window_lengths),
+            "_raw_data": "OK"
+        }
 
-        return self.build_result(
-            score=score,
-            details={
-                # 🔒 Step-3 核心：显式标 OK
-                "data_status": "OK",
-
-                # 原有业务字段（保持不删）
-                "strength_today": strength,
-                "trend_5d": trend,
-
-                # 调试证据（可审计）
-                "_raw_data": json.dumps(data)[:160] + "...",
-            },
+        return FactorResult(
+            name=self.name,
+            score=50.0,
+            level="NEUTRAL",
+            details=details,
         )

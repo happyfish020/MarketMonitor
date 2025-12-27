@@ -85,7 +85,10 @@ class DBOracleProvider:
             SYMBOL        AS symbol,
             EXCHANGE      AS exchange,
             TRADE_DATE    AS trade_date,
-            CLOSE         AS CLOSE
+            PRE_CLOSE     AS pre_close,
+            CHG_PCT       AS chg_pct,
+            CLOSE         AS close,
+            TURNOVER      AS turnover
         FROM {self.schema}.{table}
         WHERE TRADE_DATE >= :window_start
           AND TRADE_DATE <= :trade_date
@@ -353,3 +356,101 @@ class DBOracleProvider:
         )
 
         return df    
+    
+    def load_full_market_eod_snapshot(
+        self,
+        trade_date,
+    ) -> Dict[str, Any]:
+        """
+        Load confirmed full-market EOD snapshot (T-1) from oracle DB.
+    
+        Contract (frozen):
+        - trade_date: confirmed trading day (T-1)
+        - source: oracle DB only (no network)
+        - snapshot_type: EOD
+        - full-market coverage
+        - replayable / deterministic
+        """
+     
+
+        # 1. 明确只取单日（T-1）
+        rows = self.query_stock_closes(
+            window_start=trade_date,
+            trade_date=trade_date,
+        )
+    
+        if not rows:
+            raise RuntimeError(f"no EOD stock closes found for {trade_date}")
+    
+        # 2. 组装 full-market snapshot（不做任何推断）
+        market: Dict[str, Dict[str, Any]] = {}
+    
+        for symbol, exchange, td, pre_close, chg_pct, close,turnover in rows:
+            market[symbol] = {
+                "symbol": symbol,
+                "exchange": exchange,
+                "trade_date": td,
+                "close": close,
+                "pre_close": pre_close,
+                "chg_pct": chg_pct,
+                "turnover": turnover,
+            }
+    
+        # 3. 返回“确认态快照”
+        return {
+            "trade_date": trade_date,
+            "snapshot_type": "EOD",
+            "market": market,
+            "_meta": {
+                "source": "oracle",
+                "confirmed": True,
+                "record_count": len(market),
+            },
+        }
+    
+    def query_last_trade_date(self, as_of_date) -> str:
+        table = self.tables.get("stock_daily")
+        if not table:
+            raise RuntimeError("db.oracle.tables.stock_daily not configured")
+    
+        sql = f"""
+        SELECT MAX(TRADE_DATE) AS last_trade_date
+        FROM {self.schema}.{table}
+        WHERE TRADE_DATE <= :as_of_date
+        """
+    
+        params = {"as_of_date": _to_date(as_of_date)}
+        rows = self.execute(sql, params)
+        if not rows or rows[0][0] is None:
+            raise RuntimeError(f"no trade_date found <= {as_of_date}")
+        return rows[0][0]    
+        
+    def load_latest_full_market_eod_snapshot(
+        self,
+        as_of_date,
+    ) -> Dict[str, Any]:
+        """
+        Load latest confirmed full-market EOD snapshot
+        as of a given date (usually PRE_OPEN uses T).
+    
+        Contract (FROZEN):
+        - as_of_date: evaluation date (e.g. today T)
+        - internally resolves last_trade_date <= as_of_date
+        - returns confirmed EOD snapshot for last_trade_date
+        """
+    
+        last_trade_date = self.query_last_trade_date(as_of_date)
+    
+        snapshot = self.load_full_market_eod_snapshot(last_trade_date)
+    
+        # 明确标注 as_of 语义（非常重要，便于审计 / 回放）
+        snapshot["_meta"] = snapshot.get("_meta", {})
+        snapshot["_meta"].update(
+            {
+                "as_of_date": _to_date(as_of_date),
+                "resolved_trade_date": last_trade_date,
+            }
+        )
+    
+        return snapshot
+    

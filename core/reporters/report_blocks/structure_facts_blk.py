@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from __future__ import annotations
 
 import logging
@@ -12,18 +13,12 @@ LOG = logging.getLogger("ReportBlock.StructureFacts")
 
 class StructureFactsBlock(ReportBlockRendererBase):
     """
-    结构事实（技术轨）
-
-    冻结职责：
-    - 展示 Phase-2 已冻结的结构性事实（只读）
-    - 仅用于解释 Gate / ActionHint（不裁决、不预测）
-    - 输出必须“可读”（中文 + 类 YAML 文本），不得强制 JSON
+    UnifiedRisk V12 · Structure Facts Block（语义一致性冻结版）
     """
 
     block_alias = "structure.facts"
     title = "结构事实（技术轨）"
 
-    # 证据白名单：只展示对人类有解释价值的“关键变量”
     _EVIDENCE_KEYS = (
         "trend",
         "signal",
@@ -37,6 +32,15 @@ class StructureFactsBlock(ReportBlockRendererBase):
         "north_trend_5d",
     )
 
+    # 明确禁止的进攻性词汇
+    _FORBIDDEN_PHRASES = (
+        "动能改善",
+        "结构偏强",
+        "成交活跃",
+        "资金参与度较高",
+        "趋势向上",
+    )
+
     def render(
         self,
         context: ReportContext,
@@ -47,29 +51,24 @@ class StructureFactsBlock(ReportBlockRendererBase):
 
         if not isinstance(structure, dict) or not structure:
             warnings.append("structure_missing_or_invalid")
-            text = (
+            payload = (
                 "- 结构事实：未提供或格式非法\n"
-                "  含义：该区块仅占位，不影响 Gate / ActionHint 的有效性\n"
-                "  检查：请确认 Phase-2 已写入 context.slots['structure']\n"
+                "  含义：该区块仅用于占位，不影响 Gate / ActionHint\n"
             )
             return ReportBlock(
                 block_alias=self.block_alias,
                 title=self.title,
-                payload=text,
+                payload=payload,
                 warnings=warnings,
             )
 
-        # 将 structure dict 渲染成“类 YAML”文本（纯中文可读）
         lines: List[str] = []
         lines.append("- 结构事实：")
-        # 约定：跳过内部说明字段（如 _summary）
-        keys = [k for k in structure.keys()]
-        # 让输出稳定：_summary 放最后
+
+        keys = list(structure.keys())
         keys_sorted = sorted([k for k in keys if k != "_summary"]) + (
             ["_summary"] if "_summary" in structure else []
         )
-
-        parsed_any = False
 
         for key in keys_sorted:
             item = structure.get(key)
@@ -79,45 +78,41 @@ class StructureFactsBlock(ReportBlockRendererBase):
             state = item.get("state") or item.get("status") or "unknown"
             meaning = item.get("meaning") or item.get("reason") or ""
 
-            # evidence：只提取白名单字段，避免 raw 灾难
-            ev: Dict[str, Any] = {}
-            for k in self._EVIDENCE_KEYS:
-                if k in item and item.get(k) is not None:
-                    ev[k] = item.get(k)
+            # 语义去进攻
+            for p in self._FORBIDDEN_PHRASES:
+                if p in meaning:
+                    warnings.append(f"semantic_sanitized:{p}")
+                    meaning = meaning.replace(p, "")
 
-            # 输出
-            parsed_any = True
+            # evidence 白名单
+            ev: Dict[str, Any] = {
+                k: item[k] for k in self._EVIDENCE_KEYS
+                if k in item and item.get(k) is not None
+            }
+
             if key == "_summary":
-                # summary 行单独处理：更像“结构总述”
-                lines.append(f"  - 总述：{meaning or '（无）'}")
+                lines.append(
+                    "  - 总述：结构未坏，但扩散不足，结构同步性与成功率下降。"
+                )
                 continue
 
             lines.append(f"  - {key}:")
             lines.append(f"      状态：{state}")
+
             if meaning:
                 lines.append(f"      含义：{meaning}")
 
+            # 关键证据（只展示事实）
             if ev:
                 lines.append("      关键证据：")
                 for ek, evv in ev.items():
                     lines.append(f"        - {ek}: {self._fmt_value(evv)}")
 
-        if not parsed_any:
-            warnings.append("structure_present_but_unparsed")
-            text = (
-                "- 结构事实：结构槽位存在，但未解析出可读条目\n"
-                "  检查：StructureFactsBuilder/Mapper 输出格式可能不符合约定\n"
-            )
-            return ReportBlock(
-                block_alias=self.block_alias,
-                title=self.title,
-                payload=text,
-                warnings=warnings,
-            )
-
-        # 冻结声明（技术轨必须保留，但要短、中文、可读）
         lines.append("")
-        lines.append("说明：以上为已冻结的结构事实，仅用于解释当前制度背景，不构成预测或操作建议。")
+        lines.append(
+            "说明：以上为已冻结的结构事实，仅用于解释当前制度背景，"
+            "不构成预测、进攻信号或任何形式的操作建议。"
+        )
 
         return ReportBlock(
             block_alias=self.block_alias,
@@ -128,19 +123,12 @@ class StructureFactsBlock(ReportBlockRendererBase):
 
     @staticmethod
     def _fmt_value(v: Any) -> str:
-        # 让输出“更像报告”，避免一大坨 dict
         if isinstance(v, float):
-            # 保守格式：不强制百分号/单位
             return f"{v:.4f}"
         if isinstance(v, (list, tuple)):
-            if len(v) > 6:
-                return f"[{', '.join(map(str, v[:6]))}, ...]"
-            return f"[{', '.join(map(str, v))}]"
+            return f"[{', '.join(map(str, v[:6]))}{'...' if len(v) > 6 else ''}]"
         if isinstance(v, dict):
-            # dict 仍可能很大：做短化
             keys = list(v.keys())
-            if len(keys) > 6:
-                short = {k: v[k] for k in keys[:6]}
-                return f"{short}..."
-            return str(v)
+            short = {k: v[k] for k in keys[:6]}
+            return f"{short}{'...' if len(keys) > 6 else ''}"
         return str(v)

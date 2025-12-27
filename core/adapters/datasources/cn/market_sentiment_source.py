@@ -26,6 +26,9 @@ class MarketSentimentDataSource(DataSourceBase):
     - 依赖 SpotStore 全行情（zh_spot）
     - 统计当日市场宽度
     - 只输出当日 block（不做 history）
+    - Phase-1 DataSource（事实层）
+    - 只做横截面统计
+    - 不做判断、不做趋势、不依赖其它 DS
     """
 
     def __init__(self, config: DataSourceConfig , is_intraday:bool=False):

@@ -48,7 +48,7 @@ class BreadthDataSource(DataSourceBase):
         td = pd.to_datetime(trade_date)
         start = (td - timedelta(days=self.window * 2)).strftime("%Y-%m-%d")
         end = td.strftime("%Y-%m-%d")
-        self.db = DBOracleProvider()
+         
         # 读取窗口内 close（允许停牌缺失）
         #df = self.db.query_stock_closes(window_start=start, trade_date=end)
         df: pd.DataFrame = self.db.fetch_daily_new_low_stats(

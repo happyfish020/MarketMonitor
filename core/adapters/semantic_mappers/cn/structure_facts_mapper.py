@@ -37,8 +37,8 @@ class StructureFactsMapper:
         structure: Dict[str, Any] = {}
 
         # ---- index_tech ----
-        if "index_tech_raw" in factor_results:
-            fr = factor_results["index_tech_raw"]
+        if "index_tech" in factor_results:
+            fr = factor_results["index_tech"]
             structure["index_tech"] = cls._map_index_tech(fr)
         else:
             structure["index_tech"] = cls._missing("index_tech")

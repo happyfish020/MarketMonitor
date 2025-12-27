@@ -15,7 +15,7 @@ class GlobalLeadFactor(FactorBase):
     """
 
     def __init__(self):
-        super().__init__("global_lead_raw")
+        super().__init__("global_lead")
 
     @staticmethod
     def _safe_pct(info: Dict[str, Any]) -> float:

@@ -1,0 +1,32 @@
+rule_id: GX-STRUCTURE-SYNC-V1
+priority: L2
+status: frozen
+version: 1.0
+
+description: >
+  Breadth as precondition gate. ETFIndexSync as participation-quality veto.
+
+preconditions:
+  - name: breadth_low_blocks_offense
+    if:
+      all:
+        - eq: ["breadth.level", "LOW"]
+    then:
+      set_gate: CAUTION
+      add_reasons: ["gx_structure_sync_breadth_low"]
+      stop: true
+
+rules:
+  - name: structure_sync_crowding_veto
+    if:
+      all:
+        - in: ["breadth.level", ["NEUTRAL", "HIGH"]]
+        - eq: ["etf_index_sync.level", "HIGH"]
+    then:
+      downgrade_gate_by: 1
+      add_reasons: ["gx_structure_sync_etf_crowding"]
+
+constraints:
+  - name: no_promotion_by_structure
+    assert:
+      promote_gate: false

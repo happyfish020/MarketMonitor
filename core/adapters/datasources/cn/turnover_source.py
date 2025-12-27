@@ -134,7 +134,7 @@ class TurnoverDataSource(DataSourceBase):
             len(window),
         )
         LOG.info(
-            "[DS.Turnover] SH=%s SZ=%s BJ=%s TOTAL=%s",
+            "[DS.Turnover] Trade_date=%s TOTAL=%s",
             trade_date,
             current_total,
         )

@@ -20,7 +20,7 @@ class TurnoverFactor(FactorBase):
     """
     def __init__(self):
         
-        super().__init__("turnover_raw")
+        super().__init__("turnover")
          
 
     def compute(self, snapshot: Dict[str, Any]) -> FactorResult:

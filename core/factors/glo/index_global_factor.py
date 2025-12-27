@@ -16,7 +16,7 @@ class IndexGlobalFactor(FactorBase):
     """
 
     def __init__(self):
-        super().__init__("index_global_raw")
+        super().__init__("index_global")
 
     def compute(self, input_block: Dict[str, Any]) -> FactorResult:
         data = self.pick(input_block, "index_global_raw", {})

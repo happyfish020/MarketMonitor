@@ -95,7 +95,7 @@ class DataSourceBase:
     目前主要用于统一日志格式
     """
 
-    def __init__(self, name: str = "DataSource"):
+    def __init__(self, name: str = "DataSource" ):
         self.name = name
         LOG.info("Init: %s", self.name)
 

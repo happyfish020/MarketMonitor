@@ -5,6 +5,12 @@ UnifiedRisk V12 - BreadthFactor (Phase-2 Veto)
 职责：
 - 基于 new_low_ratio + persistence（连续性）映射结构损伤状态
 - 仅输出状态，不做交易建议
+- "data_status" -  "OK | DATA_NOT_CONNECTED | PARTIAL | STALE",
+- state  - HEALTHY
+WEAK
+BREAKDOWN
+DATA_MISSING
+
 """
 
 from __future__ import annotations
@@ -18,7 +24,7 @@ LOG = get_logger("Factor.Breadth")
 
 class BreadthFactor(FactorBase):
     def __init__(self):
-        super().__init__(name="breadth_raw")
+        super().__init__(name="breadth")
 
     def compute(self, snapshot: Dict[str, Any]) -> FactorResult:
         data = snapshot.get("breadth_raw") or {}
@@ -31,6 +37,7 @@ class BreadthFactor(FactorBase):
                 level="NEUTRAL",
                 details={
                     "data_status": "DATA_NOT_CONNECTED",
+                    "state": "DATA_MISSING",
                     "reason": "breadth_raw data missing",
                 },
             )
@@ -54,6 +61,7 @@ class BreadthFactor(FactorBase):
                 "new_low_ratio": ratio,
                 "reason": reason,
                 "data_status": "OK",
+                "_raw_data": data
             },
         )
 
@@ -73,3 +81,4 @@ class BreadthFactor(FactorBase):
         if r >= 0.05:
             return "Early", 40.0, "NEUTRAL", "新低比例上升，结构开始磨损"
         return "Healthy", 60.0, "LOW", "新低比例低，结构健康"
+

@@ -31,8 +31,9 @@ class ParticipationFactor(FactorBase):
         #self.name = "participation"
 
     def compute(self, input_block: Dict[str, Any]) -> FactorResult:
-        block = input_block.get("participation") or {}
-
+        block = input_block.get("participation_raw") or {}
+        
+        assert block, "snapshot participation_raw is empty!"
         adv_ratio = float(block.get("adv_ratio", 0.0) or 0.0)
         median_ret = float(block.get("median_return", 0.0) or 0.0)
         index_ret = float(block.get("index_return", 0.0) or 0.0)

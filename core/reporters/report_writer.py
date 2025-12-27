@@ -18,7 +18,7 @@ class ReportWriter:
         self.base_dir = _paths.get("cn_report_dir", "data/reports/cn/daily")
         
 
-    def write(self, *, doc: ReportDocument, text: str) -> str:
+    def write(self, doc: ReportDocument, text: str) -> str:
         """
         Write rendered report text to disk.
     

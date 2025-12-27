@@ -15,7 +15,7 @@ class GlobalMacroFactor(FactorBase):
     """
 
     def __init__(self):
-        super().__init__("global_macro_raw")
+        super().__init__("global_macro")
 
     @staticmethod
     def _safe_pct(info: Dict[str, Any]) -> float:

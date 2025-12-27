@@ -1,10 +1,10 @@
-# core/adapters/transformers/cn/unified_emotion_tr.py
+# -*- coding: utf-8 -*-
 # UnifiedRisk V12 - Unified Emotion BlockBuilder
 #
 # 作用：
-# - 将 Turnover + MarketSentiment 整合为“情绪结构块”
+# - 将 market_sentiment_raw 转换为“情绪结构块”
 # - 不评分，不判断方向
-# - 输出供 Factor / Predictor 使用的标准化特征
+# - 只输出被 factor 实际使用的字段（Pre-Stable）
 
 from __future__ import annotations
 
@@ -21,13 +21,11 @@ class UnifiedEmotionBlockBuilder(FactBlockBuilderBase):
     UnifiedEmotionBlockBuilder
     -------------------------
     输入：
-        snapshot["turnover"]
-        snapshot["market_sentiment"]
+        snapshot["market_sentiment_raw"]
 
     输出：
         snapshot["unified_emotion"] = {
             market_internal: {...},
-            behavior: {...},
             meta: {...}
         }
     """
@@ -36,27 +34,26 @@ class UnifiedEmotionBlockBuilder(FactBlockBuilderBase):
         super().__init__(name="UnifiedEmotion")
 
     # -------------------------------------------------
-    def build_block(self, snapshot: Dict[str, Any], refresh_mode: str = "none") -> Dict[str, Any]:
-        sentiment = snapshot.get("market_sentiment_raw") or {}
-        turnover = snapshot.get("turnover_raw") or {}
+    def build_block(
+        self,
+        snapshot: Dict[str, Any],
+        refresh_mode: str = "none"
+    ) -> Dict[str, Any]:
 
-        if not sentiment and not turnover:
-            LOG.warning("[UnifiedEmotion] empty inputs")
+        sentiment = snapshot.get("market_sentiment_raw") or {}
+        assert sentiment, "market_sentiment_raw is empty."
+        if not sentiment:
+            LOG.warning("[UnifiedEmotion] market_sentiment_raw is empty")
             return {}
 
         market_internal = self._build_market_internal(sentiment)
-        behavior = self._build_behavior(turnover)
 
-        out = {
+        return {
             "market_internal": market_internal,
-            "behavior": behavior,
             "meta": {
-                "has_sentiment": bool(sentiment),
-                "has_turnover": bool(turnover),
+                "has_sentiment": True,
             },
         }
-
-        return out
 
     # -------------------------------------------------
     @staticmethod
@@ -87,29 +84,5 @@ class UnifiedEmotionBlockBuilder(FactBlockBuilderBase):
             "adv_ratio": adv_ratio,
             "limit_up": limit_up,
             "limit_down": limit_down,
-            "extreme_ratio": extreme_ratio,  # 极端情绪占比
-        }
-
-    # -------------------------------------------------
-    @staticmethod
-    def _build_behavior(turnover: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        行为因子（成交参与结构）
-        """
-        sh = float(turnover.get("sh", 0.0))
-        sz = float(turnover.get("sz", 0.0))
-        bj = float(turnover.get("bj", 0.0))
-        total = float(turnover.get("total", 0.0))
-
-        concentration = None
-        if total > 0:
-            max_part = max(sh, sz, bj)
-            concentration = round(max_part / total, 4)
-
-        return {
-            "total": total,
-            "sh": sh,
-            "sz": sz,
-            "bj": bj,
-            "concentration": concentration,  # 成交是否集中
+            "extreme_ratio": extreme_ratio,
         }

@@ -84,8 +84,8 @@ def build_daily_report_text(
     else:
         lines.append("- Participation：DATA_NOT_CONNECTED")
 
-    if _factor_exists(factors, "breadth_raw"):
-        fr = factors["breadth_raw"]
+    if _factor_exists(factors, "breadth"):
+        fr = factors["breadth"]
         state = fr.details.get("state", fr.level)
         lines.append(f"- Breadth：{state}")
     else:
@@ -98,8 +98,8 @@ def build_daily_report_text(
     # ==============================================================
     lines.append("【结构证据（Factor）】")
 
-    if _factor_exists(factors, "north_nps_raw"):
-        m = factors["north_nps_raw"].details or {}
+    if _factor_exists(factors, "north_nps"):
+        m = factors["north_nps"].details or {}
         lines.append("北向代理：")
         lines.append(f"- strength_today：{_fmt_num(m.get('strength_today'))}")
         lines.append(f"- trend_5d：{_fmt_num(m.get('trend_5d'))}")
@@ -108,8 +108,8 @@ def build_daily_report_text(
         lines.append("北向代理：DATA_NOT_CONNECTED")
     lines.append("")
 
-    if _factor_exists(factors, "margin_raw"):
-        m = factors["margin_raw"].details or {}
+    if _factor_exists(factors, "margin"):
+        m = factors["margin"].details or {}
         lines.append("两融：")
         lines.append(f"- trend_10d：{_fmt_num(m.get('trend_10d'))}")
         lines.append(f"- acc_3d：{_fmt_num(m.get('acc_3d'))}")
@@ -124,7 +124,7 @@ def build_daily_report_text(
     lines.append("【📌 数据源链路检查（DS Raw）】")
 
     # --- Breadth DS ---
-    bd = snapshot.get("breadth_raw")
+    bd = snapshot.get("breadth")
     if isinstance(bd, dict):
         lines.append("Breadth DS：")
         lines.append(f"- new_low_ratio：{_fmt_pct(bd.get('new_low_ratio'))}")
@@ -135,8 +135,8 @@ def build_daily_report_text(
     lines.append("")
 
     # --- North Proxy DS ---
-    if _factor_exists(factors, "north_nps_raw"):
-        m = factors["north_nps_raw"].details or {}
+    if _factor_exists(factors, "north_nps"):
+        m = factors["north_nps"].details or {}
         lines.append("北向代理：")
         lines.append(f"- _raw_data: {m.get('_raw_data')}")
     else:
@@ -144,8 +144,8 @@ def build_daily_report_text(
     lines.append("")
 
     # --- Turnover DS ---
-    if _factor_exists(factors, "turnover_raw"):
-        m = factors["turnover_raw"].details or {}
+    if _factor_exists(factors, "turnover"):
+        m = factors["turnover"].details or {}
         lines.append("TurnOver：")
         lines.append(f"- _raw_data: {m.get('_raw_data')}")
     else:

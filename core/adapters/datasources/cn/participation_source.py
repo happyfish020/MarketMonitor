@@ -87,7 +87,7 @@ class ParticipationDataSource(DataSourceBase):
     @staticmethod
     def _calc_last2_returns(df: pd.DataFrame) -> pd.Series:
         """
-        df columns: symbol, trade_date, close_price
+        df columns: symbol, trade_date, close
         return: Series(index=symbol, value=ret)
         """
         if df is None or df.empty:
@@ -103,8 +103,8 @@ class ParticipationDataSource(DataSourceBase):
         def _ret_one(x: pd.DataFrame) -> Optional[float]:
             if x.shape[0] < 2:
                 return None
-            c1 = float(x.iloc[-1]["close_price"])
-            c0 = float(x.iloc[-2]["close_price"])
+            c1 = float(x.iloc[-1]["close"])
+            c0 = float(x.iloc[-2]["close"])
             if c0 == 0:
                 return None
             return c1 / c0 - 1.0
@@ -123,7 +123,8 @@ class ParticipationDataSource(DataSourceBase):
             history_path=None,
             spot_path=None,
         )
-
+        
+        refresh_mode = "full"
         # cache 命中
         if refresh_mode in ("none", "readonly")  and os.path.exists(cache_file):
             try:
@@ -168,8 +169,8 @@ class ParticipationDataSource(DataSourceBase):
             idx_df["trade_date"] = pd.to_datetime(idx_df["trade_date"])
             idx_df = idx_df.sort_values("trade_date")
             if idx_df.shape[0] >= 2:
-                c1 = float(idx_df.iloc[-1]["close_price"])
-                c0 = float(idx_df.iloc[-2]["close_price"])
+                c1 = float(idx_df.iloc[-1]["close"])
+                c0 = float(idx_df.iloc[-2]["close"])
                 idx_ret = (c1 / c0 - 1.0) if c0 else 0.0
             else:
                 LOG.warning("[DS.Participation] index has <2 points. index_code=%s trade_date=%s", self.index_code, td_str)

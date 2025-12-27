@@ -134,6 +134,6 @@ def main():
         LOG.error("不支持的参数: market=%s mode=%s", args.market, args.mode)
 
 
-    
+
 if __name__ == "__main__":
     main()

@@ -7,7 +7,7 @@ from typing import Any, Dict, Optional
 import baostock as bs
 import pandas as pd
 import pytz
-
+import os, json 
 from core.utils.logger import get_logger
 from core.adapters.fetchers.cn.ashare_fetcher import AshareDataFetcher
 
@@ -122,6 +122,47 @@ class AShareDailyEngine:
         gate = self._make_gate_decision(factors_bound, factors)
         self._generate_prediction(factors_bound)
         self._generate_report(gate, factors_bound)
+
+        ################# 对账 ， 
+        #self._dump_factors(factors)
+        from core.recon.reconciliation_engine import ReconciliationEngine
+        #import os , json
+        #json_path = os.path.join( "runs/recon", f"snapshot_{self.trade_date}.json")
+        #with open(json_path, "w", encoding="utf-8") as f:
+        #    json.dump(snapshot, f, ensure_ascii=False, indent=2)
+
+        #recon = ReconciliationEngine()
+        #recon.run(
+        #    trade_date=self.trade_date,
+        #    snapshot=snapshot,
+        #    factors=factors,
+        #    structure=factors_bound["structure"],
+        #    gate_level=gate.level,    
+        #)
+
+
+    def _dump_factors(
+        self,
+        *,
+         
+        factors: Dict[str, FactorResult],
+        output_dir: str = "runs/factors",
+    ) -> None:
+        os.makedirs(output_dir, exist_ok=True)
+    
+        payload = {}
+        for name, fr in factors.items():
+            payload[name] = {
+                "score": fr.score,
+                "level": fr.level,
+                "details": fr.details,
+            }
+    
+        path = os.path.join(output_dir, f"factors_{self.trade_date}.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+    
+#      
 
     # ==================================================
     # Institution Logic（不外溢）

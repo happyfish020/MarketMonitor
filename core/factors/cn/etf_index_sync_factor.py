@@ -10,7 +10,7 @@
 # - input_block["etf_spot_sync"]
 #
 # 输出：
-# - 单一结构性评分（越低 = 承接/一致性越差）
+# - 单一结构性评分（越高 = 承接/一致性越好；越低 = 执行摩擦/不同步越高）
 # - 不引入新枚举（仅使用 build_result 的 level_from_score）
 # - data_status 仅写入 details
 # ------------------------------------------------------------
@@ -128,41 +128,23 @@ class ETFIndexSyncFactor(FactorBase):
         # 3) 结构度量
         # ===============================
         same_direction = (idx_pct >= 0 and etf_pct >= 0) or (idx_pct <= 0 and etf_pct <= 0)
-        divergence_idx = abs(etf_pct - idx_pct)
+        divergence_idx = abs(etf_pct - idx_pct)  # 注意：pct 为小数（如 -0.0054 = -0.54%）
 
         # ===============================
-        # 4) 结构评分（保守、非对称；仅规则映射，不做预测）
+        # 4) 结构评分（冻结：对“跨市场/主题联动”更宽容）
         # ===============================
-        score = 50.0
-
-        # ---- ETF × Index 方向一致性 ----
-        if same_direction:
-            score += 15.0
-        else:
-            score -= 25.0
-
-        # ETF 明显强，但指数不确认（结构性风险：单边拉ETF/主题，指数未跟随）
-        if etf_pct > 0 and idx_pct <= 0:
-            score -= 25.0
-
-        # 背离过大（幅度差异太大）
-        if divergence_idx >= 1.5:
-            score -= 10.0
-
-        # ---- ETF × Spot 横截面承接质量 ----
-        # 上涨承接不足（参与面偏弱）
-        if adv_ratio < 0.45:
-            score -= 15.0
-
-        # 成交额过度集中（资金未扩散 → 结构韧性下降）
-        if top20_ratio >= 0.60:
-            score -= 10.0
-
-        # 分化过高（结构不稳）
-        if dispersion >= 2.50:
-            score -= 10.0
-
-        # clamp
+        # 设计原则：
+        # - score 表示“结构一致性/承接质量”（越高越好）
+        # - 先算 friction_score（越高 = 摩擦越大），再转 score = 100 - friction
+        # - 不允许因为 same_direction=False 就直接打到 0 分（避免与你的字段语义冲突）
+        friction_score, friction_reasons = self._calc_friction(
+            same_direction=same_direction,
+            divergence_idx=float(divergence_idx),
+            adv_ratio=float(adv_ratio),
+            top20_ratio=float(top20_ratio),
+            dispersion=float(dispersion),
+        )
+        score = 100.0 - float(friction_score)
         score = self.clamp_score(score)
 
         # ===============================
@@ -186,7 +168,19 @@ class ETFIndexSyncFactor(FactorBase):
             "turnover_stage": turnover_stage,
 
             # 结构解释（不引入枚举，仅文本标注）
-            "interpretation": self._interpret(same_direction, divergence_idx, adv_ratio, top20_ratio, dispersion),
+            "interpretation": self._interpret(
+                same_direction,
+                float(divergence_idx),
+                float(adv_ratio),
+                float(top20_ratio),
+                float(dispersion),
+            ),
+
+            # 评分审计（append-only）
+            "score_semantics": "QUALITY_100_MINUS_FRICTION",
+            "friction_score": round(float(friction_score), 2),
+            "friction_reasons": friction_reasons,
+
             # 保留最小 raw（不把整个 core_theme 塞进去）
             "_raw_ref": {
                 "core_theme_keys": list(core_theme.keys())[:20],
@@ -195,13 +189,79 @@ class ETFIndexSyncFactor(FactorBase):
         }
 
         LOG.info(
-            "[ETFIndexSyncFactor] result | score=%.2f | level=%s | same_direction=%s | div=%.3f",
+            "[ETFIndexSyncFactor] result | score=%.2f | level=%s | same_direction=%s | div=%.4f | friction=%.2f",
             score,
             self.level_from_score(score),
             same_direction,
             float(divergence_idx),
+            float(friction_score),
         )
         return self.build_result(score=score, details=details)
+
+    # ---------------------------------------------------------
+    def _calc_friction(
+        self,
+        same_direction: bool,
+        divergence_idx: float,
+        adv_ratio: float,
+        top20_ratio: float,
+        dispersion: float,
+    ) -> Tuple[float, list]:
+        """
+        Frozen minimal scoring (explainable):
+
+        friction_score 越高 ⇒ 执行摩擦/胜率下降越明显（拥挤/参与弱/集中/不同步）
+        quality score = 100 - friction_score
+
+        权重目标：让你贴的典型读数（crowding=high, participation=weak, top20≈0.77, divergence low）
+        不再落到 score=0，而是落到“中等偏差”（例如 score≈55, level≈MED）。
+        """
+        f = 0.0
+        reasons: list = []
+
+        # crowding: high (>=0.60) → 摩擦上升
+        if top20_ratio >= 0.60:
+            f += 15.0
+            reasons.append(f"crowding_high(top20={top20_ratio:.3f})")
+
+        # extreme concentration (>0.70) → 进一步惩罚
+        if top20_ratio > 0.70:
+            f += 15.0
+            reasons.append(f"top20_extreme(top20={top20_ratio:.3f})")
+
+        # participation weak (adv_ratio < 0.45)
+        if adv_ratio < 0.45:
+            f += 20.0
+            reasons.append(f"participation_weak(adv={adv_ratio:.3f})")
+
+        # direction diverged (same_direction False) → 小幅摩擦
+        if not same_direction:
+            f += 5.0
+            reasons.append("direction_diverged")
+
+        # dispersion only penalize when truly high (>=2.5)
+        if dispersion >= 2.50:
+            f += 10.0
+            reasons.append(f"dispersion_high(disp={dispersion:.3f})")
+
+        # divergence magnitude (pct is fraction)
+        if divergence_idx >= 0.015:  # 1.5%+
+            f += 15.0
+            reasons.append(f"divergence_high(div={divergence_idx:.4f})")
+        elif divergence_idx >= 0.008:  # 0.8%+
+            f += 8.0
+            reasons.append(f"divergence_moderate(div={divergence_idx:.4f})")
+        elif divergence_idx < 0.010:  # <1%: 缓和项（不是撕裂）
+            f -= 10.0
+            reasons.append(f"divergence_low_relief(div={divergence_idx:.4f})")
+
+        # clamp
+        if f < 0.0:
+            f = 0.0
+        if f > 100.0:
+            f = 100.0
+
+        return f, reasons
 
     # ---------------------------------------------------------
     def _pick_index_and_etf(self, core_theme: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]], str]:
@@ -255,14 +315,16 @@ class ETFIndexSyncFactor(FactorBase):
     ) -> Dict[str, str]:
         """
         只读解释：不做预测，不引入枚举。
+        注意：pct 为小数（如 0.0078 = 0.78%），因此阈值应按“小数”标度设置。
         """
         parts: Dict[str, str] = {}
 
         parts["direction"] = "same" if same_direction else "diverged"
 
-        if divergence_idx >= 1.5:
+        # divergence magnitude (fraction)
+        if divergence_idx >= 0.015:
             parts["divergence"] = "high"
-        elif divergence_idx >= 0.8:
+        elif divergence_idx >= 0.008:
             parts["divergence"] = "moderate"
         else:
             parts["divergence"] = "low"

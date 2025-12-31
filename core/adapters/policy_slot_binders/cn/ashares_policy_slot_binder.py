@@ -21,7 +21,9 @@ class ASharesPolicySlotBinder(PolicySlotBinderBase):
 
     SLOT_MAP = {
         "breadth": "breadth",
-        "north_nps": "north_nps",
+        #"north_nps": "north_nps",
+        "north_proxy_pressure": "north_proxy_pressure",
+
         "turnover": "turnover",
         "unified_emotion": "unified_emotion",
         

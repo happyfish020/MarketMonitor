@@ -243,9 +243,22 @@ class AshareDataFetcher(FetcherBase):
 
         snapshot["index_tech"] = self.index_tech_bb.build_block(snapshot)
         assert snapshot.get("index_tech"), "index_tech bb missing"
+   
+                #debug
+        import os,json 
+        json_path = os.path.join( "scripts/index_tech", f"index_tech_{self.trade_date}.json")
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(snapshot["index_tech"] , f, ensure_ascii=False, indent=2)
+
+
+
 
         snapshot["trend_in_force"] = self.trend_facts_bb.build_block(snapshot)
         assert snapshot.get("trend_in_force"), "trend_in_force_raw bb missing"
+
+        json_path = os.path.join( "scripts/trend_in_force", f"trend_in_force_{self.trade_date}.json")
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(snapshot["trend_in_force"] , f, ensure_ascii=False, indent=2)
 
         LOG.info("[AshareFetcher] Snapshot 数据源加载完成")
         return snapshot

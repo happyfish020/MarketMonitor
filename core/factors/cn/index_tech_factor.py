@@ -1,6 +1,8 @@
+# -*- coding: utf-8 -*-
 from __future__ import annotations
 
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
+
 from core.factors.factor_base import FactorBase
 from core.factors.factor_result import FactorResult
 
@@ -17,18 +19,32 @@ def _get_float(node: Optional[Dict[str, Any]], field: str) -> Optional[float]:
     return float(v) if isinstance(v, (int, float)) else None
 
 
+def _clamp01(x: float) -> float:
+    if x < 0.0:
+        return 0.0
+    if x > 100.0:
+        return 100.0
+    return x
+
+
 class IndexTechFactor(FactorBase):
     """
     IndexTechFactor (V12)
 
-    Input: input_block["index_tech"] 结构（来自 index_tech_blkbd）:
-      data["hs300"]["score"], data["hs300"]["pct_1d"], ...
-      data["zz500"]["score"], ...
-      data["kc50"]["score"], ...
+    语义（统一口径）：
+    - 这是“指数技术面因子”（趋势/均线/动量），不是“科技板块/成长风格”
+    - 输入来自 IndexTechBlockBuilder（客观特征），不在本 factor 生成文案 meaning
+    - 输出 score(0~100)：越高表示指数技术面越强；50 表示中性
+
+    Input:
+      snapshot["index_tech"]["hs300"]["score"] in [-100,100]
+      snapshot["index_tech"]["zz500"]["score"] ...
+      snapshot["index_tech"]["kc50"]["score"] ...
 
     Output:
-      FactorResult.score: 0~100 (供 execution_summary_builder._score 消费)
-      details: 同时提供 *_score（技术评分） 与 *_pct（1日涨跌幅，真实 pct_1d）以兼容旧链路
+      FactorResult.score: 0~100
+      FactorResult.level: HIGH / NEUTRAL / LOW
+      details: 数值证据（用于报告 Block 做统一解释）
     """
 
     def __init__(self):
@@ -36,7 +52,6 @@ class IndexTechFactor(FactorBase):
 
     def compute(self, input_block: Dict[str, Any]) -> FactorResult:
         data = self.pick(input_block, "index_tech", {})
-        assert data, "snapshot index_tech missing"
         if not isinstance(data, dict) or not data:
             return FactorResult(
                 name=self.name,
@@ -45,6 +60,7 @@ class IndexTechFactor(FactorBase):
                 details={
                     "data_status": "DATA_NOT_CONNECTED",
                     "reason": "index_tech block missing or empty",
+                    "score_semantics": "higher=stronger_index_technical",
                 },
             )
 
@@ -67,7 +83,7 @@ class IndexTechFactor(FactorBase):
             "zz500": zz500_score,
             "kc50": kc50_score,
         }
-        valid = [v for v in components_score.values() if isinstance(v, float)]
+        valid: List[float] = [v for v in components_score.values() if isinstance(v, float)]
 
         if not valid:
             return FactorResult(
@@ -78,6 +94,7 @@ class IndexTechFactor(FactorBase):
                     "data_status": "DATA_INVALID",
                     "reason": "no valid index score fields",
                     "components_score": components_score,
+                    "score_semantics": "higher=stronger_index_technical",
                 },
             )
 
@@ -85,29 +102,37 @@ class IndexTechFactor(FactorBase):
         avg_index_score = sum(valid) / len(valid)
 
         # 映射到 0~100：-100->0, 0->50, +100->100
-        final_score = 50.0 + avg_index_score / 2.0
-        final_score = max(0.0, min(100.0, final_score))
+        final_score = _clamp01(50.0 + avg_index_score / 2.0)
 
-        level = self.level_from_score(final_score)
+        # 强制口径：HIGH/NEUTRAL/LOW（避免 base 的枚举差异）
+        if final_score >= 66.0:
+            level = "HIGH"
+        elif final_score <= 34.0:
+            level = "LOW"
+        else:
+            level = "NEUTRAL"
 
-        return FactorResult(
+        fr = FactorResult(
             name=self.name,
             score=final_score,
             level=level,
             details={
-                # ✅ 新语义（推荐后续全部改用这些）
+                "data_status": "OK",
+                "score_semantics": "higher=stronger_index_technical",
                 "hs300_score": hs300_score,
                 "zz500_score": zz500_score,
                 "kc50_score": kc50_score,
                 "avg_index_score": avg_index_score,
                 "used_indices": [k for k, v in components_score.items() if isinstance(v, float)],
                 "aggregation": "equal_weight_avg",
-                "data_status": "OK",
 
-                # ✅ 旧链路兼容：这次真的是 pct_1d（不是 score）
+                # 旧链路兼容：真实 pct_1d（不是 score）
                 "hs300_pct": hs300_pct,
                 "zz500_pct": zz500_pct,
                 "kc50_pct": kc50_pct,
-                "_raw_data": data
+                "_raw_data": data,
             },
+
         )
+
+        return fr

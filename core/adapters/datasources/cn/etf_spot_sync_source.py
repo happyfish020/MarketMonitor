@@ -83,7 +83,8 @@ class ETFSpotSyncDataSource(DataSourceBase):
         # ------------------------------------------------------------
         # 1️⃣ 获取全行情 spot（盘中 or 收盘）
         # ------------------------------------------------------------
-        try:
+        try: 
+            
             df: pd.DataFrame = get_spot_daily(
                 trade_date=trade_date,
                 refresh_mode=refresh_mode,

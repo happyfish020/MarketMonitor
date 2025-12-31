@@ -40,4 +40,9 @@ class FactorResult:
         if not isinstance(self.details, dict):
             raise TypeError("FactorResult.details must be a dict")
 
- 
+    def to_dict(self) -> dict:
+        return {
+            "score": self.score,
+            "level": self.level,
+            "details": self.details,
+        }

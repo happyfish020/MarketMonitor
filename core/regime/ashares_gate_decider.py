@@ -94,6 +94,21 @@ class ASharesGateDecider:
             evidence["etf_index_sync_daily"] = sync.level
 
         # ------------------------------
+        # Northbound Proxy Pressure (price-trend proxy)
+        # ------------------------------
+        npp = factors.get("north_proxy_pressure")
+        if npp:
+            lvl = getattr(npp, "level", None)
+            # Frozen policy: only HIGH pressure can downgrade Gate
+            if lvl == "HIGH":
+                gate = _max_gate(gate, "CAUTION")
+                reasons.append("north_proxy_pressure=HIGH")
+                evidence["north_proxy_pressure"] = getattr(npp, "details", None) or lvl
+            else:
+                # still record evidence for audit (does not affect Gate)
+                evidence.setdefault("north_proxy_pressure", getattr(npp, "details", None) or lvl)
+
+        # ------------------------------
         # Failure Rate
         # ------------------------------
         frf = factors.get("failure_rate")

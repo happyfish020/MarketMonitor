@@ -7,7 +7,7 @@ def now_bj() -> datetime:
     return datetime.now(BJ_TZ)
 
 def is_trade_date_for_now (trade_date:str) -> bool:
-    now_bj = now_bj()
+    now_bj = datetime.now(BJ_TZ)
     format_string = "%Y-%m-%d"
     datetime_trade_date = datetime.strptime(trade_date, format_string)
     return now_bj.date() ==  datetime_trade_date

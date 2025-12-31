@@ -40,7 +40,7 @@ class FRFFactor(FactorBase):
 
     def compute(self, snapshot: Dict[str, Any]) -> FactorResult:
         # ---- 取事实 ----
-        trend_facts = snapshot.get("trend_facts_raw") or snapshot.get("trend_facts")
+        trend_facts = snapshot.get("trend_in_force") 
         turnover = (trend_facts or {}).get("turnover", {})
 
         slope_10d = turnover.get("slope_10d")

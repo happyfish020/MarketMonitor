@@ -125,8 +125,8 @@ def main():
 
     if args.market == "cn" and args.mode == "ashare_daily":
         # ✅ V12：只调用，不接收，不解析
-        is_intraday, trade_date = get_intraday_status_and_last_trade_date()
-        assert trade_date, "定位最后交易日失败！"
+        #is_intraday, trade_date = get_intraday_status_and_last_trade_date()
+        #assert trade_date, "定位最后交易日失败！"
         daily_engine = AShareDailyEngine(refresh_mode=refresh_mode)
         daily_engine.run( )
 

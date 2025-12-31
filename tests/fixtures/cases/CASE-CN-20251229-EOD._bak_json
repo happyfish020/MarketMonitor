@@ -1,0 +1,44 @@
+{
+  "case_id": "CASE-CN-20251229-EOD-INDEX_STABLE_STOCKS_WEAK-D1-CAUTION",
+  "trade_date": "2025-12-29",
+  "kind": "EOD",
+  "inputs": {
+    "etf_spot_sync": {
+      "adv_ratio": 0.4079,
+      "top20_turnover_ratio": 0.772,
+      "dispersion": 2.4326,
+      "same_direction": false,
+      "interpretation": {
+        "crowding": "high",
+        "direction": "diverged",
+        "participation": "weak",
+        "dispersion": "moderate",
+        "divergence": "low"
+      }
+    },
+    "expected_structure_states": {
+      "breadth": "healthy",
+      "turnover": "expanding",
+      "index_tech": "neutral",
+      "failure_rate": "stable",
+      "trend_in_force": "in_force",
+      "north_proxy_pressure": "pressure_low"
+    }
+  },
+  "expected": {
+    "actionhint_code": "N",
+    "gate": "CAUTION",
+    "execution_band": "D1",
+    "must_not_contain": [
+      "semantic_caution_state:",
+      "note:execution_code_diff",
+      "A/D1"
+    ],
+    "must_contain_any": [
+      "涨少跌多",
+      "调仓",
+      "轮动"
+    ],
+    "caution_hint_no_duplicate": true
+  }
+}

@@ -90,8 +90,8 @@ class ExecutionSummaryBlock(ReportBlockRendererBase):
         从已接入的 slots 中提取“执行摩擦”证据（只读，不推断、不编造）。
 
         当前支持：
-        - etf_spot_sync（或 intraday_overlay 内嵌 etf_index_sync）：adv_ratio / top20_turnover_ratio / same_direction / interpretation.*
-        - market_overview：breadth.up/down/adv_ratio、turnover.top20_turnover_ratio
+        - etf_spot_sync（或 intraday_overlay 内嵌 etf_index_sync）：adv_ratio / top20_amount_ratio / same_direction / interpretation.*
+        - market_overview：breadth.up/down/adv_ratio、amount.top20_amount_ratio
 
         返回为“可读短句”，用于报告解释。
         """
@@ -103,8 +103,8 @@ class ExecutionSummaryBlock(ReportBlockRendererBase):
             self._pick_number(self._get_nested(context.slots.get("market_overview"), ("breadth", "adv_ratio")), None),
         )
         top20 = self._pick_number(
-            details.get("top20_turnover_ratio"),
-            self._pick_number(self._get_nested(context.slots.get("market_overview"), ("turnover", "top20_turnover_ratio")), None),
+            details.get("top20_amount_ratio"),
+            self._pick_number(self._get_nested(context.slots.get("market_overview"), ("amount", "top20_amount_ratio")), None),
         )
         same_direction = details.get("same_direction")
         crowding = str(interp.get("crowding", "")).lower()
@@ -123,7 +123,7 @@ class ExecutionSummaryBlock(ReportBlockRendererBase):
         if crowding in ("high", "very_high"):
             out.append("拥挤度高（crowding=high）：资金集中在少数热点/少数票里，轮动快、追涨胜率下降。")
         elif isinstance(top20, (int, float)) and top20 >= 0.70:
-            out.append(f"成交高度集中（top20_turnover_ratio={top20:.3f}）：窄领涨特征明显，追价更容易踩空。")
+            out.append(f"成交高度集中（top20_amount_ratio={top20:.3f}）：窄领涨特征明显，追价更容易踩空。")
 
         # divergence / sync
         if direction in ("diverged", "mixed", "diverge"):
@@ -178,7 +178,7 @@ class ExecutionSummaryBlock(ReportBlockRendererBase):
         if isinstance(obj.get("details"), dict):
             return obj.get("details")  # type: ignore[return-value]
         # already details-like
-        keys = ("adv_ratio", "top20_turnover_ratio", "interpretation", "same_direction")
+        keys = ("adv_ratio", "top20_amount_ratio", "interpretation", "same_direction")
         if any(k in obj for k in keys):
             return obj
         return {}

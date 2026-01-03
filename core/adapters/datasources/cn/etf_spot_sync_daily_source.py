@@ -90,7 +90,7 @@ class ETFSpotSyncDailyDataSource(DataSourceBase):
         # 转为 DataFrame（统一计算口径）
         df = pd.DataFrame.from_dict(market, orient="index")
         
-        NUMERIC_COLS = ["chg_pct", "turnover", "close", "prev_close"]
+        NUMERIC_COLS = ["chg_pct", "amount", "close", "prev_close"]
         
         for c in NUMERIC_COLS:
             if c in df.columns:
@@ -118,6 +118,7 @@ class ETFSpotSyncDailyDataSource(DataSourceBase):
 
         adv = int((df["chg_pct"] > 0).sum())
         dec = int((df["chg_pct"] < 0).sum())
+        flat = int(total - adv - dec)
 
         adv_ratio = round(adv / total, 4)
         dec_ratio = round(dec / total, 4)
@@ -125,24 +126,24 @@ class ETFSpotSyncDailyDataSource(DataSourceBase):
         # ------------------------------------------------------------
         # 3️⃣ 成交额集中度（Top 20%）
         # ------------------------------------------------------------
-        if "turnover" in df.columns:
-            df_turn = df[df["turnover"] > 0]
+        if "amount" in df.columns:
+            df_turn = df[df["amount"] > 0]
             if not df_turn.empty:
-                df_turn_sorted = df_turn.sort_values("turnover", ascending=False)
+                df_turn_sorted = df_turn.sort_values("amount", ascending=False)
                 top_n = max(int(len(df_turn_sorted) * 0.2), 1)
-                top_turnover = float(df_turn_sorted.head(top_n)["turnover"].sum())
-                total_turnover = float(df_turn_sorted["turnover"].sum())
-                top20_turnover_ratio = (
-                    round(top_turnover / total_turnover, 4)
-                    if total_turnover > 0
+                top_amount = float(df_turn_sorted.head(top_n)["amount"].sum())
+                total_amount = float(df_turn_sorted["amount"].sum())
+                top20_amount_ratio = (
+                    round(top_amount / total_amount, 4)
+                    if total_amount > 0
                     else 0.0
                 )
             else:
-                top20_turnover_ratio = 0.0
-                total_turnover = 0.0
+                top20_amount_ratio = 0.0
+                total_amount = 0.0
         else:
-            top20_turnover_ratio = 0.0
-            total_turnover = 0.0
+            top20_amount_ratio = 0.0
+            total_amount = 0.0
 
         # ------------------------------------------------------------
         # 4️⃣ 分化程度
@@ -152,18 +153,21 @@ class ETFSpotSyncDailyDataSource(DataSourceBase):
         block: Dict[str, Any] = {
             "trade_date": trade_date,
             "snapshot_type": "EOD",          # 强制确认态
-            "turnover_stage": "FULL",        # daily 固定 FULL
+            "amount_stage": "FULL",        # daily 固定 FULL
 
             "total_stocks": total,
+            "adv_count": adv,
+            "dec_count": dec,
+            "flat_count": flat,
             "adv_ratio": adv_ratio,
             "dec_ratio": dec_ratio,
-            "top20_turnover_ratio": top20_turnover_ratio,
+            "top20_amount_ratio": top20_amount_ratio,
             "dispersion": dispersion,
 
             "_meta": {
                 "source": "oracle",
                 "confirmed": True,
-                "total_turnover": round(total_turnover, 2),
+                "total_amount": round(total_amount, 2),
                 "generated_at": datetime.now().isoformat(timespec="seconds"),
             },
         }
@@ -182,10 +186,10 @@ class ETFSpotSyncDailyDataSource(DataSourceBase):
         return {
             "trade_date": trade_date,
             "snapshot_type": "EOD",
-            "turnover_stage": "FULL",
+            "amount_stage": "FULL",
             "total_stocks": 0,
             "adv_ratio": 0.0,
             "dec_ratio": 0.0,
-            "top20_turnover_ratio": 0.0,
+            "top20_amount_ratio": 0.0,
             "dispersion": 0.0,
         }

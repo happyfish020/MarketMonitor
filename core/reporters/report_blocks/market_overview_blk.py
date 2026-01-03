@@ -1,289 +1,502 @@
 # -*- coding: utf-8 -*-
+"""UnifiedRisk V12 · Market Overview block (Frozen)
+
+目标：
+- 输出“收盘事实”的大盘概述：指数表现、成交与集中度、赚钱效应（上涨/下跌/涨停/跌停）
+- **不依赖** slots['market_overview']（可能为空），自动从 factors / etf_spot_sync 兜底
+- 不展示真实北向净流入（系统当前只有北向代理压力），避免 north_net 之类未定义字段
+
+注意：这是解释层 block，不参与决策；所有异常必须被捕获并转为 warnings。
+"""
+
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+import json
+import os
+from typing import Dict, Any, List, Optional, Tuple
 
-from core.reporters.report_types import ReportBlock
+import yaml
+
 from core.reporters.report_context import ReportContext
+from core.reporters.report_types import ReportBlock
 from core.reporters.report_blocks.report_block_base import ReportBlockRendererBase
+from core.utils.logger import get_logger
+
+
+log = get_logger(__name__)
 
 
 class MarketOverviewBlock(ReportBlockRendererBase):
-    """
-    UnifiedRisk V12 · Market Overview（收盘事实）
-
-    设计原则：
-    - 只读 context / doc_partial，不抛异常、不返回 None
-    - 优先使用 slots["market_overview"]，但允许从 observations / doc_partial 兜底取数
-    - 不编造事实：缺字段就明确缺失（warning），而不是“猜”
-    """
-
     block_alias = "market.overview"
     title = "大盘概述（收盘事实）"
 
-    # -------------------------
-    # entry
-    # -------------------------
+    # NOTE: keep constructor minimal; block instances may be created dynamically.
+    # Logger is module-level (log). Do not rely on instance attributes like self._logger.
+
     def render(self, context: ReportContext, doc_partial: Dict[str, Any]) -> ReportBlock:
         warnings: List[str] = []
 
-        src = self._pick_src(context, doc_partial)
+        try:
+            src = self._pick_src(context=context, doc_partial=doc_partial, warnings=warnings)
+            if not src:
+                warnings.append("empty:market_overview")
+                return ReportBlock(
+                    block_alias=self.block_alias,
+                    title=self.title,
+                    warnings=warnings,
+                    payload={
+                        "content": [
+                            "（未提供市场概述数据，且无法从 factors/etf_spot_sync 兜底读取）",
+                        ],
+                        "note": "注：MarketOverview 只读展示；缺失时不影响 Gate / ActionHint。",
+                    },
+                )
 
-        if not isinstance(src, dict) or not src:
-            warnings.append("empty:market_overview")
-            payload = (
-                "（未提供大盘收盘事实数据：market_overview slot 为空或无法兜底读取）\n"
-                "建议：在 Snapshot/DS 层补齐指数/量能/赚钱效应/资金流字段。"
+            lines: List[str] = []
+
+            idx_line = self._fmt_indices(context=context, src=src, warnings=warnings)
+            if idx_line:
+                lines.append(idx_line)
+
+            amt_line, top20_ratio = self._fmt_amount(context=context, src=src, warnings=warnings)
+            if amt_line:
+                lines.append(amt_line)
+
+            br_line, adv_ratio = self._fmt_breadth(src=src, warnings=warnings)
+            if br_line:
+                lines.append(br_line)
+
+            proxy_line = self._fmt_north_proxy(context=context, warnings=warnings)
+            if proxy_line:
+                lines.append(proxy_line)
+
+            feel_line = self._fmt_feeling(adv_ratio=adv_ratio, top20_ratio=top20_ratio)
+            if feel_line:
+                lines.append(feel_line)
+
+            return ReportBlock(
+                block_alias=self.block_alias,
+                title=self.title,
+                warnings=warnings,
+                payload={
+                    "content": lines,
+                    "note": "注：以上为收盘事实的读数汇总，用于理解盘面，不构成建议。",
+                },
             )
-            return ReportBlock(self.block_alias, self.title, payload=payload, warnings=warnings)
 
-        # normalize sub-sections
-        indices = src.get("indices") if isinstance(src.get("indices"), dict) else {}
-        turnover = src.get("turnover") if isinstance(src.get("turnover"), dict) else {}
-        breadth = src.get("breadth") if isinstance(src.get("breadth"), dict) else {}
-        fundflow = src.get("fundflow") if isinstance(src.get("fundflow"), dict) else {}
-        feeling = src.get("feeling")
+        except Exception as e:
+            log.exception("MarketOverviewBlock.render failed: %s", e)
+            warnings.append("exception:market_overview_render")
+            return ReportBlock(
+                block_alias=self.block_alias,
+                title=self.title,
+                warnings=warnings,
+                payload={
+                    "content": [
+                        "市场概述渲染异常（已捕获）。",
+                    ],
+                    "note": "注：异常已记录日志；本 block 不影响其它 block 生成。",
+                },
+            )
 
-        lines: List[str] = []
+    # ----------------------------
+    # data pick / fallback
+    # ----------------------------
+    def _pick_src(self, *, context: ReportContext, doc_partial: Dict[str, Any], warnings: List[str]) -> Dict[str, Any]:
+        slots = context.slots if isinstance(context.slots, dict) else {}
 
-        # 1) 指数
-        idx_line = self._fmt_indices(indices, warnings)
-        if idx_line:
-            lines.append(idx_line)
-        else:
-            warnings.append("missing:indices")
+        # prefer slot (if exists)
+        slot_v = slots.get("market_overview")
+        if isinstance(slot_v, dict) and slot_v:
+            return slot_v
 
-        # 2) 量能
-        t_line = self._fmt_turnover(turnover, warnings)
-        if t_line:
-            lines.append(t_line)
+        src: Dict[str, Any] = {}
 
-        # 3) 赚钱效应 / 扩散
-        b_line = self._fmt_breadth(breadth, warnings)
-        if b_line:
-            lines.append(b_line)
+        factors = slots.get("factors")
 
-        # 4) 资金流
-        f_line = self._fmt_fundflow(fundflow, warnings)
-        if f_line:
-            lines.append(f_line)
+        # 1) indices from index_tech factor raw_data
+        idx = self._extract_indices_from_index_tech(factors, warnings=warnings)
+        if idx:
+            src["indices"] = idx
 
-        # 5) 一句话体感
-        if isinstance(feeling, str) and feeling.strip():
-            lines.append(f"**一句话体感：**{feeling.strip()}")
-        else:
-            # 尽力拼“中性体感”，不写具体数值
-            adv = breadth.get("adv_ratio")
-            top20 = turnover.get("top20_turnover_ratio") or breadth.get("top20_turnover_ratio")
-            if isinstance(adv, (int, float)) and adv <= 0.42:
-                lines.append("**一句话体感：**指数可能较稳，但涨跌扩散偏弱（涨少跌多）——盘面更像调仓轮动，而非全面风险偏好抬升。")
-            elif isinstance(top20, (int, float)) and top20 >= 0.70:
-                lines.append("**一句话体感：**成交高度集中（窄领涨/拥挤），追价与热点轮动的胜率偏低。")
-            else:
-                lines.append("**一句话体感：**盘面偏结构性分化；需结合制度（Gate/Execution）判断是否适合进攻性执行。")
-            warnings.append("missing:feeling")
+        # 2) amount from amount factor raw_data
+        a = self._extract_amount_from_amount_factor(factors, warnings=warnings)
+        if a:
+            src["amount"] = a
 
-        payload = "\n".join(lines).strip()
-        return ReportBlock(self.block_alias, self.title, payload=payload, warnings=warnings)
+        # 3) breadth counts from market sentiment factors (preferred)
+        br = self._extract_breadth_from_unified_emotion(factors, warnings=warnings)
+        if not br:
+            br = self._extract_breadth_from_participation(factors, warnings=warnings)
+        if br:
+            src["breadth"] = br
 
-    # -------------------------
-    # source picking / normalization
-    # -------------------------
-    def _pick_src(self, context: ReportContext, doc_partial: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        取数优先级（只读，不改写 context）：
-        1) slots["market_overview" | "market_close_facts" | "close_facts"]
-        2) doc_partial["market_overview"]
-        3) observations["market_overview" | "market" | "close_facts" | "market_close_facts"]
-        4) 从 observations 中拼装（indices/turnover/breadth/fundflow）
-        """
-        # 1) direct slots
-        for k in ("market_overview", "market_close_facts", "close_facts"):
-            v = context.slots.get(k)
-            if isinstance(v, dict) and v:
-                return v
+        # 4) Top20 amount ratio is produced by ETF sync factors
+        top20 = self._extract_top20_amount_ratio(factors)
+        if top20 is not None:
+            src["top20_amount_ratio"] = top20
 
-        # 2) doc_partial
-        v = doc_partial.get("market_overview")
-        if isinstance(v, dict) and v:
-            return v
+        # 5) extra fallback from etf_spot_sync slot (may carry feeling/top20/breadth)
+        etf = slots.get("etf_spot_sync")
+        if isinstance(etf, dict) and etf:
+            if "breadth" not in src:
+                br2 = etf.get("breadth") if isinstance(etf.get("breadth"), dict) else None
+                if not br2:
+                    det = etf.get("details") if isinstance(etf.get("details"), dict) else {}
+                    br2 = det.get("breadth") if isinstance(det.get("breadth"), dict) else None
+                    if not br2:
+                        br2 = {k: det.get(k) for k in ["adv", "dec", "flat", "limit_up", "limit_down", "adv_ratio"] if k in det}
+                if br2:
+                    src["breadth"] = br2
 
-        # 3) observations direct
-        obs = context.slots.get("observations")
-        if isinstance(obs, dict) and obs:
-            for k in ("market_overview", "market", "close_facts", "market_close_facts"):
-                vv = obs.get(k)
-                if isinstance(vv, dict) and vv:
-                    # allow nested market dict directly as src if it already has sub-sections
-                    if any(x in vv for x in ("indices", "turnover", "breadth", "fundflow", "feeling")):
-                        return vv
-                    # or wrap it
-                    return {"_raw": vv}
+            if "top20_amount_ratio" not in src and "top20_amount_ratio" in etf:
+                src["top20_amount_ratio"] = etf.get("top20_amount_ratio")
 
-            # 4) assemble from observations keys
-            assembled: Dict[str, Any] = {}
-            # indices candidates
-            idx = obs.get("indices") or obs.get("index") or obs.get("index_facts")
-            if isinstance(idx, dict) and idx:
-                assembled["indices"] = idx
+            if "feeling" in etf and isinstance(etf.get("feeling"), str):
+                src["feeling"] = etf.get("feeling")
 
-            # turnover candidates
-            t = obs.get("turnover") or obs.get("amount") or obs.get("liquidity")
-            if isinstance(t, dict) and t:
-                assembled["turnover"] = t
+        return src
 
-            # breadth candidates
-            b = obs.get("breadth") or obs.get("adv_dec") or obs.get("market_breadth")
-            if isinstance(b, dict) and b:
-                assembled["breadth"] = b
-
-            # fundflow candidates
-            ff = obs.get("fundflow") or obs.get("money_flow") or obs.get("main_fundflow")
-            if isinstance(ff, dict) and ff:
-                assembled["fundflow"] = ff
-
-            if assembled:
-                return assembled
-
-        return {}
-
-    # -------------------------
-    # formatters
-    # -------------------------
-    def _fmt_indices(self, indices: Dict[str, Any], warnings: List[str]) -> Optional[str]:
-        if not indices:
+    def _extract_top20_amount_ratio(self, factors: Any) -> Optional[float]:
+        """Extract Top20成交占比（优先 etf_index_sync_daily.details.top20_amount_ratio）。"""
+        if not isinstance(factors, dict):
             return None
 
-        # accept various keys; keep order stable
-        keys = [
-            ("sh", "沪指"),
-            ("sz", "深成指"),
-            ("cyb", "创业板"),
-            ("kcb50", "科创50"),
-            ("hs300", "沪深300"),
-        ]
-
-        parts: List[str] = []
-        for k, label in keys:
-            v = indices.get(k)
-            if isinstance(v, dict):
-                parts.append(self._fmt_one_index(label, v))
-            elif isinstance(v, (int, float)):
-                # v is pct only
-                parts.append(f"{label} {self._fmt_pct(v)}")
-        # fallback: if indices dict is already {name: {...}}
-        if not parts:
-            for name, v in indices.items():
-                if isinstance(v, dict):
-                    parts.append(self._fmt_one_index(str(name), v))
-        if not parts:
-            warnings.append("missing:indices_fields")
-            return None
-        return "**指数：**" + "；".join(parts) + "。"
-
-    def _fmt_one_index(self, label: str, v: Dict[str, Any]) -> str:
-        pct = v.get("pct")
-        close = v.get("close")
-        s = f"{label} {self._fmt_pct(pct)}"
-        if isinstance(close, (int, float)):
-            s += f" 收 {self._fmt_close(close)}"
-        return s
-
-    def _fmt_turnover(self, turnover: Dict[str, Any], warnings: List[str]) -> Optional[str]:
-        if not turnover:
-            return None
-
-        # common fields
-        amount = turnover.get("amount") or turnover.get("total_amount") or turnover.get("amt")
-        delta = turnover.get("delta") or turnover.get("chg") or turnover.get("amount_delta")
-        unit = turnover.get("unit") or "亿元"
-
-        # top20 concentration (optional)
-        top20 = turnover.get("top20_turnover_ratio")
-        top20_part = ""
-        if isinstance(top20, (int, float)):
-            top20_part = f"；Top20 成交占比 {top20:.3f}"
-
-        if isinstance(amount, (int, float)):
-            line = f"**量能：**两市成交额约 {self._fmt_num(amount)}{unit}"
-            if isinstance(delta, (int, float)):
-                # delta sign: + / -
-                sign = "+" if delta >= 0 else ""
-                line += f"，较上一交易日 {'放量' if delta >= 0 else '缩量'}约 {sign}{self._fmt_num(abs(delta))}{unit}"
-            line += f"。{top20_part}"
-            return line
-
-        # if only ratio exists
-        if top20_part:
-            warnings.append("missing:turnover_amount")
-            return f"**量能：**（成交额缺失）{top20_part.lstrip('；')}。"
-
-        warnings.append("missing:turnover")
+        for k in ("etf_index_sync_daily", "etf_spot_sync", "etf_index_sync"):
+            fr = factors.get(k)
+            if not isinstance(fr, dict):
+                continue
+            details = fr.get("details") if isinstance(fr.get("details"), dict) else {}
+            v = details.get("top20_amount_ratio")
+            if isinstance(v, (int, float)):
+                return float(v)
         return None
 
-    def _fmt_breadth(self, breadth: Dict[str, Any], warnings: List[str]) -> Optional[str]:
-        if not breadth:
+    def _extract_breadth_from_unified_emotion(self, factors: Any, warnings: List[str]) -> Optional[Dict[str, Any]]:
+        """Extract breadth/market-sentiment counts from unified_emotion.details._raw_data.market_sentiment.
+
+        Expected payload (example):
+          details._raw_data = {"market_sentiment": {"adv":..., "dec":..., "flat":..., "limit_up":..., "limit_down":..., "adv_ratio":...}}
+        """
+        if not isinstance(factors, dict):
             return None
-        up = breadth.get("up") or breadth.get("adv") or breadth.get("adv_count")
-        down = breadth.get("down") or breadth.get("dec") or breadth.get("dec_count")
-        median = breadth.get("median") or breadth.get("median_ret") or breadth.get("median_pct")
-        adv_ratio = breadth.get("adv_ratio")
+        ue = factors.get("unified_emotion")
+        if not isinstance(ue, dict):
+            return None
+        details = ue.get("details") if isinstance(ue.get("details"), dict) else {}
+        raw = details.get("_raw_data")
+        if isinstance(raw, str):
+            try:
+                raw = json.loads(raw)
+            except Exception:
+                warnings.append("invalid:unified_emotion_raw_data_json")
+                return None
+        if not isinstance(raw, dict):
+            return None
+        ms = raw.get("market_sentiment") if isinstance(raw.get("market_sentiment"), dict) else None
+        if not isinstance(ms, dict):
+            return None
+        out = {k: ms.get(k) for k in ["adv", "dec", "flat", "limit_up", "limit_down", "adv_ratio"] if k in ms}
+        return out if out else None
+
+    def _extract_breadth_from_participation(self, factors: Any, warnings: List[str]) -> Optional[Dict[str, Any]]:
+        """Fallback breadth extraction from participation.details._raw_data (adv/dec/flat/adv_ratio)."""
+        if not isinstance(factors, dict):
+            return None
+        p = factors.get("participation")
+        if not isinstance(p, dict):
+            return None
+        details = p.get("details") if isinstance(p.get("details"), dict) else {}
+        raw = details.get("_raw_data")
+        if isinstance(raw, str):
+            try:
+                raw = json.loads(raw)
+            except Exception:
+                warnings.append("invalid:participation_raw_data_json")
+                return None
+        if not isinstance(raw, dict):
+            return None
+        out = {k: raw.get(k) for k in ["adv", "dec", "flat", "adv_ratio"] if k in raw}
+        return out if out else None
+
+    def _extract_indices_from_index_tech(self, factors: Any, warnings: List[str]) -> Dict[str, Any]:
+        if not isinstance(factors, dict):
+            warnings.append("missing:factors")
+            return {}
+
+        idx_tech = factors.get("index_tech")
+        if not isinstance(idx_tech, dict):
+            return {}
+
+        details = idx_tech.get("details") if isinstance(idx_tech.get("details"), dict) else {}
+        raw = details.get("_raw_data")
+
+        if isinstance(raw, str):
+            try:
+                raw = json.loads(raw)
+            except Exception:
+                warnings.append("invalid:index_tech_raw_data_json")
+                return {}
+
+        if not isinstance(raw, dict):
+            return {}
+
+        # raw format: {sh:{close,pct_1d}, ... , _meta:{indices:[...]}}
+        indices = {}
+        for k, v in raw.items():
+            if k == "_meta":
+                continue
+            if isinstance(v, dict):
+                indices[k] = v
+        return indices
+
+    def _extract_amount_from_amount_factor(self, factors: Any, warnings: List[str]) -> Optional[Dict[str, Any]]:
+        if not isinstance(factors, dict):
+            return None
+        a = factors.get("amount")
+        if not isinstance(a, dict):
+            return None
+
+        details = a.get("details") if isinstance(a.get("details"), dict) else {}
+        total = details.get("amount_total")
+        raw = details.get("_raw_data")
+
+        delta = None
+        if isinstance(raw, str):
+            try:
+                raw = json.loads(raw)
+            except Exception:
+                raw = None
+        if isinstance(raw, dict):
+            window = raw.get("window")
+            if isinstance(window, list) and len(window) >= 2:
+                # assume window sorted by date asc or desc; we try detect by comparing trade_date
+                try:
+                    w0 = window[0]
+                    w1 = window[1]
+                    t0 = str(w0.get("trade_date", ""))
+                    t1 = str(w1.get("trade_date", ""))
+                    # If t0 < t1 then ascending, latest is last
+                    if t0 and t1 and t0 < t1:
+                        latest = window[-1].get("total_amount")
+                        prev = window[-2].get("total_amount")
+                    else:
+                        latest = w0.get("total_amount")
+                        prev = w1.get("total_amount")
+                    if isinstance(latest, (int, float)) and isinstance(prev, (int, float)):
+                        total = total if isinstance(total, (int, float)) else latest
+                        delta = float(latest) - float(prev)
+                except Exception:
+                    pass
+
+        if not isinstance(total, (int, float)):
+            return None
+
+        out = {"amount": float(total), "unit": "亿元"}
+        if isinstance(delta, (int, float)):
+            out["delta"] = float(delta)
+        return out
+
+    # ----------------------------
+    # formatting
+    # ----------------------------
+    def _fmt_indices(self, *, context: ReportContext, src: Dict[str, Any], warnings: List[str]) -> Optional[str]:
+        indices = src.get("indices")
+        if not isinstance(indices, dict) or not indices:
+            warnings.append("missing:indices")
+            return None
+
+        order = self._load_indices_order(context=context, warnings=warnings)
+        if not order:
+            # fallback to meta if exists
+            meta = indices.get("_meta") if isinstance(indices.get("_meta"), dict) else {}
+            order = meta.get("indices") if isinstance(meta.get("indices"), list) else list(indices.keys())
 
         parts: List[str] = []
-        if isinstance(up, (int, float)) and isinstance(down, (int, float)):
-            parts.append(f"上涨约 {int(up)} 家，下跌约 {int(down)} 家")
-        if isinstance(median, (int, float)):
-            parts.append(f"中位数 {self._fmt_pct(median)}")
-        if isinstance(adv_ratio, (int, float)) and not parts:
-            parts.append(f"上涨占比 {adv_ratio:.4f}")
+        for key in order:
+            if key not in indices:
+                continue
+            v = indices.get(key)
+            if not isinstance(v, dict):
+                continue
+            close = v.get("close")
+            pct = v.get("pct_1d") if "pct_1d" in v else v.get("chg_pct")
+            if not isinstance(close, (int, float)) or not isinstance(pct, (int, float)):
+                continue
+
+            # pct in raw data is usually decimal return (e.g., 0.0093 == 0.93%). Convert to percent.
+            pct_pct = self._to_pct(pct)
+            if pct_pct is None:
+                continue
+            parts.append(f"{key.upper()} {pct_pct:.2f}% 收 {close:.2f}")
+
         if not parts:
-            warnings.append("missing:breadth_fields")
-            return None
-        return "**赚钱效应：**" + "；".join(parts) + "。"
-
-    def _fmt_fundflow(self, fundflow: Dict[str, Any], warnings: List[str]) -> Optional[str]:
-        if not fundflow:
+            warnings.append("missing:indices_values")
             return None
 
-        # accept common names
-        main = fundflow.get("main_net") or fundflow.get("main_net_inflow") or fundflow.get("main")
-        north = fundflow.get("north_net") or fundflow.get("northbound") or fundflow.get("north")
+        return "**指数表现：**" + " / ".join(parts) + "。"
 
-        unit = fundflow.get("unit") or "亿元"
+    def _fmt_amount(self, *, context: ReportContext, src: Dict[str, Any], warnings: List[str]) -> Tuple[Optional[str], Optional[float]]:
+        amt = src.get("amount")
+        total, delta, unit = self._extract_value_delta(amt)
+
+        # fallback: if amount exists but not parsed, warn
+        if total is None:
+            warnings.append("missing:amount")
+            return None, None
+
+        # top20 ratio
+        top20 = src.get("top20_amount_ratio")
+        top20_pct = self._to_pct(top20)
+
+        # If top20 missing, try from etf_spot_sync factor details (if any)
+        if top20_pct is None:
+            etf = context.slots.get("etf_spot_sync") if isinstance(context.slots, dict) else None
+            if isinstance(etf, dict):
+                top20_pct = self._to_pct(etf.get("top20_amount_ratio"))
+
+        s = f"**成交额：**{total:.2f}{unit}"
+        if delta is not None:
+            s += f"（较前一日 {delta:+.2f}{unit}）"
+        if top20_pct is not None:
+            s += f"；Top20 成交占比 {top20_pct:.1f}%"
+        s += "。"
+        return s, top20_pct
+
+    def _fmt_breadth(self, *, src: Dict[str, Any], warnings: List[str]) -> Tuple[Optional[str], Optional[float]]:
+        br = src.get("breadth")
+        if not isinstance(br, dict):
+            warnings.append("missing:breadth")
+            return None, None
+
+        adv = br.get("adv")
+        dec = br.get("dec")
+        flat = br.get("flat")
+        limit_up = br.get("limit_up")
+        limit_down = br.get("limit_down")
+        adv_ratio = br.get("adv_ratio")
+
+        adv_i = int(adv) if isinstance(adv, (int, float)) else None
+        dec_i = int(dec) if isinstance(dec, (int, float)) else None
+        flat_i = int(flat) if isinstance(flat, (int, float)) else None
+        lu_i = int(limit_up) if isinstance(limit_up, (int, float)) else None
+        ld_i = int(limit_down) if isinstance(limit_down, (int, float)) else None
+
+        adv_ratio_pct = self._to_pct(adv_ratio)
 
         parts: List[str] = []
-        if isinstance(main, (int, float)):
-            sign = "+" if main >= 0 else ""
-            parts.append(f"主力净{'流入' if main >= 0 else '流出'} {sign}{self._fmt_num(abs(main))}{unit}")
-        if isinstance(north, (int, float)):
-            sign = "+" if north >= 0 else ""
-            parts.append(f"北向净{'买入' if north >= 0 else '卖出'} {sign}{self._fmt_num(abs(north))}{unit}")
+        if adv_i is not None and dec_i is not None and flat_i is not None:
+            parts.append(f"上涨 {adv_i} 家 / 下跌 {dec_i} 家 / 平盘 {flat_i} 家")
+        if adv_ratio_pct is not None:
+            parts.append(f"上涨占比 {adv_ratio_pct:.2f}%")
+        if lu_i is not None and ld_i is not None:
+            parts.append(f"涨停 {lu_i} / 跌停 {ld_i}")
 
         if not parts:
-            warnings.append("missing:fundflow_fields")
-            return None
-        return "**资金面：**" + "；".join(parts) + "。"
+            warnings.append("missing:breadth_values")
+            return None, adv_ratio_pct
 
-    # -------------------------
+        return "**赚钱效应：**" + "；".join(parts) + "。", adv_ratio_pct
+
+    def _fmt_north_proxy(self, *, context: ReportContext, warnings: List[str]) -> Optional[str]:
+        # Current system only provides proxy pressure, not real north_net.
+        structure = context.slots.get("structure") if isinstance(context.slots, dict) else None
+        if not isinstance(structure, dict):
+            return None
+        npp = structure.get("north_proxy_pressure")
+        if not isinstance(npp, dict):
+            return None
+        state = npp.get("state")
+        ev = npp.get("evidence") if isinstance(npp.get("evidence"), dict) else {}
+        score = ev.get("pressure_score")
+        level = ev.get("pressure_level") or state
+        if score is None and level is None:
+            return None
+        if isinstance(score, (int, float)):
+            return f"**北向代理：**压力 {level}（score {float(score):.1f}）。"
+        return f"**北向代理：**压力 {level}。"
+
+    def _fmt_feeling(self, *, adv_ratio: Optional[float], top20_ratio: Optional[float]) -> Optional[str]:
+        # prefer explicit feeling if exists
+        # (do not force warnings here; feeling is optional)
+        # adv_ratio/top20_ratio are already % numbers
+        if top20_ratio is not None and top20_ratio >= 65:
+            return "**一句话体感：**成交高度集中（窄领涨/拥挤），追价与热点轮动的胜率偏低。"
+        if adv_ratio is not None and 45 <= adv_ratio <= 55:
+            return "**一句话体感：**多空均衡、轮动偏快，按制度更适合“观望/小仓试错”而非追价。"
+        if adv_ratio is not None and adv_ratio < 40:
+            return "**一句话体感：**下跌家数占优，情绪偏弱，优先控制回撤与执行摩擦。"
+        if adv_ratio is not None and adv_ratio > 60:
+            return "**一句话体感：**上涨扩散较好，但仍需看成交与集中度是否支持持续性。"
+        return None
+
+    # ----------------------------
     # helpers
-    # -------------------------
-    def _fmt_pct(self, v: Any) -> str:
-        if not isinstance(v, (int, float)):
-            return ""
-        # v may be in [-1,1] or already in percentage
-        if abs(v) <= 1.5:
-            return f"{v * 100:.2f}%"
-        return f"{v:.2f}%"
+    # ----------------------------
+    def _load_indices_order(self, *, context: ReportContext, warnings: List[str]) -> List[str]:
+        # configurable via governance.config.symbols_path; fallback toJM: config/symbols.yaml
+        cfg = context.slots.get("governance", {}).get("config", {}) if isinstance(context.slots, dict) else {}
+        path = cfg.get("symbols_path") if isinstance(cfg, dict) else None
+        candidates = []
+        if isinstance(path, str) and path.strip():
+            candidates.append(path.strip())
+        candidates.extend(["config/symbols.yaml", "symbols.yaml"])
 
-    def _fmt_close(self, v: Any) -> str:
-        if not isinstance(v, (int, float)):
-            return ""
-        return f"{v:.2f}"
+        sym = None
+        for p in candidates:
+            sym = self._try_load_yaml(p)
+            if isinstance(sym, dict):
+                break
+        if not isinstance(sym, dict):
+            warnings.append("missing:symbols_yaml")
+            return []
 
-    def _fmt_num(self, v: Any) -> str:
-        if not isinstance(v, (int, float)):
-            return ""
-        # keep 2 decimals for large
-        if abs(v) >= 100:
-            return f"{v:.0f}"
-        return f"{v:.2f}"
+        idx_core = sym.get("index_core")
+        if isinstance(idx_core, dict) and idx_core:
+            return list(idx_core.keys())
+
+        idx = sym.get("indices")
+        if isinstance(idx, list):
+            return [str(x) for x in idx if isinstance(x, str)]
+        return []
+
+    def _try_load_yaml(self, path: str) -> Optional[Dict[str, Any]]:
+        try:
+            if not path:
+                return None
+            # allow relative path
+            p = path
+            if not os.path.isabs(p):
+                p = os.path.join(os.getcwd(), p)
+            if not os.path.exists(p):
+                return None
+            with open(p, "r", encoding="utf-8") as f:
+                return yaml.safe_load(f)
+        except Exception:
+            return None
+
+    def _extract_value_delta(self, v: Any) -> Tuple[Optional[float], Optional[float], str]:
+        unit = "亿元"
+        if isinstance(v, dict):
+            # common keys
+            amount = v.get("amount")
+            if amount is None:
+                amount = v.get("amount_total")
+            delta = v.get("delta")
+            if isinstance(v.get("unit"), str):
+                unit = v.get("unit")
+            amount_f = float(amount) if isinstance(amount, (int, float)) else None
+            delta_f = float(delta) if isinstance(delta, (int, float)) else None
+            return amount_f, delta_f, unit
+        if isinstance(v, (int, float)):
+            return float(v), None, unit
+        return None, None, unit
+
+    def _to_pct(self, v: Any) -> Optional[float]:
+        if isinstance(v, (int, float)):
+            x = float(v)
+            # treat 0~1 as ratio, others as already percent
+            if 0 <= x <= 1:
+                return x * 100.0
+            return x
+        return None

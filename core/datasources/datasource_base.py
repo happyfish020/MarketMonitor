@@ -32,7 +32,7 @@ class DataSourceConfig:
     """
     V12 数据源配置：
         market: "cn" / "glo" / "us" / ...
-        ds_name: 数据源目录名（例：index_series / turnover / margin）
+        ds_name: 数据源目录名（例：index_series / amount / margin）
     
     自动生成：
         data_root / market_root / cache_root / history_root

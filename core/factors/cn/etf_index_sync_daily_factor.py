@@ -22,7 +22,7 @@ class ETFIndexSyncDailyFactor(FactorBase):
 
     Level 语义：
     - LOW     : 广泛参与，同步健康
-    - MEDIUM  : 轻度集中 / 分化
+    - NEUTRAL  : 轻度集中 / 分化
     - HIGH    : 明显集中 / 分化（结构不同步）
     """
 
@@ -44,10 +44,10 @@ class ETFIndexSyncDailyFactor(FactorBase):
 
         adv_ratio = data.get("adv_ratio")
         dispersion = data.get("dispersion")
-        top20_turnover_ratio = data.get("top20_turnover_ratio")
+        top20_amount_ratio = data.get("top20_amount_ratio")
 
         # 基础字段校验
-        if not self._is_valid_number(adv_ratio, dispersion, top20_turnover_ratio):
+        if not self._is_valid_number(adv_ratio, dispersion, top20_amount_ratio):
             return self._neutral("invalid numeric fields")
 
         # -----------------------------------------------------
@@ -67,9 +67,9 @@ class ETFIndexSyncDailyFactor(FactorBase):
             reasons.append(f"high_dispersion={dispersion:.2f}")
 
         # 成交额集中
-        if top20_turnover_ratio > 0.60:
+        if top20_amount_ratio > 0.60:
             score -= 15
-            reasons.append(f"high_top20_turnover={top20_turnover_ratio:.2f}")
+            reasons.append(f"high_top20_amount={top20_amount_ratio:.2f}")
 
         # -----------------------------------------------------
         # Level 映射（冻结）
@@ -77,7 +77,7 @@ class ETFIndexSyncDailyFactor(FactorBase):
         if score >= 60:
             level = "LOW"
         elif score >= 45:
-            level = "MEDIUM"
+            level = "NEUTRAL"
         else:
             level = "HIGH"
 
@@ -88,7 +88,7 @@ class ETFIndexSyncDailyFactor(FactorBase):
             details={
                 "adv_ratio": round(adv_ratio, 4),
                 "dispersion": round(dispersion, 4),
-                "top20_turnover_ratio": round(top20_turnover_ratio, 4),
+                "top20_amount_ratio": round(top20_amount_ratio, 4),
                 "reasons": reasons,
                 "snapshot_type": "EOD",
                 "trade_date": data.get("trade_date"),
@@ -102,7 +102,7 @@ class ETFIndexSyncDailyFactor(FactorBase):
         return FactorResult(
             name=self.name,
             score=50.0,
-            level="MEDIUM",
+            level="NEUTRAL",
             details={"note": reason},
         )
 

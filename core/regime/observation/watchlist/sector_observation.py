@@ -41,7 +41,7 @@ class WatchlistSectorsObservation(ObservationBase):
                 "breadth",
                 "index_tech",
                 "north_nps",
-                "turnover",
+                "amount",
                 "margin",
                 "sector_rotation",
             ],
@@ -69,7 +69,7 @@ class WatchlistSectorsObservation(ObservationBase):
         breadth = slots.get("breadth")
         index_tech = slots.get("index_tech")
         north_nps = slots.get("north_nps")
-        turnover = slots.get("turnover")
+        amount = slots.get("amount")
         margin = slots.get("margin")
         sector_rotation = slots.get("sector_rotation")
 
@@ -77,7 +77,7 @@ class WatchlistSectorsObservation(ObservationBase):
             "breadth": self._summarize_factor(breadth),
             "index_tech": self._summarize_factor(index_tech),
             "north_nps": self._summarize_factor(north_nps),
-            "turnover": self._summarize_factor(turnover),
+            "amount": self._summarize_factor(amount),
             "margin": self._summarize_factor(margin),
             "sector_rotation": self._summarize_factor(sector_rotation),
         }
@@ -90,7 +90,7 @@ class WatchlistSectorsObservation(ObservationBase):
                 structure_state = self._structure_state(breadth=breadth, index_tech=index_tech)
                 trend_state = self._trend_state(index_tech=index_tech)
                 flow_nb = self._northbound_state(north_nps=north_nps)
-                flow_to = self._turnover_state(turnover=turnover)
+                flow_to = self._amount_state(amount=amount)
                 flow_mg = self._margin_state(margin=margin)
 
                 mom3, mom5, cons = self._momentum_state(index_tech=index_tech)
@@ -120,7 +120,7 @@ class WatchlistSectorsObservation(ObservationBase):
                             "intensity": flow_nb[1],
                             "evidence": "north_nps",
                         },
-                        "turnover": {"state": flow_to, "evidence": "turnover"},
+                        "amount": {"state": flow_to, "evidence": "amount"},
                         "margin": {"state": flow_mg, "evidence": "margin"},
                     },
                     "momentum": {
@@ -215,10 +215,10 @@ class WatchlistSectorsObservation(ObservationBase):
             return ("outflow", "medium")
         return ("flat", "weak")
 
-    def _turnover_state(self, *, turnover: FactorResult | None) -> str:
-        if turnover is None:
+    def _amount_state(self, *, amount: FactorResult | None) -> str:
+        if amount is None:
             return "unknown"
-        s = turnover.score
+        s = amount.score
         if s >= 60.0:
             return "hot"
         if s <= 40.0:

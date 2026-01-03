@@ -41,10 +41,10 @@ class FRFFactor(FactorBase):
     def compute(self, snapshot: Dict[str, Any]) -> FactorResult:
         # ---- 取事实 ----
         trend_facts = snapshot.get("trend_in_force") 
-        turnover = (trend_facts or {}).get("turnover", {})
+        amount = (trend_facts or {}).get("amount", {})
 
-        slope_10d = turnover.get("slope_10d")
-        window = turnover.get("window", [])
+        slope_10d = amount.get("slope_10d")
+        window = amount.get("window", [])
 
         # ==========================================================
         # 回退分支：数据不足（不抛异常）
@@ -73,7 +73,7 @@ class FRFFactor(FactorBase):
                 "fail_event": fail,
                 "slope_10d": slope_10d,
                 "_raw_data": {
-                    "turnover": {
+                    "amount": {
                         "slope_10d": slope_10d,
                         "window_len": len(window) if isinstance(window, list) else 0,
                     }

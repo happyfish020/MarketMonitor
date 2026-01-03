@@ -25,7 +25,7 @@ class StructureFactsMapper:
     """Deprecated shim: delegate to StructureFactsBuilder."""
 
     @classmethod
-    def build(
+    def build111111(
         cls,
         factor_results: Dict[str, FactorResult],
         *,

@@ -1,0 +1,35 @@
+reports:
+  EOD:
+    blocks:
+      - market.overview
+      - governance.gate
+      - structure.facts
+      - summary
+      - sector.proxy
+      - execution.summary
+      - exit.readiness
+      - etf_spot_sync.explain
+      - execution_quick_reference
+
+
+    titles:
+      market.overview: "大盘概述（收盘事实）"
+      governance.gate: "制度门禁（Gate · Decision）"
+      execution.summary: "执行层评估（Execution · 2–5D）"
+      execution_quick_reference: "执行速查卡（只读）"
+      structure.facts: "结构事实（技术轨）"
+      etf_spot_sync.explain: "核心字段解释（拥挤/不同步/参与度）"
+      exit.readiness: "出场准备度（Exit Readiness · Governance）"
+      summary: "简要总结（Summary · A / N / D）"
+      sector.proxy: "板块代理验证（Sector Proxy · Validation）"
+
+builders:
+  market.overview: "core.reporters.report_blocks.market_overview_blk:MarketOverviewBlock"
+  governance.gate: "core.reporters.report_blocks.gate_decision_blk:GateDecisionBlock"
+  execution.summary: "core.reporters.report_blocks.execution_summary_blk:ExecutionSummaryBlock"
+  execution_quick_reference: "core.reporters.report_blocks.execution_quick_reference_blk:ExecutionQuickReferenceBlock"
+  structure.facts: "core.reporters.report_blocks.structure_facts_blk:StructureFactsBlock"
+  etf_spot_sync.explain: "core.reporters.report_blocks.etf_spot_sync_explain_blk:EtfSpotSyncExplainBlock"
+  exit.readiness: "core.reporters.report_blocks.exit_readiness_blk:ExitReadinessBlock"
+  summary: "core.reporters.report_blocks.summary_a_n_d_blk:SummaryANDBlock"
+  sector.proxy: "core.reporters.report_blocks.sector_proxy_blk:SectorProxyBlock"

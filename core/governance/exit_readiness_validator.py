@@ -206,7 +206,7 @@ class ExitReadinessValidator:
                 asof=asof,
             )
 
-        if ro_flag is True and ro_sev in ("MEDIUM", "HIGH"):
+        if ro_flag is True and ro_sev in ("NEUTRAL", "HIGH"):
             reasons.append("mid:rebound_only_guard")
             return self._mk(
                 level="WATCH",

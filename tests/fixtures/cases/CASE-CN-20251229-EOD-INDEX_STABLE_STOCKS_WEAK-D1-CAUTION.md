@@ -7,7 +7,7 @@
 - 体感：指数没怎么跌，但多数股票在跌；更像调仓轮动/兑现，而非全面风险偏好抬升。
 - etf_spot_sync（你系统当日字段）：
   - adv_ratio = 0.4079（涨少跌多）
-  - top20_turnover_ratio = 0.772（成交极度集中/窄领涨/拥挤）
+  - top20_amount_ratio = 0.772（成交极度集中/窄领涨/拥挤）
   - interpretation: crowding=high, direction=diverged, participation=weak, dispersion=moderate, divergence=low
   - same_direction = false
   - dispersion = 2.4326
@@ -19,7 +19,7 @@
 - Execution.band = D1（必须为单值；禁止 "A/D1"）
 - Structure Facts states：
   - breadth.state = healthy（必须带“仅表示未坏/不代表可进攻”的语义收敛提示；且提示不得重复）
-  - turnover.state = expanding（文案必须偏“分歧/轮动/调仓”，不得偏乐观）
+  - amount.state = expanding（文案必须偏“分歧/轮动/调仓”，不得偏乐观）
   - index_tech.state = neutral
   - failure_rate.state = stable
   - trend_in_force.state = in_force（强调成功率下降/避免过度利用趋势）

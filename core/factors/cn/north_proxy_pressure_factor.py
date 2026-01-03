@@ -20,7 +20,7 @@ Factor: north_proxy_pressure (T-1 Confirmed, price-proxy trend)
 
 输出（约定）：
 - score：0~100（越高 = 压力越低/结构越好；与现有多数“质量型”因子一致）
-- level：LOW/MEDIUM/HIGH（越高 = 风险越高）
+- level：LOW/NEUTRAL/HIGH（越高 = 风险越高）
 - details：包含每个 proxy 的 ret_5d/10d/20d、slope_5d/10d、ma20_slope、dd10 等证据
 """
 
@@ -125,6 +125,12 @@ class NorthProxyPressureFactor(FactorBase):
             "quality_score": round(quality, 2),
             "pressure_score": round(pressure_score, 2),
             "pressure_level": self._pressure_level(pressure_score),
+
+            "evidence": {
+                "quality_score": round(float(quality), 2),
+                "pressure_score": round(float(pressure_score), 2),
+                "pressure_level": self._pressure_level(pressure_score),
+            },
 
             # per-proxy evidence
             "proxies": per,
@@ -404,7 +410,7 @@ class NorthProxyPressureFactor(FactorBase):
         if q >= 70:
             return "LOW"
         if q >= 55:
-            return "MEDIUM"
+            return "NEUTRAL"
         return "HIGH"
 
     @staticmethod
@@ -413,17 +419,18 @@ class NorthProxyPressureFactor(FactorBase):
         if pressure_score >= 45:
             return "HIGH"
         if pressure_score >= 25:
-            return "MEDIUM"
+            return "NEUTRAL"
         return "LOW"
 
     def _neutral(self, reason: str) -> FactorResult:
         return FactorResult(
             name=self.name,
             score=50.0,
-            level="MEDIUM",
+            level="NEUTRAL",
             details={
                 "data_status": "DATA_NOT_CONNECTED",
                 "note": reason,
                 "score_semantics": "QUALITY_HIGH_IS_LOW_PRESSURE",
+                "evidence": {"quality_score": 50.0, "pressure_score": 50.0, "pressure_level": "NEUTRAL"},
             },
         )

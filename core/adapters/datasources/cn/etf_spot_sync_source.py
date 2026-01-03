@@ -97,8 +97,8 @@ class ETFSpotSyncDataSource(DataSourceBase):
             LOG.error("[DS.ETFSpotSync] Spot DF empty")
             return self._neutral_block(trade_date, snapshot_type="UNKNOWN")
 
-        df = df.rename(columns={"昨收": "pre_close", "最新价": "close",  "成交额": "turnover" ,"涨跌幅": "chg_pct"})
-        NUMERIC_COLS = ["chg_pct", "turnover", "close", "prev_close"]
+        df = df.rename(columns={"昨收": "pre_close", "最新价": "close",  "成交额": "amount" ,"涨跌幅": "chg_pct"})
+        NUMERIC_COLS = ["chg_pct", "amount", "close", "prev_close"]
         
         for c in NUMERIC_COLS:
             if c in df.columns:
@@ -106,7 +106,7 @@ class ETFSpotSyncDataSource(DataSourceBase):
 
 
         # 必要字段检查
-        if "chg_pct" not in df.columns or "turnover" not in df.columns:
+        if "chg_pct" not in df.columns or "amount" not in df.columns:
             LOG.error("[DS.ETFSpotSync] required columns missing")
             return self._neutral_block(trade_date, snapshot_type="UNKNOWN")
 
@@ -124,27 +124,28 @@ class ETFSpotSyncDataSource(DataSourceBase):
         # ------------------------------------------------------------
         adv = int((df["chg_pct"] > 0).sum())
         dec = int((df["chg_pct"] < 0).sum())
+        flat = int(total - adv - dec)
 
         adv_ratio = round(adv / total, 4)
         dec_ratio = round(dec / total, 4)
 
-        # turnover集中度（Top 20%）
-        df_turn = df[["turnover"]].copy()
-        df_turn = df_turn[df_turn["turnover"] > 0]
+        # amount集中度（Top 20%）
+        df_turn = df[["amount"]].copy()
+        df_turn = df_turn[df_turn["amount"] > 0]
 
         if not df_turn.empty:
-            df_turn_sorted = df_turn.sort_values("turnover", ascending=False)
+            df_turn_sorted = df_turn.sort_values("amount", ascending=False)
             top_n = max(int(len(df_turn_sorted) * 0.2), 1)
-            top_turnover = float(df_turn_sorted.head(top_n)["turnover"].sum())
-            total_turnover = float(df_turn_sorted["turnover"].sum())
-            top20_turnover_ratio = (
-                round(top_turnover / total_turnover, 4)
-                if total_turnover > 0
+            top_amount = float(df_turn_sorted.head(top_n)["amount"].sum())
+            total_amount = float(df_turn_sorted["amount"].sum())
+            top20_amount_ratio = (
+                round(top_amount / total_amount, 4)
+                if total_amount > 0
                 else 0.0
             )
         else:
-            top20_turnover_ratio = 0.0
-            total_turnover = 0.0
+            top20_amount_ratio = 0.0
+            total_amount = 0.0
 
         # 涨跌幅分化（标准差）
         dispersion = round(float(df["chg_pct"].std(ddof=0)), 4)
@@ -152,23 +153,26 @@ class ETFSpotSyncDataSource(DataSourceBase):
         # ------------------------------------------------------------
         # 4️⃣ 成交额阶段标注（仅事实，用于盘中解释）
         # ------------------------------------------------------------
-        turnover_stage = self._infer_turnover_stage(snapshot_type)
+        amount_stage = self._infer_amount_stage(snapshot_type)
 
         block: Dict[str, Any] = {
             "trade_date": trade_date,
             "snapshot_type": snapshot_type,      # INTRADAY / EOD / UNKNOWN
-            "turnover_stage": turnover_stage,    # EARLY / MID / LATE / FULL / UNKNOWN
+            "amount_stage": amount_stage,    # EARLY / MID / LATE / FULL / UNKNOWN
 
             "total_stocks": total,
+            "adv_count": adv,
+            "dec_count": dec,
+            "flat_count": flat,
             "adv_ratio": adv_ratio,
             "dec_ratio": dec_ratio,
-            "top20_turnover_ratio": top20_turnover_ratio,
+            "top20_amount_ratio": top20_amount_ratio,
             "dispersion": dispersion,
 
             # 仅用于审计，不做解释
             "_meta": {
                 "refresh_mode": refresh_mode,
-                "total_turnover": round(total_turnover, 2),
+                "total_amount": round(total_amount, 2),
                 "generated_at": datetime.now().isoformat(timespec="seconds"),
             },
         }
@@ -196,7 +200,7 @@ class ETFSpotSyncDataSource(DataSourceBase):
     
         return "EOD"
 
-    def _infer_turnover_stage(self, snapshot_type: str) -> str:
+    def _infer_amount_stage(self, snapshot_type: str) -> str:
         """
         成交额阶段标注（仅事实，不做判断）
         """
@@ -226,10 +230,10 @@ class ETFSpotSyncDataSource(DataSourceBase):
         return {
             "trade_date": trade_date,
             "snapshot_type": snapshot_type,
-            "turnover_stage": "UNKNOWN",
+            "amount_stage": "UNKNOWN",
             "total_stocks": 0,
             "adv_ratio": 0.0,
             "dec_ratio": 0.0,
-            "top20_turnover_ratio": 0.0,
+            "top20_amount_ratio": 0.0,
             "dispersion": 0.0,
         }

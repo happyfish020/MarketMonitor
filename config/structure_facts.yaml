@@ -1,0 +1,270 @@
+meta:
+  spec: URV12-STRUCTURE-FACTS
+  version: '1.0'
+  updated_at: '2025-12-31'
+  note: StructureFactsBuilder 的唯一语义来源：state/meaning/evidence/summary 全由此文件定义。
+factors:
+  sector_proxy:
+    sources:
+    - sector_proxy
+    state:
+      details_keys:
+      - state
+      level_map:
+        LOW: defensive_lead
+        NEUTRAL: mixed
+        HIGH: risk_on_confirmed
+      default: mixed
+    meaning:
+      by_state:
+        defensive_lead: 板块代理偏防御，风险偏好下降证据。
+        broad_weak: 风险资产扩散不足，偏“指数稳但个股弱”的盘面。
+        mixed: 板块信号混合（风险偏好未形成一致性）。
+        risk_on_confirmed: 风险资产代理同步走强（仍需结合执行/成功率）。
+    evidence:
+      include_details_keys:
+      - benchmark_symbol
+      - benchmark_ret
+      - benchmark_label
+      - leaders
+      - risk_on_score
+      - defensive_score
+      - same_direction
+      - divergence
+      - dispersion
+      - notes
+  north_proxy_pressure:
+    sources:
+    - north_proxy_pressure
+    state:
+      details_keys:
+      - state
+      level_map:
+        LOW: pressure_low
+        NEUTRAL: pressure_medium
+        HIGH: pressure_high
+      default: pressure_medium
+      normalize: true
+      alias_map:
+        low: pressure_low
+        neutral: pressure_medium
+        medium: pressure_medium
+        high: pressure_high
+        pressurelow: pressure_low
+        pressuremedium: pressure_medium
+        pressurehigh: pressure_high
+    meaning:
+      by_state:
+        pressure_low: 北向代理压力不显著（未见明显撤退压力）。
+        pressure_medium: 北向代理压力中性，需要结合其他结构指标判断。
+        pressure_high: 北向代理压力显著，需提高谨慎等级。
+    evidence:
+      include_details_keys:
+      - pressure_level
+      - pressure_score
+      - pressure_score_raw
+      - provider
+      - asof
+      - inputs
+  amount:
+    sources:
+    - amount
+    - amount_raw
+    state:
+      details_keys:
+      - state
+      level_map:
+        LOW: contracting
+        NEUTRAL: neutral
+        HIGH: expanding
+      default: neutral
+    meaning:
+      by_state:
+        expanding: 成交处于较高水平（相对窗口），更可能反映分歧或调仓轮动，而非新增进攻性资金。
+        contracting: 成交缩量，风险偏好偏弱，趋势延续性需要谨慎验证。
+        neutral: 成交处于中性区间。
+    evidence:
+      include_details_keys:
+      - amount_total
+      - amount_ma20
+      - amount_ratio
+      - provider
+      - asof
+  trend_in_force:
+    sources:
+    - trend_in_force
+    - trend_in_force_raw
+    state:
+      details_keys:
+      - state
+      level_map:
+        LOW: broken
+        NEUTRAL: weakening
+        HIGH: in_force
+      default: in_force
+      normalize: true
+      alias_map:
+        in_force: in_force
+        inforce: in_force
+        weakening: weakening
+        broken: broken
+    meaning:
+      by_state:
+        in_force: 趋势结构仍然成立，但需结合成功率/执行环境控制追价风险。
+        weakening: 趋势仍在但走弱，避免追涨与放大试错。
+        broken: 趋势结构失效（趋势破坏）。
+    evidence:
+      include_details_keys:
+      - trend_state
+      - signal
+      - provider
+      - asof
+  failure_rate:
+    sources:
+    - failure_rate
+    - frf
+    state:
+      details_keys:
+      - state
+      level_map:
+        LOW: stable
+        NEUTRAL: watch
+        HIGH: elevated_risk
+      default: stable
+      normalize: true
+      alias_map:
+        stable: stable
+        watch: watch
+        elevated_risk: elevated_risk
+        elevatedrisk: elevated_risk
+    meaning:
+      by_state:
+        stable: 未观察到趋势结构失效迹象，结构保持稳定。
+        watch: 成功率开始走弱，需降档执行并观察。
+        elevated_risk: 失败率上升，风险信号增强，建议更强防守。
+    evidence:
+      include_details_keys:
+      - window
+      - fail_rate
+      - fail_count
+      - sample_size
+      - provider
+      - asof
+  breadth:
+    sources:
+    - breadth
+    - breadth_raw
+    state:
+      details_keys:
+      - state
+      level_map:
+        LOW: damaged
+        NEUTRAL: healthy
+        HIGH: healthy
+      default: healthy
+    meaning:
+      by_state:
+        healthy: 市场广度未见系统性破坏（仅表示未坏，不代表可进攻）。
+        damaged: 市场广度受损，趋势质量下降，需更谨慎。
+    evidence:
+      include_details_keys:
+      - adv_ratio
+      - new_lows
+      - new_highs
+      - breadth_score
+      - provider
+      - asof
+  index_tech:
+    sources:
+    - index_tech
+    state:
+      details_keys:
+      - state
+      level_map:
+        LOW: weak
+        NEUTRAL: neutral
+        HIGH: strong
+      default: neutral
+      normalize: true
+      alias_map:
+        high: strong
+        strong: strong
+        neutral: neutral
+        medium: neutral
+        low: weak
+        weak: weak
+    meaning:
+      by_state:
+        strong: 指数技术面偏强（趋势/均线/动量占优），仅作结构解释，不构成进攻依据。
+        neutral: 指数技术面中性。
+        weak: 指数技术面走弱，需提高谨慎。
+    evidence:
+      include_details_keys:
+      - ma_state
+      - momentum
+      - provider
+      - asof
+  etf_index_sync_daily:
+    meaning:
+      by_state:
+        sync_good: ETF–指数同步性良好（参与结构一致性较高）。
+        sync_ok: ETF–指数同步性一般（结构尚可，需结合广度/成功率）。
+        sync_bad: ETF–指数同步性转差（分化/拥挤上升，追价与轮动胜率偏低）。
+    state:
+      default: sync_ok
+      normalize: true
+      level_map:
+        LOW: sync_good
+        NEUTRAL: sync_ok
+        HIGH: sync_bad
+      alias_map:
+        low: sync_good
+        neutral: sync_ok
+        high: sync_bad
+    evidence:
+      include_details_keys:
+      - adv_ratio
+      - dispersion_level
+      - top20_amount_ratio
+summary:
+  rules:
+  - when:
+      path: breadth.state
+      op: ==
+      value: damaged
+    add: breadth_damaged
+  - when:
+      path: failure_rate.state
+      op: ==
+      value: elevated_risk
+    add: failure_rate_elevated
+  - when:
+      path: trend_in_force.state
+      op: ==
+      value: broken
+    add: trend_broken
+  - when:
+      path: amount.state
+      op: ==
+      value: expanding
+    add: amount_expanding
+  - when:
+      path: north_proxy_pressure.state
+      op: ==
+      value: pressure_high
+    add: north_pressure_high
+  - when:
+      path: _meta.modifier
+      op: ==
+      value: distribution_risk
+    add: modifier_distribution_risk
+  - when:
+      path: _meta.modifier
+      op: ==
+      value: success_rate_declining
+    add: modifier_success_rate_declining
+  - when:
+      path: _meta.modifier
+      op: ==
+      value: high_execution_risk
+    add: modifier_high_execution_risk

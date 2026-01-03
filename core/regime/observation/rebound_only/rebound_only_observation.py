@@ -11,7 +11,7 @@ LOG = get_logger("Obs.ReboundOnly")
 @dataclass(frozen=True)
 class ReboundOnlyResult:
     flag: bool
-    severity: str  # LOW / MEDIUM / HIGH
+    severity: str  # LOW / NEUTRAL / HIGH
     meaning: str
     drivers: Dict[str, Any]
 
@@ -87,7 +87,7 @@ class ReboundOnlyObservation:
         if trend_state == "broken" or drs_signal == "RED":
             return ReboundOnlyResult(
                 flag=True,
-                severity="MEDIUM",
+                severity="NEUTRAL",
                 meaning="反弹谨慎：趋势结构或制度风险尚未解除，反弹更可能是噪声而非趋势修复。",
                 drivers=drivers,
             )

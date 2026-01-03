@@ -51,14 +51,14 @@ class EtfSpotSyncExplainBlock(ReportBlockRendererBase):
 
         # Key fields (raw)
         adv_ratio = details.get("adv_ratio")
-        top20 = details.get("top20_turnover_ratio")
+        top20 = details.get("top20_amount_ratio")
         dispersion = details.get("dispersion")
         same_dir = details.get("same_direction")
 
         if isinstance(adv_ratio, (int, float)):
             lines.append(f"- adv_ratio: **{adv_ratio:.4f}**")
         if isinstance(top20, (int, float)):
-            lines.append(f"- top20_turnover_ratio: **{top20:.3f}**")
+            lines.append(f"- top20_amount_ratio: **{top20:.3f}**")
         if isinstance(dispersion, (int, float)):
             lines.append(f"- dispersion: **{dispersion:.4f}**")
         if isinstance(same_dir, bool):
@@ -126,7 +126,7 @@ class EtfSpotSyncExplainBlock(ReportBlockRendererBase):
                 if isinstance(vv, dict) and vv:
                     return vv
             # if overlay itself is the details dict
-            if "interpretation" in overlay or "top20_turnover_ratio" in overlay:
+            if "interpretation" in overlay or "top20_amount_ratio" in overlay:
                 return overlay
 
         # 3) doc_partial

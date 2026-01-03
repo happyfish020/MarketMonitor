@@ -1,13 +1,22 @@
 from __future__ import annotations
 
 import logging
+import json
+import importlib
+from pathlib import Path
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Optional
 
 from core.reporters.report_context import ReportContext
 from core.reporters.report_types import ReportBlock, ReportDocument
 
 LOG = logging.getLogger("ReportEngine")
+
+
+try:
+    import yaml  # type: ignore
+except Exception:  # pragma: no cover
+    yaml = None  # type: ignore
 
 BlockBuilder = Callable[[ReportContext, Dict[str, Any]], ReportBlock]
 
@@ -23,6 +32,8 @@ class BlockSpec:
 BLOCK_SPECS: List[BlockSpec] = [
     # 🔒 冻结：顺序即制度顺序（事实 → 结构 → 解释 → 总结 → 执行）
     #BlockSpec("market.overview", "大盘概述（收盘事实）"),
+    
+    BlockSpec("governance.gate", "governance.gate"),
     BlockSpec("structure.facts", "结构事实（Fact → 含义）"),
     #BlockSpec("etf_spot_sync.explain", "核心字段解释（拥挤/不同步/参与度）"),
     BlockSpec("summary", "简要总结（A / N / D）"),
@@ -52,12 +63,283 @@ class ReportEngine:
         market: str,
         actionhint_service: Any,
         #summary_mapper: Any,
-        block_builders: Dict[str, BlockBuilder],  # key = block_alias
+        block_builders: Optional[Dict[str, BlockBuilder]] = None,  # key = block_alias (optional; YAML can drive builders)
+        block_specs_path: Optional[str] = None,
     ) -> None:
         self.market = market
         self.actionhint_service = actionhint_service
         #self.summary_mapper = summary_mapper
-        self._builders_by_alias = dict(block_builders)
+
+        self._builders_by_alias = dict(block_builders or {})
+        self._block_specs_path = block_specs_path
+        
+        self._block_specs_cache: Dict[str, List[BlockSpec]] = {}
+        self._blocks_doc_cache: Dict[str, Dict[str, Any]] = {}
+        self._builders_cache: Dict[str, Dict[str, BlockBuilder]] = {}
+        
+        # Safety: only allow importing builders from these module prefixes.
+        self._allowed_builder_module_prefixes: List[str] = [
+            "core.reporters.report_blocks.",
+            "core.reporters.cn.report_blocks.",
+            "core.reporters.cn.report_blocks_v12.",
+        ]
+
+    def _placeholder_block(self, *, spec: BlockSpec, note: str, warnings: List[str], extra: Optional[Dict[str, Any]] = None) -> ReportBlock:
+        """Create an auditable placeholder ReportBlock.
+
+        Renderer 必须能稳定显示 placeholder（避免 block 看起来“消失”）：
+        - 使用统一 schema: payload.content (list[str]) + payload.note (optional)
+        - extra 以 JSON 形式附在 content，方便定位缺失 builder / 异常原因
+        """
+        lines: List[str] = []
+        if isinstance(note, str) and note.strip():
+            lines.append(note.strip())
+        else:
+            lines.append("PLACEHOLDER")
+
+        if isinstance(extra, dict) and extra:
+            try:
+                lines.append("")
+                lines.append("```json")
+                lines.append(json.dumps(extra, ensure_ascii=False, indent=2))
+                lines.append("```")
+            except Exception:
+                # Never fail placeholder generation.
+                lines.append("")
+                lines.append("(extra serialization failed)")
+
+        return ReportBlock(
+            block_alias=spec.block_alias,
+            title=spec.title,
+            payload={"content": lines},
+            warnings=warnings,
+        )
+
+    def _safe_call_builder(
+        self,
+        *,
+        spec: BlockSpec,
+        builder: Callable[[ReportContext, Dict[str, Any]], Any],
+        context: ReportContext,
+        doc_partial: Dict[str, Any],
+    ) -> ReportBlock:
+        """Safely run a block builder.
+
+        Frozen requirements:
+        - no silent exception: any exception is logged with stack trace
+        - any invalid return (None / wrong type / alias mismatch) becomes an auditable placeholder block
+        """
+        try:
+            blk = builder(context, doc_partial)
+        except Exception as e:
+            LOG.exception("block builder exception: %s", spec.block_alias)
+            return self._placeholder_block(
+                spec=spec,
+                note="BLOCK_BUILDER_EXCEPTION",
+                warnings=[f"error:block_builder_exception:{spec.block_alias}"],
+                extra={"error": f"{type(e).__name__}: {e}"},
+            )
+
+        if blk is None:
+            LOG.warning("block builder returned None: %s", spec.block_alias)
+            return self._placeholder_block(
+                spec=spec,
+                note="BLOCK_BUILDER_RETURNED_NONE",
+                warnings=[f"invalid:block_builder_return_none:{spec.block_alias}"],
+            )
+
+        if not isinstance(blk, ReportBlock):
+            LOG.warning("block builder invalid return type: %s -> %s", spec.block_alias, type(blk))
+            return self._placeholder_block(
+                spec=spec,
+                note="BLOCK_BUILDER_INVALID_RETURN_TYPE",
+                warnings=[f"invalid:block_builder_return_type:{spec.block_alias}"],
+                extra={"return_type": str(type(blk)), "return_repr": repr(blk)[:500]},
+            )
+
+        if blk.block_alias != spec.block_alias:
+            LOG.warning("block_alias mismatch: got=%s expected=%s", blk.block_alias, spec.block_alias)
+            return self._placeholder_block(
+                spec=spec,
+                note="BLOCK_ALIAS_MISMATCH",
+                warnings=[f"invalid:block_alias_mismatch:{spec.block_alias}"],
+                extra={"got_block_alias": blk.block_alias},
+            )
+
+        return blk
+
+    
+    def _resolve_report_blocks_path(self, *, kind: str, slots: Dict[str, Any]) -> str:
+        path_val = self._block_specs_path
+    
+        if not path_val and isinstance(slots.get("governance"), dict):
+            cfg = slots.get("governance", {}).get("config")
+            if isinstance(cfg, dict):
+                pv = cfg.get("report_blocks_path")
+                if isinstance(pv, str) and pv.strip():
+                    path_val = pv.strip()
+    
+        if not path_val:
+            raise ValueError(
+                "report_blocks_path missing: provide block_specs_path or slots['governance']['config']['report_blocks_path']"
+            )
+        return path_val
+    
+    def _load_blocks_doc(self, *, kind: str, slots: Dict[str, Any]) -> Dict[str, Any]:
+        path_val = self._resolve_report_blocks_path(kind=kind, slots=slots)
+        if yaml is None:
+            raise RuntimeError("PyYAML not available: cannot load report_blocks.yaml")
+
+        raw = Path(path_val).expanduser()
+        candidates: List[Path] = []
+
+        if raw.is_absolute():
+            candidates.append(raw.resolve())
+        else:
+            # Prefer repository root resolution to avoid cwd-dependent ambiguity
+            try:
+                from core.utils.config_loader import ROOT_DIR  # type: ignore
+                candidates.append((Path(ROOT_DIR) / raw).resolve())
+            except Exception:
+                # fall back to cwd-only resolution if loader is unavailable
+                pass
+
+            candidates.append((Path.cwd() / raw).resolve())
+            candidates.append(raw.resolve())
+
+        path: Optional[Path] = None
+        for c in candidates:
+            if c.exists() and c.is_file():
+                path = c
+                break
+
+        if path is None:
+            tried = ", ".join(str(c) for c in candidates) if candidates else str(raw)
+            raise FileNotFoundError(f"report_blocks config not found: {path_val}; tried: {tried}")
+
+        key = str(path)
+        cached = self._blocks_doc_cache.get(key)
+        if cached is not None:
+            return cached
+
+        with open(path, "r", encoding="utf-8") as f:
+            doc = yaml.safe_load(f) or {}
+
+        if not isinstance(doc, dict):
+            raise ValueError(f"invalid report_blocks yaml (expected dict): {path}")
+
+        self._blocks_doc_cache[key] = doc
+        return doc
+
+    def _resolve_block_specs(self, *, kind: str, slots: Dict[str, Any]) -> List[BlockSpec]:
+        kind_norm = (kind or "").strip().upper() or "DEFAULT"
+        path_val = self._resolve_report_blocks_path(kind=kind, slots=slots)
+        cache_key = f"{kind_norm}::{path_val}"
+    
+        cached = self._block_specs_cache.get(cache_key)
+        if cached is not None:
+            return cached
+    
+        doc = self._load_blocks_doc(kind=kind, slots=slots)
+    
+        reports = doc.get("reports") if isinstance(doc.get("reports"), dict) else None
+        titles_map: Dict[str, str] = {}
+        blocks_list: Optional[List[str]] = None
+    
+        if reports is not None:
+            entry = reports.get(kind_norm) or reports.get(kind_norm.lower()) or reports.get("DEFAULT") or reports.get("default")
+            if isinstance(entry, dict):
+                blocks_list = entry.get("blocks") if isinstance(entry.get("blocks"), list) else None
+                t = entry.get("titles")
+                if isinstance(t, dict):
+                    titles_map = {str(k): str(v) for k, v in t.items()}
+            elif isinstance(entry, list):
+                blocks_list = entry
+        else:
+            blocks_list = doc.get("blocks") if isinstance(doc.get("blocks"), list) else None
+            t = doc.get("titles")
+            if isinstance(t, dict):
+                titles_map = {str(k): str(v) for k, v in t.items()}
+    
+        if not blocks_list or not all(isinstance(x, str) for x in blocks_list):
+            raise ValueError(f"report_blocks yaml missing blocks list for kind={kind_norm}: {path_val}")
+    
+        specs = [BlockSpec(block_alias=a.strip(), title=titles_map.get(a.strip(), a.strip())) for a in blocks_list if a and a.strip()]
+        if not specs:
+            raise ValueError(f"report_blocks yaml resolved empty specs for kind={kind_norm}: {path_val}")
+    
+        self._block_specs_cache[cache_key] = specs
+        return specs
+    
+    def _import_builder(self, spec: str) -> BlockBuilder:
+        if not isinstance(spec, str) or ":" not in spec:
+            raise ValueError(f"invalid builder spec (expected 'module:obj'): {spec}")
+    
+        module_name, obj_name = spec.split(":", 1)
+        module_name = module_name.strip()
+        obj_name = obj_name.strip()
+    
+        if not module_name or not obj_name:
+            raise ValueError(f"invalid builder spec: {spec}")
+    
+        if not any(module_name.startswith(pfx) for pfx in self._allowed_builder_module_prefixes):
+            raise ValueError(f"builder module not allowed: {module_name}")
+    
+        mod = importlib.import_module(module_name)
+        obj = getattr(mod, obj_name, None)
+        if obj is None:
+            raise ImportError(f"builder object not found: {module_name}:{obj_name}")
+    
+        if isinstance(obj, type):
+            inst = obj()
+            render = getattr(inst, "render", None)
+            if not callable(render):
+                raise TypeError(f"builder class has no callable render(): {module_name}:{obj_name}")
+            return render  # type: ignore[return-value]
+    
+        if callable(obj):
+            return obj  # type: ignore[return-value]
+    
+        raise TypeError(f"builder target not callable: {module_name}:{obj_name}")
+    
+    def _resolve_builders(self, *, kind: str, slots: Dict[str, Any]) -> Dict[str, BlockBuilder]:
+        kind_norm = (kind or "").strip().upper() or "DEFAULT"
+        path_val = self._resolve_report_blocks_path(kind=kind, slots=slots)
+        cache_key = f"{kind_norm}::{path_val}"
+    
+        cached = self._builders_cache.get(cache_key)
+        if cached is not None:
+            return cached
+    
+        doc = self._load_blocks_doc(kind=kind, slots=slots)
+    
+        ap = doc.get("allowed_builder_module_prefixes")
+        if isinstance(ap, list) and all(isinstance(x, str) for x in ap):
+            safe = [x for x in ap if x.startswith("core.")]
+            if safe:
+                self._allowed_builder_module_prefixes = safe
+    
+        builders_doc = doc.get("builders") or {}
+        if not isinstance(builders_doc, dict):
+            raise ValueError("report_blocks yaml invalid: 'builders' must be dict if provided")
+    
+        resolved: Dict[str, BlockBuilder] = {}
+        for alias, bspec in builders_doc.items():
+            if not isinstance(alias, str):
+                continue
+            a = alias.strip()
+            if not a:
+                continue
+            if isinstance(bspec, str) and bspec.strip():
+                resolved[a] = self._import_builder(bspec.strip())
+    
+        # backward compatibility: ctor-provided builders fill missing
+        for a, fn in (self._builders_by_alias or {}).items():
+            if a not in resolved and callable(fn):
+                resolved[a] = fn
+    
+        self._builders_cache[cache_key] = resolved
+        return resolved
 
     def build_report_no(self, *, context: ReportContext) -> ReportDocument:
         meta = {
@@ -91,8 +373,11 @@ class ReportEngine:
         doc_partial = {"actionhint": actionhint, "summary": summary}
         blocks: List[ReportBlock] = []
 
-        for spec in BLOCK_SPECS:
-            builder = self._builders_by_alias.get(spec.block_alias)
+        builders = self._resolve_builders(kind=context.kind, slots=context.slots)
+
+
+        for spec in self._resolve_block_specs(kind=context.kind, slots=context.slots):
+            builder = builders.get(spec.block_alias)
             if builder is None:
                 LOG.warning("missing block builder: %s", spec.block_alias)
                 blocks.append(
@@ -104,11 +389,7 @@ class ReportEngine:
                     )
                 )
             else:
-                blk = builder(context, doc_partial)
-                if blk.block_alias != spec.block_alias:
-                    raise ValueError(
-                        f"block_alias mismatch: {blk.block_alias} != {spec.block_alias}"
-                    )
+                blk = self._safe_call_builder(spec=spec, builder=builder, context=context, doc_partial=doc_partial)
                 blocks.append(blk)
 
         return ReportDocument(meta, actionhint, summary, blocks)
@@ -297,8 +578,11 @@ class ReportEngine:
 
         blocks: List[ReportBlock] = []
 
-        for spec in BLOCK_SPECS:
-            builder = self._builders_by_alias.get(spec.block_alias)
+        builders = self._resolve_builders(kind=context.kind, slots=context.slots)
+
+
+        for spec in self._resolve_block_specs(kind=context.kind, slots=context.slots):
+            builder = builders.get(spec.block_alias)
             if builder is None:
                 LOG.warning("missing block builder: %s", spec.block_alias)
                 blocks.append(
@@ -310,11 +594,7 @@ class ReportEngine:
                     )
                 )
             else:
-                blk = builder(context, doc_partial)
-                if blk.block_alias != spec.block_alias:
-                    raise ValueError(
-                        f"block_alias mismatch: {blk.block_alias} != {spec.block_alias}"
-                    )
+                blk = self._safe_call_builder(spec=spec, builder=builder, context=context, doc_partial=doc_partial)
                 blocks.append(blk)
 
         from core.reporters.cn.semantic_guard import SemanticGuard

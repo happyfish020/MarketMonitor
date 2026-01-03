@@ -29,29 +29,29 @@ class TrendFactsBlockBuilder(FactBlockBuilderBase):
         _paths = load_paths()
         #self.base_dir = _paths.get("cn_history_dir", "data/cn/history")
         
-    def _build_turnover_trend_1(self, snapshot: dict) -> dict | None:
+    def _build_amount_trend_1(self, snapshot: dict) -> dict | None:
         """
-        从 snapshot['turnover_raw']['windows'] 中读取时间序列
-        提取 total_turnover，计算成交额趋势指标
+        从 snapshot['amount_raw']['windows'] 中读取时间序列
+        提取 total_amount，计算成交额趋势指标
         后续计算逻辑与原代码完全一致
         """
-        windows = snapshot.get('turnover_raw', {}).get('windows', [])
-        assert windows, "snapsot - turnover_trend window is empty!"
+        windows = snapshot.get('amount_raw', {}).get('windows', [])
+        assert windows, "snapsot - amount_trend window is empty!"
         if not windows:
             return None
 
         records = [
             {
                 "trade_date": item["trade_date"],
-                "total": item.get("total_turnover")  # 键名改为 total_turnover
+                "total": item.get("total_amount")  # 键名改为 total_amount
             }
             for item in windows
-            if item.get("total_turnover") is not None
+            if item.get("total_amount") is not None
         ]
 
         if len(records) < 10:
-            LOG.error("Turnover history records < 10")
-            raise Exception("Turnover history records < 10")
+            LOG.error("Amount history records < 10")
+            raise Exception("Amount history records < 10")
             return None
 
         # 按日期排序（升序）
@@ -84,46 +84,46 @@ class TrendFactsBlockBuilder(FactBlockBuilderBase):
         refresh_mode: str = "none",
     ) -> Dict[str, Any]:
         """
-        当前仅实现：Turnover 趋势事实
+        当前仅实现：Amount 趋势事实
         """
         facts: Dict[str, Any] = {}
 
-        turnover_trend = self._build_turnover_trend(snapshot)
-        assert turnover_trend, "turnover_trend is empty!"
-        if turnover_trend:
-            facts["turnover"] = turnover_trend
+        amount_trend = self._build_amount_trend(snapshot)
+        assert amount_trend, "amount_trend is empty!"
+        if amount_trend:
+            facts["amount"] = amount_trend
         #
         # Todo other  trend like market_sentiment....breadth trend
         #
         return facts
 
-    def _build_turnover_trend(self, snapshot: dict) -> dict | None:
+    def _build_amount_trend(self, snapshot: dict) -> dict | None:
         """
-        从 snapshot['turnover_raw']['windows'] 中读取时间序列
-        提取 total_turnover，计算成交额趋势指标
+        从 snapshot['amount_raw']['windows'] 中读取时间序列
+        提取 total_amount，计算成交额趋势指标
     
         冻结原则：
         - 这里只生成【事实 + 时间序列】
         - 不做判断、不生成信号
         - 不裁剪窗口长度（保留 30d 供下游使用）
         """
-        windows = snapshot.get("turnover_raw", {}).get("window", [])
+        windows = snapshot.get("amount_raw", {}).get("window", [])
         if not windows:
-            LOG.error("snapshot.turnover_raw.windows is empty")
+            LOG.error("snapshot.amount_raw.windows is empty")
             return None
     
         # 过滤无效值，规范字段
         records = [
             {
                 "trade_date": item["trade_date"],
-                "total": item.get("total_turnover"),
+                "total": item.get("total_amount"),
             }
             for item in windows
-            if item.get("total_turnover") is not None
+            if item.get("total_amount") is not None
         ]
     
         if len(records) < 10:
-            LOG.error("Turnover history records < 10")
+            LOG.error("Amount history records < 10")
             return None
     
         # 按日期升序排列（最旧 → 最新）

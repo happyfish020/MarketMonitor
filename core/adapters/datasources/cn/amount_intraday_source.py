@@ -1,4 +1,4 @@
-# core/adapters/datasources/cn/turnover_source.py
+# core/adapters/datasources/cn/amount_source.py
 # -*- coding: utf-8 -*-
 
 import os
@@ -15,10 +15,10 @@ from core.datasources.datasource_base import (
 from core.utils.spot_store import get_spot_daily
 from core.utils.ds_refresh import apply_refresh_cleanup
 
-LOG = get_logger("DS.Turnover")
+LOG = get_logger("DS.Amount")
 
 
-class TurnoverDataSource(DataSourceBase):
+class AmountDataSource(DataSourceBase):
     """
     V12 成交额数据源：
     - 使用 SpotStore 提供的全行情（zh_spot）
@@ -35,7 +35,7 @@ class TurnoverDataSource(DataSourceBase):
     """
 
     def __init__(self, config: DataSourceConfig):
-        super().__init__(name="DS.Turnover")
+        super().__init__(name="DS.Amount")
 
         self.config = config
         self.cache_root = config.cache_root
@@ -45,7 +45,7 @@ class TurnoverDataSource(DataSourceBase):
         os.makedirs(self.history_root, exist_ok=True)
 
         LOG.info(
-            "[DS.Turnover] Init: market=%s ds=%s cache_root=%s history_root=%s",
+            "[DS.Amount] Init: market=%s ds=%s cache_root=%s history_root=%s",
             config.market,
             config.ds_name,
             self.cache_root,
@@ -54,7 +54,7 @@ class TurnoverDataSource(DataSourceBase):
 
     # ------------------------------------------------------------
     def build_block(self, trade_date: str, refresh_mode: str = "none") -> Dict[str, Any]:
-        cache_file = os.path.join(self.cache_root, f"turnover_{trade_date}.json")
+        cache_file = os.path.join(self.cache_root, f"amount_{trade_date}.json")
 
         # 按 refresh_mode 清理 cache（如果需要）
         _ = apply_refresh_cleanup(
@@ -70,17 +70,17 @@ class TurnoverDataSource(DataSourceBase):
                 with open(cache_file, "r", encoding="utf-8") as f:
                     return json.load(f)
             except Exception as e:
-                LOG.error("[DS.Turnover] load cache error: %s", e)
+                LOG.error("[DS.Amount] load cache error: %s", e)
 
         # 1. 读取全行情（SpotStore 内部负责缓存）
         try:
             df: pd.DataFrame = get_spot_daily(trade_date, refresh_mode=refresh_mode)
         except Exception as e:
-            LOG.error("[DS.Turnover] get_spot_daily error: %s", e)
+            LOG.error("[DS.Amount] get_spot_daily error: %s", e)
             return self._neutral_block(trade_date)
 
         if df is None or df.empty:
-            LOG.error("[DS.Turnover] Spot DF is empty - return neutral block")
+            LOG.error("[DS.Amount] Spot DF is empty - return neutral block")
             return self._neutral_block(trade_date)
 
         # SpotStore 约定：
@@ -108,7 +108,7 @@ class TurnoverDataSource(DataSourceBase):
         }
 
         LOG.info(
-            "[DS.Turnover] SH=%s SZ=%s BJ=%s TOTAL=%s",
+            "[DS.Amount] SH=%s SZ=%s BJ=%s TOTAL=%s",
             sh_val,
             sz_val,
             bj_val,
@@ -120,7 +120,7 @@ class TurnoverDataSource(DataSourceBase):
             with open(cache_file, "w", encoding="utf-8") as f:
                 json.dump(block, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            LOG.error("[DS.Turnover] save cache error: %s", e)
+            LOG.error("[DS.Amount] save cache error: %s", e)
 
         # ===============================
         # 写 history（最小侵入新增）
@@ -131,7 +131,7 @@ class TurnoverDataSource(DataSourceBase):
         try:
             self._save_history_if_needed(trade_date=trade_date, block=block)
         except Exception as e:
-            LOG.error("[DS.Turnover] save history error: %s", e)
+            LOG.error("[DS.Amount] save history error: %s", e)
 
         return block
 
@@ -168,7 +168,7 @@ class TurnoverDataSource(DataSourceBase):
             return
 
         # 文件命名保持“最小侵入”：沿用 cache 的命名风格，避免影响其它工具链
-        history_file = os.path.join(self.history_root, f"turnover_{trade_date}.json")
+        history_file = os.path.join(self.history_root, f"amount_{trade_date}.json")
 
         # 幂等：已有则跳过（冻结：不覆盖）
         if os.path.exists(history_file):

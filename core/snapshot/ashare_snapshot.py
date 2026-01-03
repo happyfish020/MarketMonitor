@@ -46,7 +46,7 @@ class AshareSnapshotBuilder(SnapshotBuilderBase):
         """
         snapshot.setdefault("market_sentiment", {})
         snapshot.setdefault("emotion", {})
-        snapshot.setdefault("turnover", {})
+        snapshot.setdefault("amount", {})
         snapshot.setdefault("margin", {})
         snapshot.setdefault("north_nps_raw", {})
         snapshot.setdefault("index_tech", {})

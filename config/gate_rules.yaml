@@ -1,0 +1,95 @@
+# ============================================================
+# UnifiedRisk V12 - Gate Overlay Rules (SINGLE SOURCE OF TRUTH)
+# - This YAML contains both machine-executable rules (gate.*)
+#   and human-readable semantics (meta/semantics/path_contract).
+# - Engine should ONLY depend on gate.* fields.
+# ============================================================
+meta:
+  spec: URV12-GATE-RULES
+  version: '1.1'
+  updated_at: '2025-12-31'
+  owner: UnifiedRisk V12
+  note: '本文件同时包含：Gate Overlay 规则（机器执行）与语义说明（人读）。
+
+    引擎仅依赖 gate.* 字段；其余字段为文档/元数据，可忽略。'
+semantics:
+  gate_meaning:
+    NORMAL: 结构正常，但不鼓励进攻
+    CAUTION: 禁止加仓，只能防守或不动
+    PLANB: 进入 PlanB：只允许防守与保全型轮动（更严格的谨慎）
+    FREEZE: 冻结风险：禁止一切进攻，仅允许强制防守/减仓
+  overlay_policy:
+    default_mode: downgrade_only
+    explanation: Overlay 默认只能把 Gate 变得更谨慎（不允许“更放行”），用于 UAT 阶段防止规则误触发放行导致制度语义漂移。
+  ops_supported:
+  - exists
+  - not_exists
+  - ==
+  - '!='
+  - in
+  - '>'
+  - '>='
+  - <
+  - <=
+path_contract:
+  structure_keys:
+  - sector_proxy
+  - north_proxy_pressure
+  - failure_rate
+  - trend_in_force
+  - amount
+  - margin
+  - breadth
+  - index_tech
+  - participation
+  examples:
+  - structure.sector_proxy.state
+  - structure.north_proxy_pressure.evidence.pressure_score
+  - structure.failure_rate.state
+  - structure.trend_in_force.state
+gate:
+  mode: downgrade_only
+  order:
+  - NORMAL
+  - CAUTION
+  - PLANB
+  - FREEZE
+  rules:
+  - id: GR-SECTOR-DEFENSIVE
+    priority: 50
+    title: 板块代理偏防御 → 至少 CAUTION
+    description: 当 sector_proxy 显示 defensive_lead 或 broad_weak，视为风险偏好下降证据，制度至少进入谨慎区间。
+    when:
+      all:
+      - path: structure.sector_proxy.state
+        op: in
+        value:
+        - defensive_lead
+        - broad_weak
+    then:
+      set_gate: CAUTION
+      reason: Sector proxy defensive leadership.
+  - id: GR-NORTH-PRESSURE-HIGH
+    priority: 60
+    title: 北向代理压力高 → PLANB
+    description: north_proxy_pressure 的 pressure_score 达到高压阈值时触发更强防守（PlanB）。
+    when:
+      all:
+      - path: structure.north_proxy_pressure.evidence.pressure_score
+        op: '>='
+        value: 4
+    then:
+      set_gate: PLANB
+      reason: North proxy pressure high (pressure_score>=4).
+  - id: GR-NORTH-PRESSURE-EXTREME
+    priority: 80
+    title: 北向代理压力极端 → FREEZE
+    description: pressure_score 达到极端阈值时进入 FREEZE（极端防守）。
+    when:
+      all:
+      - path: structure.north_proxy_pressure.evidence.pressure_score
+        op: '>='
+        value: 6
+    then:
+      set_gate: FREEZE
+      reason: North proxy pressure extreme (pressure_score>=6).

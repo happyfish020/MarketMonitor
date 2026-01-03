@@ -43,17 +43,17 @@ DATA_MISSING # 数据不足，无法判断
                 raw_data=trend_facts,
             )
 
-        turnover = trend_facts.get("turnover")
-        if not isinstance(turnover, dict):
+        amount = trend_facts.get("amount")
+        if not isinstance(amount, dict):
             return self._neutral_result(
                 state="DATA_MISSING",
-                reason="missing turnover trend facts",
+                reason="missing amount trend facts",
                 raw_data=trend_facts,
             )
 
-        slope_10d = turnover.get("slope_10d")
-        slope_5d = turnover.get("slope_5d")
-        ratio_vs_10d = turnover.get("ratio_vs_10d")
+        slope_10d = amount.get("slope_10d")
+        slope_5d = amount.get("slope_5d")
+        ratio_vs_10d = amount.get("ratio_vs_10d")
 
         # -------------------------------
         # 判定逻辑（冻结最小集）
@@ -65,7 +65,7 @@ DATA_MISSING # 数据不足，无法判断
 
         try:
             if slope_10d is None or ratio_vs_10d is None:
-                raise ValueError("incomplete turnover trend facts")
+                raise ValueError("incomplete amount trend facts")
 
             # 趋势失效
             if slope_10d < 0:
@@ -100,7 +100,7 @@ DATA_MISSING # 数据不足，无法判断
             "state": state,              # ✅ 新增：制度语义
             "reason": reason,            # 保留：原有说明
             "_raw_data": trend_facts,    # 保留：原始事实
-            "turnover": {
+            "amount": {
                 "slope_5d": slope_5d,
                 "slope_10d": slope_10d,
                 "ratio_vs_10d": ratio_vs_10d,

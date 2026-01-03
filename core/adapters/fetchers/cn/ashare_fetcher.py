@@ -21,14 +21,14 @@ from core.datasources.datasource_base import DataSourceConfig
 from core.adapters.datasources.cn.index_core_source import IndexCoreDateSource
 from core.adapters.datasources.cn.breadth_source import BreadthDataSource
 from core.adapters.datasources.cn.north_nps_source import NorthNPSDataSource
-from core.adapters.datasources.cn.turnover_source import TurnoverDataSource
+from core.adapters.datasources.cn.amount_source import AmountDataSource
 from core.adapters.datasources.cn.margin_source import MarginDataSource
 from core.adapters.datasources.cn.market_sentiment_source import MarketSentimentDataSource
 from core.adapters.datasources.cn.core_theme_source import CoreThemeDataSource
 from core.adapters.datasources.cn.participation_source import ParticipationDataSource
 from core.adapters.datasources.cn.etf_spot_sync_source  import ETFSpotSyncDataSource
 from core.adapters.datasources.cn.etf_spot_sync_daily_source  import  ETFSpotSyncDailyDataSource
-
+from core.adapters.datasources.cn.sector_proxy_source import SectorProxyDataSource
 from core.adapters.datasources.glo.global_macro_source import GlobalMacroDataSource
 from core.adapters.datasources.glo.global_lead_source import GlobalLeadDataSource
 from core.adapters.datasources.glo.index_global_source import IndexGlobalDataSource
@@ -62,8 +62,8 @@ class AshareDataFetcher(FetcherBase):
             DataSourceConfig(market="cn", ds_name="index_core")
         )
 #
-        self.turnover_ds = TurnoverDataSource(
-            DataSourceConfig(market="cn", ds_name="turnover")
+        self.amount_ds = AmountDataSource(
+            DataSourceConfig(market="cn", ds_name="amount")
         )
 
         self.market_sentiment_ds = MarketSentimentDataSource(
@@ -92,16 +92,22 @@ class AshareDataFetcher(FetcherBase):
             DataSourceConfig(market="cn", ds_name="core_theme")
         )     
         
+        self.sector_proxy_ds = SectorProxyDataSource(
+            DataSourceConfig(market="cn", ds_name="sector_proxy")
+        )     
+ 
+
+        
         self.participation_ds = ParticipationDataSource(
             DataSourceConfig(market="cn", ds_name="participation")
         )    
 
         self.etf_spot_sync_ds =  ETFSpotSyncDataSource(
-            DataSourceConfig(market="cn", ds_name="core_theme" ), is_intraday= self.is_intraday
+            DataSourceConfig(market="cn", ds_name="etf_spot_sync"), is_intraday=self.is_intraday
         )     
 
         self.etf_spot_sync_daily_ds =  ETFSpotSyncDailyDataSource(
-            DataSourceConfig(market="cn", ds_name="core_theme" )
+            DataSourceConfig(market="cn", ds_name="etf_spot_sync_daily")
         )     
  
 
@@ -153,13 +159,13 @@ class AshareDataFetcher(FetcherBase):
         assert snapshot.get("north_nps_raw"), "North DS missing"
 
         # ==========================================================
-        # 3️⃣ Turnover (DS raw)
+        # 3️⃣ Amount (DS raw)
         # ==========================================================
-        snapshot["turnover_raw"] = self.turnover_ds.build_block(
+        snapshot["amount_raw"] = self.amount_ds.build_block(
             trade_date=self.trade_date,
             refresh_mode=self.refresh_mode,
         )
-        assert snapshot.get("turnover_raw"), "Turnover DS missing"
+        assert snapshot.get("amount_raw"), "Amount DS missing"
 
         snapshot["market_sentiment_raw"] = self.market_sentiment_ds.build_block(
             trade_date=self.trade_date,
@@ -215,7 +221,11 @@ class AshareDataFetcher(FetcherBase):
         assert snapshot.get("core_theme_raw"), "core_theme_raw missing"   
        
 
-
+        snapshot["sector_proxy_raw"] = self.sector_proxy_ds.build_block(
+            trade_date=self.trade_date,
+            refresh_mode=self.refresh_mode,
+        )
+        assert snapshot.get("sector_proxy_raw"), "sector_proxy_raw  missing" 
 
         snapshot["unified_emotion_raw"] = self.unified_emotion_bb.build_block(snapshot, refresh_mode=self.refresh_mode)
         assert snapshot.get("unified_emotion_raw"), "unified_emotion raw missing"

@@ -1,4 +1,4 @@
-# core/factors/cn/turnover_factor.py
+# core/factors/cn/amount_factor.py
 # -*- coding: utf-8 -*-
 
 from __future__ import annotations
@@ -10,22 +10,22 @@ from core.factors.factor_result import FactorResult
 
 from core.utils.logger import get_logger
 
-LOG = get_logger("Factor.Turnover")
+LOG = get_logger("Factor.Amount")
 
 
-class TurnoverFactor(FactorBase):
+class AmountFactor(FactorBase):
     """
     成交额流动性因子（V12 专业版）
     衡量市场成交额高低对风险偏好的影响
     """
     def __init__(self):
         
-        super().__init__("turnover")
+        super().__init__("amount")
          
 
     def compute(self, snapshot: Dict[str, Any]) -> FactorResult:
-        data = snapshot.get("turnover_raw", {}) or {}
-        assert data, "turnover_raw is missing"
+        data = snapshot.get("amount_raw", {}) or {}
+        assert data, "amount_raw is missing"
 
         if not data:
             return FactorResult(
@@ -34,12 +34,12 @@ class TurnoverFactor(FactorBase):
                 level="NEUTRAL",
                 details={
                     "data_status": "DATA_NOT_CONNECTED",
-                    "reason": "turnover data missing",
+                    "reason": "amount data missing",
                 },
             )
 
         
-        total = data.get("total_turnover")
+        total = data.get("total_amount")
          
         # 数据缺失处理
         if total is None:
@@ -90,10 +90,10 @@ class TurnoverFactor(FactorBase):
 
         # 详细数据
         details: Dict[str, Any] = {}
-        details["total_turnover"] = total
+        details["total_amount"] = total
         details["data_status"] =  "OK"
         details["_raw_data"] = json.dumps(data)[:160] + "..."
-        LOG.info(f"[TurnoverFactor]  total={total:.0f} score={score:.2f} level={level}")
+        LOG.info(f"[AmountFactor]  total={total:.0f} score={score:.2f} level={level}")
         
         return self.build_result(
             score=score,

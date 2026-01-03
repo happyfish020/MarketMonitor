@@ -88,7 +88,7 @@ class DBOracleProvider:
             PRE_CLOSE     AS pre_close,
             CHG_PCT       AS chg_pct,
             CLOSE         AS close,
-            TURNOVER      AS turnover
+            AMOUNT      AS amount
         FROM {self.schema}.{table}
         WHERE TRADE_DATE >= :window_start
           AND TRADE_DATE <= :trade_date
@@ -152,7 +152,7 @@ class DBOracleProvider:
         return self.execute(sql)
 
 
-    def fetch_daily_turnover_series(
+    def fetch_daily_amount_series(
         self,
         start_date: str,
         look_back_days: int = 60,
@@ -162,7 +162,7 @@ class DBOracleProvider:
 
         返回 columns:
             trade_date (datetime)
-            total_turnover (float)  # 单位：亿元，已除 1e8
+            total_amount (float)  # 单位：亿元，已除 1e8
         """
         table = self.tables.get("stock_daily")
         if not table:
@@ -171,7 +171,7 @@ class DBOracleProvider:
         sql = f"""
         SELECT
             TRADE_DATE,
-            SUM(TURNOVER) AS total_turnover
+            SUM(AMOUNT) AS total_amount
         FROM {self.schema}.{table}
         WHERE TRADE_DATE >= :start_date - :look_back_days
               AND TRADE_DATE <= :start_date
@@ -189,13 +189,13 @@ class DBOracleProvider:
         raw = self.execute(sql, params)
 
         if not raw:
-            return pd.DataFrame(columns=["trade_date", "total_turnover"])
+            return pd.DataFrame(columns=["trade_date", "total_amount"])
 
-        df = pd.DataFrame(raw, columns=["trade_date", "total_turnover"])
+        df = pd.DataFrame(raw, columns=["trade_date", "total_amount"])
         df["trade_date"] = pd.to_datetime(df["trade_date"])
-        #df["total_turnover"] = (df["total_turnover"] / 1e8).round(2)  # 转为亿元，保留2位小数
-        df["total_turnover"] = (df["total_turnover"].astype(float) / 1e8).round(2)
-        df = df[["trade_date", "total_turnover"]].set_index("trade_date")
+        #df["total_amount"] = (df["total_amount"] / 1e8).round(2)  # 转为亿元，保留2位小数
+        df["total_amount"] = (df["total_amount"].astype(float) / 1e8).round(2)
+        df = df[["trade_date", "total_amount"]].set_index("trade_date")
 
         return df
     
@@ -385,7 +385,7 @@ class DBOracleProvider:
         # 2. 组装 full-market snapshot（不做任何推断）
         market: Dict[str, Dict[str, Any]] = {}
     
-        for symbol, exchange, td, pre_close, chg_pct, close,turnover in rows:
+        for symbol, exchange, td, pre_close, chg_pct, close,amount in rows:
             market[symbol] = {
                 "symbol": symbol,
                 "exchange": exchange,
@@ -393,7 +393,7 @@ class DBOracleProvider:
                 "close": close,
                 "pre_close": pre_close,
                 "chg_pct": chg_pct,
-                "turnover": turnover,
+                "amount": amount,
             }
     
         # 3. 返回“确认态快照”

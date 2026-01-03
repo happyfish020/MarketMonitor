@@ -87,7 +87,7 @@ class WatchlistStateBuilder:
     ) -> Dict[str, str]:
         title = cfg.get("title", obj_id)
 
-        turnover = structure.get("turnover", {}).get("state")
+        amount = structure.get("amount", {}).get("state")
         breadth = structure.get("breadth", {}).get("state")
 
         # ---------------------------------
@@ -108,7 +108,7 @@ class WatchlistStateBuilder:
         # ---------------------------------
         # 2️⃣ 动能否决（常见限制条件）
         # ---------------------------------
-        if turnover == "contracting":
+        if amount == "contracting":
             return {
                 "title": title,
                 "state": "NOT_ALLOWED",
@@ -148,7 +148,7 @@ class WatchlistStateBuilder:
         title = cfg.get("title", obj_id)
 
         breadth = structure.get("breadth", {}).get("state")
-        turnover = structure.get("turnover", {}).get("state")
+        amount = structure.get("amount", {}).get("state")
 
         # breadth 仅用于风险提示，不直接否决个股
         if breadth in ("broken", "damaged"):
@@ -163,7 +163,7 @@ class WatchlistStateBuilder:
                 ),
             }
 
-        if turnover == "contracting":
+        if amount == "contracting":
             return {
                 "title": title,
                 "state": "OBSERVE",

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from core.reporters.report_types import ReportBlock
 from core.reporters.report_context import ReportContext
@@ -77,12 +77,13 @@ class SummaryANDBlock(ReportBlockRendererBase):
         lines.append(reason)
         lines.append("趋势结构仍在，但成功率下降，制度不支持主动扩大风险敞口。")
 
-        # "体感" line (aligns with D1/D2; prevents optimistic reading)
+        # "体感" line（证据驱动；避免仅凭 Execution 推断盘面事实）
         if exec_band in ("D1", "D2"):
-            lines.append(
-                "体感：指数没怎么跌，但多数股票在跌——更像调仓轮动，"
-                "而非全面风险偏好抬升（因此不利于追价执行）。"
-            )
+            feeling = self._derive_execution_feeling(context)
+            if feeling:
+                lines.append(feeling)
+            else:
+                lines.append("体感：执行摩擦偏高，盘面更偏结构性分化/轮动，追价与频繁进攻性调仓胜率偏低。")
 
         # DRS（只读）
         drs = context.slots.get("drs")
@@ -209,3 +210,103 @@ class SummaryANDBlock(ReportBlockRendererBase):
         }
 
         return mapping.get(g, "权限未知")
+
+
+    # -----------------------------
+    # Evidence-driven "feeling" (summary only)
+    # -----------------------------
+    def _derive_execution_feeling(self, context: ReportContext) -> Optional[str]:
+        """
+        Summary 内的“体感”必须证据驱动（best-effort）：
+        - 仅当可从 etf_spot_sync / intraday_overlay / market_overview 提取到关键证据时才输出具体描述
+        - 避免仅凭 Execution band 直接“推断盘面事实”
+        """
+        details = self._extract_etf_sync_details(context)
+        interp = details.get("interpretation") if isinstance(details.get("interpretation"), dict) else {}
+
+        adv_ratio = self._pick_number(
+            details.get("adv_ratio"),
+            self._pick_number(self._get_nested(context.slots.get("market_overview"), ("breadth", "adv_ratio")), None),
+        )
+        top20 = self._pick_number(
+            details.get("top20_amount_ratio"),
+            self._pick_number(self._get_nested(context.slots.get("market_overview"), ("amount", "top20_amount_ratio")), None),
+        )
+
+        participation = str(interp.get("participation", "")).lower()
+        crowding = str(interp.get("crowding", "")).lower()
+
+        weak = (participation in ("weak", "low")) or (isinstance(adv_ratio, (int, float)) and adv_ratio <= 0.42)
+        crowded = (crowding in ("high", "very_high")) or (isinstance(top20, (int, float)) and top20 >= 0.70)
+
+        # evidence sufficiency guard
+        has_ev = isinstance(adv_ratio, (int, float)) or isinstance(top20, (int, float)) or participation or crowding
+        if not has_ev:
+            return None
+
+        if weak and crowded:
+            return (
+                "体感：指数可能较稳，但涨少跌多；盘面更像调仓轮动/兑现，"
+                "而非全面风险偏好抬升（因此不利于追价执行）。"
+            )
+        if weak:
+            return "体感：扩散偏弱，赚钱效应不普遍；更像结构性轮动，追价胜率偏低。"
+        if crowded:
+            return "体感：拥挤度高/窄领涨，轮动快；追价与频繁进攻性调仓胜率偏低。"
+
+        return None
+
+    def _extract_etf_sync_details(self, context: ReportContext) -> Dict[str, Any]:
+        """
+        提取 etf_spot_sync / etf_index_sync 的 details（best-effort）。
+        """
+        v = context.slots.get("etf_spot_sync")
+        d = self._unwrap_details(v)
+        if d:
+            return d
+
+        overlay = context.slots.get("intraday_overlay") or context.slots.get("overlay") or context.slots.get("intraday")
+        if isinstance(overlay, dict):
+            for k in ("etf_spot_sync", "etf_index_sync", "etf_index_sync_daily"):
+                d = self._unwrap_details(overlay.get(k))
+                if d:
+                    return d
+            d = self._unwrap_details(overlay)
+            if d:
+                return d
+
+        obs = context.slots.get("observations")
+        if isinstance(obs, dict):
+            for k in ("etf_spot_sync", "etf_index_sync", "intraday_overlay", "overlay"):
+                d = self._unwrap_details(obs.get(k))
+                if d:
+                    return d
+
+        return {}
+
+    @staticmethod
+    def _unwrap_details(obj: Any) -> Dict[str, Any]:
+        if not isinstance(obj, dict) or not obj:
+            return {}
+        if isinstance(obj.get("details"), dict):
+            return obj.get("details")  # type: ignore[return-value]
+        keys = ("adv_ratio", "top20_amount_ratio", "interpretation")
+        if any(k in obj for k in keys):
+            return obj
+        return {}
+
+    @staticmethod
+    def _pick_number(*vals: Any) -> Optional[float]:
+        for v in vals:
+            if isinstance(v, (int, float)):
+                return float(v)
+        return None
+
+    @staticmethod
+    def _get_nested(obj: Any, path: Tuple[str, ...]) -> Optional[Any]:
+        cur = obj
+        for k in path:
+            if not isinstance(cur, dict):
+                return None
+            cur = cur.get(k)
+        return cur

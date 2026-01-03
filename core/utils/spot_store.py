@@ -6,7 +6,7 @@ UnifiedRisk V12 - A 股全行情本地存取工具
     - 按交易日管理 zh_spot parquet
     - 有本地文件 -> 读 parquet
     - 无本地文件 / full 刷新 -> 调 ak.stock_zh_a_spot() 并写 parquet
-    - 提供 DataFrame 给 turnover / sentiment / 其它因子使用
+    - 提供 DataFrame 给 amount / sentiment / 其它因子使用
 """
 
 from __future__ import annotations

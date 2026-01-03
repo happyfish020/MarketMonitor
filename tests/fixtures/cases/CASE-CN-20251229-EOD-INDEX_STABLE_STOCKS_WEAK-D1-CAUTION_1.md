@@ -12,7 +12,7 @@ CASE-CN-20251229-EOD-INDEX_STABLE_STOCKS_WEAK-D1-CAUTION
 
 adv_ratio=0.4079（涨少跌多）
 
-top20_turnover_ratio=0.772（成交极度集中，窄领涨/拥挤）
+top20_amount_ratio=0.772（成交极度集中，窄领涨/拥挤）
 
 dispersion=2.4326（分化中等）
 
@@ -22,7 +22,7 @@ participation=weak（参与度弱）
 
 intraday divergence_index≈0.0083；EOD divergence_index≈0.0067
 
-snapshot_type=EOD，turnover_stage=FULL
+snapshot_type=EOD，amount_stage=FULL
 
 V12 当日制度输出（作为“应当保持”的目标输出）
 
@@ -38,7 +38,7 @@ Structure Facts（关键 state）
 
 breadth = healthy（但必须带“仅表示未坏/不代表可进攻”的语义收敛提示）
 
-turnover = expanding（但文案必须偏“分歧/轮动/调仓”，不能偏乐观）
+amount = expanding（但文案必须偏“分歧/轮动/调仓”，不能偏乐观）
 
 index_tech = neutral
 
@@ -69,9 +69,9 @@ B. 语义一致性（避免“看起来偏乐观”）
 
 当 Gate=CAUTION 时：
 
-breadth/turnover 这类“正向词”必须被语义收敛：明确不等于允许进攻（但提示只出现一次，不能重复叠加）。
+breadth/amount 这类“正向词”必须被语义收敛：明确不等于允许进攻（但提示只出现一次，不能重复叠加）。
 
-turnover=expanding 的 meaning 必须是：
+amount=expanding 的 meaning 必须是：
 
 更可能分歧/调仓/轮动，而不是“进攻动能增强”。
 
@@ -110,7 +110,7 @@ tests/fixtures/cases/CASE-CN-20251229-EOD.json
   "inputs": {
     "etf_spot_sync": {
       "adv_ratio": 0.4079,
-      "top20_turnover_ratio": 0.772,
+      "top20_amount_ratio": 0.772,
       "dispersion": 2.4326,
       "same_direction": false,
       "interpretation": {
@@ -123,7 +123,7 @@ tests/fixtures/cases/CASE-CN-20251229-EOD.json
     },
     "expected_structure_states": {
       "breadth": "healthy",
-      "turnover": "expanding",
+      "amount": "expanding",
       "index_tech": "neutral",
       "failure_rate": "stable",
       "trend_in_force": "in_force",

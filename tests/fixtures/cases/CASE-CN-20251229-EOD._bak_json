@@ -5,7 +5,7 @@
   "inputs": {
     "etf_spot_sync": {
       "adv_ratio": 0.4079,
-      "top20_turnover_ratio": 0.772,
+      "top20_amount_ratio": 0.772,
       "dispersion": 2.4326,
       "same_direction": false,
       "interpretation": {
@@ -18,7 +18,7 @@
     },
     "expected_structure_states": {
       "breadth": "healthy",
-      "turnover": "expanding",
+      "amount": "expanding",
       "index_tech": "neutral",
       "failure_rate": "stable",
       "trend_in_force": "in_force",

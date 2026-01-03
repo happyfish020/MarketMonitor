@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, time
+import importlib
+import inspect
 from typing import Any, Dict, Optional, Tuple
 
 import baostock as bs
@@ -11,8 +13,6 @@ import os, json
 import sqlite3
 
 from core.persistence.sqlite.sqlite_l2_publisher import SqliteL2Publisher
-from core.reporters.report_blocks.etf_spot_sync_explain_blk import EtfSpotSyncExplainBlock
-from core.reporters.report_blocks.market_overview_blk import MarketOverviewBlock
 from core.utils.logger import get_logger
 from core.adapters.fetchers.cn.ashare_fetcher import AshareDataFetcher
 
@@ -24,15 +24,15 @@ from core.factors.glo.index_global_factor import IndexGlobalFactor
 from core.factors.glo.global_lead_factor import GlobalLeadFactor
 #from core.factors.cn.north_nps_factor import NorthNPSFactor
 from core.factors.cn.north_proxy_pressure_factor import NorthProxyPressureFactor
-from core.factors.cn.turnover_factor import TurnoverFactor
+from core.factors.cn.amount_factor import AmountFactor
 from core.factors.cn.margin_factor import MarginFactor
-from core.factors.cn.sector_rotation_factor import SectorRotationFactor
 from core.factors.cn.index_tech_factor import IndexTechFactor
 from core.factors.cn.breadth_factor import BreadthFactor
 from core.factors.cn.etf_index_sync_factor import ETFIndexSyncFactor
 from core.factors.cn.etf_index_sync_daily_factor import ETFIndexSyncDailyFactor
 from core.factors.cn.trend_in_force_factor import TrendInForceFactor
 from core.factors.cn.frf_factor import FRFFactor
+from core.factors.cn.sector_proxy_factor import SectorProxyFactor
 from core.factors.factor_result import FactorResult
 
 # ===== Regime / Governance =====
@@ -50,20 +50,9 @@ from core.reporters.report_engine import ReportEngine
 from core.reporters.renderers.markdown_renderer import MarkdownRenderer
 from core.reporters.report_writer import ReportWriter
 from core.actions.actionhint_service import ActionHintService
-from core.reporters.report_blocks.structure_facts_blk import StructureFactsBlock
-from core.reporters.report_blocks.summary_a_n_d_blk import SummaryANDBlock
-from core.reporters.report_blocks.watchlist_sectors_blk import WatchlistSectorsBlock
-from core.reporters.report_blocks.context_overnight_blk import ContextOvernightBlock
-from core.reporters.report_blocks.execution_timing_block import ExecutionTimingBlock
-from core.reporters.report_blocks.dev_evidence_blk import DevEvidenceBlock
-from core.reporters.report_blocks.scenarios_forward_blk import ScenariosForwardBlock
-from core.reporters.report_blocks.exposure_boundary_blk import ExposureBoundaryBlock
-from core.reporters.report_blocks.execution_quick_reference_blk import ExecutionQuickReferenceBlock
-from core.reporters.report_blocks.execution_summary_blk import ExecutionSummaryBlock
-from core.reporters.report_blocks.exit_readiness_blk import ExitReadinessBlock
 
 from core.predictors.prediction_engine import PredictionEngine
-from core.adapters.policy_slot_binders.cn.ashares_policy_slot_binder import ASharesPolicySlotBinder
+from core.regime.observation.watchlist.watchlist_ob_builder import WatchlistObservationBuilder
 from core.cases.case_validator import validate_case
 
 LOG = get_logger("Engine.AshareDaily")
@@ -106,11 +95,11 @@ class AShareDailyEngine:
         # === 核心制度状态（只在 Engine 内部存在）===
         self._distribution_risk_active: bool = False
         
-        self._resolve_trade_time()
+        #self._resolve_trade_time()
         #test 
-        #self.trade_date="2025-12-29"
-        #self.report_kind ="EOD"
-        #self.is_intraday = False
+        self.trade_date="2025-12-31"
+        self.report_kind ="EOD"
+        self.is_intraday = False
          
 
 
@@ -208,6 +197,53 @@ class AShareDailyEngine:
         
 
 
+    def _load_yaml_file(self, path: str) -> Dict[str, Any]:
+        """Load a YAML file as dict (fail-safe)."""
+        from pathlib import Path
+        import yaml
+
+        if not isinstance(path, str) or not path.strip():
+            return {}
+
+        raw = path.strip()
+
+        def _try(p: Path):
+            if not p.exists() or not p.is_file():
+                return None
+            try:
+                data = yaml.safe_load(p.read_text(encoding="utf-8"))
+            except Exception:
+                return None
+            return data if isinstance(data, dict) else None
+
+        p = Path(raw)
+        if p.is_absolute():
+            d = _try(p)
+            return d if d is not None else {}
+
+        d = _try(Path.cwd() / raw)
+        if d is not None:
+            return d
+
+        here = Path(__file__).resolve()
+        for parent in [here.parent] + list(here.parents)[:6]:
+            d = _try(parent / raw)
+            if d is not None:
+                return d
+
+        d = _try(p)
+        return d if d is not None else {}
+
+
+    def _load_weights_cfg(self) -> Dict[str, Any]:
+        """Load weights.yaml (single source for config paths)."""
+        cfg = self._load_yaml_file("config/weights.yaml")
+        if isinstance(cfg, dict) and cfg:
+            return cfg
+        cfg = self._load_yaml_file("weights.yaml")
+        return cfg if isinstance(cfg, dict) else {}
+    
+
 
     # ==================================================
     # Public API
@@ -221,6 +257,13 @@ class AShareDailyEngine:
     # Core Pipeline（唯一入口）
     # ==================================================
     def _execute_pipeline(self) -> None:
+        # weights.yaml is the single source of truth for pipeline config
+        self.weights_cfg = self._load_weights_cfg()
+        fp = self.weights_cfg.get("factor_pipeline", {}) if isinstance(self.weights_cfg, dict) else {}
+        structure_keys = fp.get("structure_factors", []) if isinstance(fp, dict) else []
+        if not isinstance(structure_keys, list):
+            structure_keys = []
+
         
         
         self.snapshot = self._fetch_snapshot()
@@ -228,7 +271,8 @@ class AShareDailyEngine:
         
         self.factors = self._compute_factors(self.snapshot)
 
-        factors_bound = self._bind_policy_slots()
+        # policy slot binder 已弃用：Phase-2/Report 统一从 YAML 读取结构与语义；此处不再做额外绑定
+        factors_bound: Dict[str, Any] = {}
         factors_bound = self._build_phase2( factors_bound)
 
         # ===== Phase-3 / 制度状态（封装）=====
@@ -238,8 +282,9 @@ class AShareDailyEngine:
         )
 
         # ===== Structure（消费制度状态）=====
-        factors_bound["structure"] = StructureFactsBuilder().build(
+        factors_bound["structure"] = StructureFactsBuilder(spec=self._load_structure_facts_cfg()).build(
             factors = self.factors,
+            structure_keys=structure_keys,
             distribution_risk_active=self._distribution_risk_active,
             drs_signal=self._extract_drs_signal(factors_bound),
         )
@@ -255,7 +300,7 @@ class AShareDailyEngine:
         report_text , des_payload = self._generate_report( factors_bound)
      
         ########## presiste  ###########
-        self.presiste_data(report_text=report_text, des_payload= des_payload)
+        #self.presiste_data(report_text=report_text, des_payload= des_payload)
 
     def presiste_data(self, report_text: str, des_payload:dict):
 
@@ -386,29 +431,204 @@ class AShareDailyEngine:
             refresh_mode=self.refresh_mode,
         ).prepare_daily_market_snapshot()
 
+    def _load_factor_pipeline_cfg(self) -> Tuple[list, dict, dict]:
+        """Load factor pipeline config from weights.yaml (single source of truth).
+    
+        Returns:
+            enabled: list[str] - compute order
+            registry: dict[str,str|dict] - factor name -> import spec
+            params: dict[str,dict] - factor name -> init kwargs (optional)
+        """
+        cfg = self.weights_cfg if isinstance(getattr(self, "weights_cfg", None), dict) else {}
+        fp = cfg.get("factor_pipeline", {}) if isinstance(cfg, dict) else {}
+    
+        enabled = fp.get("enabled", []) if isinstance(fp, dict) else []
+        if not isinstance(enabled, list):
+            enabled = []
+    
+        registry = fp.get("registry", {}) if isinstance(fp, dict) else {}
+        if not isinstance(registry, dict):
+            registry = {}
+    
+        params = fp.get("params", {}) if isinstance(fp, dict) else {}
+        if not isinstance(params, dict):
+            params = {}
+    
+        return enabled, registry, params
+    
+    def _import_obj(self, spec: str) -> Any:
+        """Import an object by spec.
+    
+        Supported:
+        - 'package.module:ClassName'
+        - 'package.module.ClassName'
+        """
+        spec = (spec or "").strip()
+        if not spec:
+            raise ValueError("empty import spec")
+    
+        if ":" in spec:
+            mod_path, attr = spec.split(":", 1)
+        else:
+            mod_path, _, attr = spec.rpartition(".")
+            if not mod_path:
+                raise ValueError(f"invalid import spec: {spec}")
+    
+        module = importlib.import_module(mod_path)
+        obj = getattr(module, attr, None)
+        if obj is None:
+            raise ValueError(f"import failed: {spec} (attr not found)")
+        return obj
+    
+    def _guess_factor_import_spec(self, name: str) -> Optional[str]:
+        """Best-effort import spec guess when YAML registry is not provided.
+    
+        Note: This is only a fallback. Recommended is to define
+        factor_pipeline.registry in config/weights.yaml.
+        """
+        # explicit exceptions (only for legacy compatibility)
+        special = {
+            "failure_rate": "core.factors.cn.frf_factor:FRFFactor",
+            "etf_index_sync": "core.factors.cn.etf_index_sync_factor:ETFIndexSyncFactor",
+            "etf_index_sync_daily": "core.factors.cn.etf_index_sync_daily_factor:ETFIndexSyncDailyFactor",
+        }
+        if name in special:
+            return special[name]
+    
+        # try CN first, then GLO
+        candidates = [
+            f"core.factors.cn.{name}_factor",
+            f"core.factors.glo.{name}_factor",
+        ]
+    
+        # build class name: tokens -> Camel + Factor, with common acronym handling
+        token_map = {"etf": "ETF", "ai": "AI", "nps": "NPS", "drs": "DRS", "dos": "DOS"}
+        toks = [t for t in name.split("_") if t]
+        camel = "".join(token_map.get(t, t[:1].upper() + t[1:]) for t in toks)
+        cls_name = f"{camel}Factor"
+    
+        for mod in candidates:
+            try:
+                module = importlib.import_module(mod)
+                if hasattr(module, cls_name):
+                    return f"{mod}:{cls_name}"
+            except Exception:
+                continue
+        return None
+    
+    def _instantiate_factor(self, cls: Any, params: Dict[str, Any]) -> Any:
+        """Instantiate factor class with best-effort filtered kwargs."""
+        if not isinstance(params, dict):
+            params = {}
+        try:
+            sig = inspect.signature(cls.__init__)
+            kwargs = {}
+            for k, v in params.items():
+                if k in sig.parameters and k != "self":
+                    kwargs[k] = v
+            return cls(**kwargs)
+        except Exception:
+            return cls()
+    
     def _compute_factors(self, snapshot: Dict[str, Any]) -> Dict[str, FactorResult]:
-        factors = {}
-        for factor in [
-            UnifiedEmotionFactor(), ParticipationFactor(),
-            GlobalMacroFactor(), IndexGlobalFactor(), GlobalLeadFactor(),
-            NorthProxyPressureFactor(), TurnoverFactor(), MarginFactor(),
-            SectorRotationFactor(), IndexTechFactor(), BreadthFactor(),
-            ETFIndexSyncFactor(), ETFIndexSyncDailyFactor(),
-            TrendInForceFactor(), FRFFactor(),
-        ]:
-            fr = factor.compute(snapshot)
-            factors[fr.name] = fr
+        """Compute factors dynamically based on config/weights.yaml.
+    
+        Source of truth:
+          weights.yaml -> factor_pipeline.enabled (+ optional registry/params)
+    
+        Behavior:
+        - Each enabled factor is instantiated then compute(snapshot) is called.
+        - Missing/failed factor will NOT crash the engine in UAT; instead it yields
+          a NEUTRAL FactorResult with details.data_status = ERROR/MISSING.
+        """
+        enabled, registry, params_cfg = self._load_factor_pipeline_cfg()
+        factors: Dict[str, FactorResult] = {}
+    
+        for name in enabled:
+            if not isinstance(name, str) or not name.strip():
+                continue
+            key = name.strip()
+    
+            try:
+                spec = None
+                if key in registry:
+                    raw = registry.get(key)
+                    if isinstance(raw, str):
+                        spec = raw.strip()
+                    elif isinstance(raw, dict):
+                        spec = str(raw.get("import") or raw.get("path") or "").strip()
+                if not spec:
+                    spec = self._guess_factor_import_spec(key)
+    
+                if not spec:
+                    raise KeyError(f"factor not registered: {key} (set factor_pipeline.registry)")
+    
+                cls = self._import_obj(spec)
+                factor = self._instantiate_factor(cls, params_cfg.get(key, {}))
+                fr = factor.compute(snapshot)
+    
+                if not isinstance(fr, FactorResult):
+                    raise TypeError(f"factor.compute() must return FactorResult, got={type(fr)}")
+    
+                # store under config key to keep YAML/structure alignment stable
+                factors[key] = fr
+                if fr.name != key:
+                    LOG.warning("FactorResult.name mismatch: cfg=%s result=%s", key, fr.name)
+    
+            except Exception as e:
+                LOG.exception("factor compute failed: %s", key)
+                factors[key] = FactorResult(
+                    name=key,
+                    score=50.0,
+                    level="NEUTRAL",
+                    details={
+                        "data_status": "ERROR" if not isinstance(e, KeyError) else "MISSING",
+                        "error": str(e),
+                    },
+                )
+    
         return factors
+    def _bind_policy_slots(self) -> Dict[str, Any]:
+        """Bind FactorResult dict into slots using YAML config (no hard-coded SLOT_MAP).
 
-    def _bind_policy_slots(self, ) -> Dict[str, Any]:
-        return ASharesPolicySlotBinder().bind(self.factors)
+        Rules:
+        - default: identity binding (slot name == factor key)
+        - optional rename: weights.yaml -> factor_pipeline.rename {factor_key: slot_key}
+        - inject watchlist observation (append-only, may raise if coverage missing)
+        """
+        cfg = self.weights_cfg if isinstance(getattr(self, "weights_cfg", None), dict) else {}
+        rename = cfg.get("factor_pipeline", {}).get("rename", {})
+        if not isinstance(rename, dict):
+            rename = {}
+
+        bound: Dict[str, Any] = {}
+        for k, fr in (self.factors or {}).items():
+            if not isinstance(k, str):
+                continue
+            slot = rename.get(k, k)
+            bound[slot] = fr
+
+        # watchlist injection (kept for backward compatibility)
+        asof = getattr(self, "trade_date", None) or "unknown"
+        try:
+            watchlist = WatchlistObservationBuilder().build(slots=bound, asof=str(asof))
+            bound["watchlist"] = watchlist
+        except FileNotFoundError:
+            # coverage 缺失属于配置错误：明确失败
+            raise
+        return bound
 
     def _build_phase2(self,  bound):
-        structure = StructureFactsBuilder().build(factors=self.factors)
+        cfg = self.weights_cfg if isinstance(getattr(self, "weights_cfg", None), dict) else {}
+        fp = cfg.get("factor_pipeline", {}) if isinstance(cfg, dict) else {}
+        structure_keys = fp.get("structure_factors", []) if isinstance(fp, dict) else []
+        if not isinstance(structure_keys, list):
+            structure_keys = []
+        structure = StructureFactsBuilder(spec=self._load_structure_facts_cfg()).build(factors=self.factors or {}, structure_keys=structure_keys)
         bound["structure"] = structure
-        bound["watchlist"] = WatchlistStateBuilder().build(
-            factors=self.factors, structure=structure, watchlist_config=bound.get("watchlist")
-        )
+        #bound["watchlist"] = WatchlistStateBuilder().build(
+        #    factors=self.factors, structure=structure, watchlist_config=bound.get("watchlist")
+        #)
         drs = DRSObservation().build(inputs=structure, asof=self.trade_date)
         bound["observations"] = {
                                     "drs": DRSContinuity.apply(
@@ -418,6 +638,7 @@ class AShareDailyEngine:
                                     )
                                 }
         return bound
+
 
     def _extract_drs_signal(self, bound: Dict[str, Any]) -> Optional[str]:
         return bound.get("observations", {}).get("drs", {}).get("observation", {}).get("signal")
@@ -465,6 +686,34 @@ class AShareDailyEngine:
             # 供 etf_spot_sync.explain block 使用（允许 intraday_overlay 作为备用）
             "intraday_overlay": bound.get("intraday_overlay") or {},
         }
+        # -----------------------------------------------------------
+        # Expose FactorResults to report blocks (read-only)
+        # - SectorProxyBlock expects slots["factors"]["sector_proxy"]
+        # - Keep best-effort compatibility: if bound carries sector_proxy, also attach it.
+        # -----------------------------------------------------------
+        factors_slot: Dict[str, Any] = {}
+        if isinstance(getattr(self, "factors", None), dict):
+            for _k, _fr in self.factors.items():
+                if _fr is None:
+                    continue
+                try:
+                    factors_slot[_k] = _wrap_factor(_fr)
+                except Exception:
+                    # fallback: keep raw object
+                    factors_slot[_k] = _fr
+        
+        # If binder/output placed sector_proxy on bound but it is not present in self.factors
+        if "sector_proxy" not in factors_slot:
+            _sp = bound.get("sector_proxy")
+            if _sp is not None:
+                try:
+                    factors_slot["sector_proxy"] = _wrap_factor(_sp)  # type: ignore[arg-type]
+                except Exception:
+                    factors_slot["sector_proxy"] = _sp
+        
+        slots["factors"] = factors_slot
+
+
     
         # 将 etf_index_sync / etf_spot_sync factor 统一挂到 slots["etf_spot_sync"]
         #（你的 explain block 优先读 slots["etf_spot_sync"]）
@@ -500,17 +749,32 @@ class AShareDailyEngine:
             "rule_trace": "",  # init
         }
     
+
+        # --- report blocks config (single source of truth: YAML) ---
+        weights_cfg = self._load_weights_cfg()
+        report_blocks_path = None
+        if isinstance(weights_cfg, dict):
+            v = weights_cfg.get("report_blocks_path")
+            if isinstance(v, str) and v.strip():
+                report_blocks_path = v.strip()
+        if not report_blocks_path:
+            report_blocks_path = "config/report_blocks.yaml"
+
+        # expose path into slots for audit/debug
+        gov = slots.get("governance")
+        if not isinstance(gov, dict):
+            gov = {}
+            slots["governance"] = gov
+        cfg = gov.get("config")
+        if not isinstance(cfg, dict):
+            cfg = {}
+            gov["config"] = cfg
+        cfg["report_blocks_path"] = report_blocks_path
+
         engine = ReportEngine(
             market="CN",
             actionhint_service=ActionHintService(),
-            block_builders={
-                #"market.overview": MarketOverviewBlock().render,
-                "structure.facts": StructureFactsBlock().render,
-                #"etf_spot_sync.explain": EtfSpotSyncExplainBlock().render,
-                "summary": SummaryANDBlock().render,
-                "execution.summary": ExecutionSummaryBlock().render,
-                "exit.readiness": ExitReadinessBlock().render,
-            },
+            block_specs_path=report_blocks_path,
         )
     
         doc = engine.build_report(context)
@@ -523,3 +787,19 @@ class AShareDailyEngine:
         ReportWriter().write(doc, text)
         return text, des_payload
         
+
+    def _load_structure_facts_cfg(self) -> Dict[str, Any]:
+        """Load structure facts semantic configuration (YAML).
+
+        Default path: config/structure_facts.yaml
+        Override via weights.yaml key: structure_facts_path
+        """
+        weights_cfg = self._load_weights_cfg()
+        path = None
+        if isinstance(weights_cfg, dict):
+            path = weights_cfg.get("structure_facts_path")
+        if not path:
+            path = "config/structure_facts.yaml"
+        cfg = self._load_yaml_file(path)
+        return cfg if isinstance(cfg, dict) else {}
+

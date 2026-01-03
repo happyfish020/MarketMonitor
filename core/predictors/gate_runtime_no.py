@@ -55,7 +55,7 @@ def _pick_trade_date(snapshot: Dict[str, Any]) -> Optional[date]:
         if d:
             return d
 
-    to = snapshot.get("turnover")
+    to = snapshot.get("amount")
     if isinstance(to, dict):
         d = _as_date(to.get("trade_date"))
         if d:
@@ -127,7 +127,7 @@ class ASharesGateDecider:
         trade_date = _pick_trade_date(snapshot)
 
         ms = snapshot.get("market_sentiment") or {}
-        to = snapshot.get("turnover") or {}
+        to = snapshot.get("amount") or {}
         sc = snapshot.get("structural_context") or {}
 
         breadth_damage = snapshot.get("breadth_damage")
@@ -144,7 +144,7 @@ class ASharesGateDecider:
         signals: Dict[str, Any] = {
             "trade_date": trade_date.isoformat() if trade_date else None,
             "adv_ratio": ms.get("adv_ratio"),
-            "turnover_total": to.get("total") or to.get("total_turnover"),
+            "amount_total": to.get("total") or to.get("total_amount"),
             "structural_health": sc.get("health"),
         }
 

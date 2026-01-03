@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-'''UnifiedRisk V12 - Selftest (Regression Gate)
+r'''UnifiedRisk V12 - Selftest (Regression Gate)
 
 目标：
 - 遍历 core/tests/fixtures/cases 目录下的所有 case fixture（*.json / *.v2.json）
@@ -349,8 +349,8 @@ def _build_minimal_slots_from_case_legacy(case: Dict[str, Any]) -> Dict[str, Any
             'state': ss.get('breadth', 'healthy'),
             'meaning': '市场广度未出现系统性破坏，但扩散程度有限，需结合其他结构指标判断。',
         },
-        'turnover': {
-            'state': ss.get('turnover', 'expanding'),
+        'amount': {
+            'state': ss.get('amount', 'expanding'),
             'meaning': '成交放大，但更可能反映分歧或调仓轮动，而非新增进攻性资金。',
         },
         'index_tech': {
@@ -379,7 +379,7 @@ def _build_minimal_slots_from_case_legacy(case: Dict[str, Any]) -> Dict[str, Any
         'details': {
             'snapshot_type': 'EOD',
             'adv_ratio': etf_anchor.get('adv_ratio'),
-            'top20_turnover_ratio': etf_anchor.get('top20_turnover_ratio'),
+            'top20_amount_ratio': etf_anchor.get('top20_amount_ratio'),
             'dispersion': etf_anchor.get('dispersion'),
             'same_direction': etf_anchor.get('same_direction'),
             'interpretation': etf_anchor.get('interpretation') or {},
@@ -598,7 +598,7 @@ def _extract_structure_evidence(text: str, key: str) -> Dict[str, Any]:
 
 
 def _extract_structure_bundle(text: str) -> Dict[str, Any]:
-    keys = ['breadth', 'failure_rate', 'index_tech', 'north_proxy_pressure', 'trend_in_force', 'turnover']
+    keys = ['breadth', 'failure_rate', 'index_tech', 'north_proxy_pressure', 'trend_in_force', 'amount']
     out: Dict[str, Any] = {}
     for k in keys:
         st = _extract_structure_state(text, k)

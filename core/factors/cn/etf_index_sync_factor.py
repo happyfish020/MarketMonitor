@@ -33,7 +33,7 @@ class ETFIndexSyncFactor(FactorBase):
     结构含义（只读解释）：
     - ETF 与主线指数方向是否一致（同向/背离）
     - ETF 的表现是否得到全市场横截面的“广泛承接”（adv_ratio）
-    - 市场资金是否过度集中（top20_turnover_ratio）
+    - 市场资金是否过度集中（top20_amount_ratio）
     - 市场涨跌分化是否过高（dispersion）
 
     注意：
@@ -102,14 +102,14 @@ class ETFIndexSyncFactor(FactorBase):
             )
 
         adv_ratio = self._to_float(spot_blk.get("adv_ratio"))
-        top20_ratio = self._to_float(spot_blk.get("top20_turnover_ratio"))
+        top20_ratio = self._to_float(spot_blk.get("top20_amount_ratio"))
         dispersion = self._to_float(spot_blk.get("dispersion"))
 
         if adv_ratio is None or top20_ratio is None or dispersion is None:
             LOG.warning(
                 "[ETFIndexSyncFactor] SPOT_MISSING_FIELDS | adv_ratio=%r | top20_ratio=%r | dispersion=%r",
                 spot_blk.get("adv_ratio"),
-                spot_blk.get("top20_turnover_ratio"),
+                spot_blk.get("top20_amount_ratio"),
                 spot_blk.get("dispersion"),
             )
             return self.build_result(
@@ -122,7 +122,7 @@ class ETFIndexSyncFactor(FactorBase):
 
         # 可选：盘中/盘后标注（只读，不影响 score 的“预测性”）
         snapshot_type = spot_blk.get("snapshot_type") if isinstance(spot_blk.get("snapshot_type"), str) else None
-        turnover_stage = spot_blk.get("turnover_stage") if isinstance(spot_blk.get("turnover_stage"), str) else None
+        amount_stage = spot_blk.get("amount_stage") if isinstance(spot_blk.get("amount_stage"), str) else None
 
         # ===============================
         # 3) 结构度量
@@ -160,12 +160,12 @@ class ETFIndexSyncFactor(FactorBase):
             "divergence_index": round(float(divergence_idx), 4),
 
             "adv_ratio": round(float(adv_ratio), 4),
-            "top20_turnover_ratio": round(float(top20_ratio), 4),
+            "top20_amount_ratio": round(float(top20_ratio), 4),
             "dispersion": round(float(dispersion), 4),
 
             # 盘中/盘后标注：只读，不参与枚举体系
             "snapshot_type": snapshot_type,
-            "turnover_stage": turnover_stage,
+            "amount_stage": amount_stage,
 
             # 结构解释（不引入枚举，仅文本标注）
             "interpretation": self._interpret(

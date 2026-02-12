@@ -35,10 +35,12 @@ BLOCK_SPECS: List[BlockSpec] = [
     
     BlockSpec("governance.gate", "governance.gate"),
     BlockSpec("structure.facts", "结构事实（Fact → 含义）"),
-    #BlockSpec("etf_spot_sync.explain", "核心字段解释（拥挤/不同步/参与度）"),
+    BlockSpec("crowding_concentration.explain", "核心字段解释（拥挤/不同步/参与度）"),
     BlockSpec("summary", "简要总结（A / N / D）"),
     BlockSpec("execution.summary", "执行层评估（Execution · 2–5D）"),
     BlockSpec("exit.readiness", "出场准备度（Exit Readiness · Governance）"),
+    BlockSpec("rotation.snapshot", "板块轮换快照"),
+
     #BlockSpec("context.overnight", "隔夜维度"),
     #BlockSpec("watchlist.sectors", "观察板块对象"),
     #BlockSpec("execution.timing",  "执行时点校验（风险敞口变更行为）"),
@@ -554,6 +556,50 @@ class ReportEngine:
         from core.governance.exit_readiness_validator import ExitReadinessValidator
         slots["exit_readiness"] = ExitReadinessValidator().evaluate(slots=slots, asof=context.trade_date)
 
+        # -------- ②.5 DOS（Opportunity Permission · read-only）--------
+        # 目的：在趋势有效但执行摩擦偏高时，允许“底仓参与/回撤加”，避免系统长期只防守。
+        try:
+            from core.governance.dos_builder import DOSBuilder
+            dos = DOSBuilder().build(slots=slots, asof=context.trade_date)
+            if isinstance(gov, dict):
+                gov["dos"] = dos
+            else:
+                slots.setdefault("governance", {})["dos"] = dos
+        except Exception as e:
+            LOG.warning("[DOS] build failed: %s", e)
+            fallback = {
+                "schema_version": "DOS_V1",
+                "level": "OFF",
+                "mode": "BASE_INDEX",
+                "allowed": ["HOLD"],
+                "forbidden": ["CHASE_ADD", "LEVER_ADD"],
+                "constraints": [],
+                "reasons": ["dos_build_failed"],
+                "warnings": [f"dos_build_failed:{type(e).__name__}"],
+                "evidence": {},
+                "meta": {"asof": context.trade_date},
+            }
+            if isinstance(gov, dict):
+                gov["dos"] = fallback
+            else:
+                slots.setdefault("governance", {})["dos"] = fallback
+
+
+        
+        # -------- ②.5 AttackPermit（进攻许可 · read-only）--------
+        # 目的：在 Gate=CAUTION 甚至 DRS 偏谨慎时，只要“扩散好 + 集中度低”，也要显式给出“底仓参与/回撤确认加”的权限边界。
+        # 注意：AttackPermit 不放松 Gate（final_gate 仍由 GateDecision 决定），只用于 ActionHint/报告解释层。
+        try:
+            from core.governance.attack_permit_builder import AttackPermitBuilder
+            ap = AttackPermitBuilder().build(slots=slots, asof=context.trade_date, gate=gate_final)
+            if isinstance(gov, dict):
+                gov["attack_permit"] = ap
+            else:
+                slots.setdefault("governance", {})["attack_permit"] = ap
+        except Exception as e:
+            LOG.warning("[AttackPermit] build failed: %s", e)
+
+
         # -------- ③ ActionHint（唯一生成点；只传已支持参数）--------
         # 注意：ActionHintService 不接收 observations / execution_summary
         actionhint = self.actionhint_service.build_actionhint(
@@ -561,6 +607,7 @@ class ReportEngine:
             structure=structure if isinstance(structure, dict) else None,
             watchlist=slots.get("watchlist") if isinstance(slots.get("watchlist"), dict) else None,
             conditions_runtime=slots.get("conditions_runtime"),
+            governance=gov if isinstance(gov, dict) else None,
         )
 
         if not isinstance(actionhint, dict):
@@ -597,6 +644,99 @@ class ReportEngine:
                 blk = self._safe_call_builder(spec=spec, builder=builder, context=context, doc_partial=doc_partial)
                 blocks.append(blk)
 
+
+                # -------- Attack Window (auto block) --------
+        # Offense Permission Layer: OFF / LITE / ON, clipped by Gate in evaluator mapping.
+        # (2026-02-05 audit fix) show real reasons/evidence instead of "missing:*" placeholders.
+        try:
+            aw = context.slots.get("attack_window")
+            if isinstance(aw, dict) and aw:
+                meta_aw = aw.get("meta") if isinstance(aw.get("meta"), dict) else {}
+                asof_aw = meta_aw.get("asof", "unknown")
+                st = aw.get("state", "OFF")
+                perm = aw.get("offense_permission", "FORBID")
+                gate_aw = aw.get("gate", gate_final)
+                yes = aw.get("reasons_yes") if isinstance(aw.get("reasons_yes"), list) else []
+                no = aw.get("reasons_no") if isinstance(aw.get("reasons_no"), list) else []
+                ev = aw.get("evidence") if isinstance(aw.get("evidence"), dict) else {}
+                df = aw.get("data_freshness") if isinstance(aw.get("data_freshness"), dict) else {}
+
+                content = [
+                    f"- As of: **{asof_aw}**",
+                    f"- State: **{st}** · offense_permission=**{perm}** · Gate=**{gate_aw}**",
+                ]
+                if yes:
+                    content.append("- ✅ reasons_yes: " + ", ".join([str(x) for x in yes]))
+                if no:
+                    content.append("- ❌ reasons_no: " + ", ".join([str(x) for x in no]))
+
+                # Evidence clarity: show both market-wide Top20 and proxy Top20 when present.
+                show_keys = [
+                    "trend_state", "adv_ratio", "pct_above_ma20", "amount_ma20_ratio",
+                    "market_top20_trade_ratio", "proxy_top20_amount_ratio", "top20_ratio",
+                    "failure_rate_level", "failure_rate_improve_days",
+                    "north_proxy_level", "leverage_level", "options_level",
+                ]
+                ev_parts = []
+                for k in show_keys:
+                    if k in ev:
+                        ev_parts.append(f"{k}={ev.get(k)}")
+                if ev_parts:
+                    content.append("- evidence: " + " · ".join(ev_parts))
+
+                if df:
+                    content.append(f"- data_freshness: asof_ok={df.get('asof_ok')} notes={df.get('notes')}")
+
+                blocks.append(
+                    ReportBlock(
+                        block_alias="attack.window",
+                        title="进攻窗口（Attack Window）",
+                        payload={"content": content, "raw": aw},
+                        warnings=[],
+                    )
+                )
+        except Exception as _e:
+            LOG.warning("attack_window block append failed: %s", _e)
+
+
+
+        # -------- Position Playbook (auto block) --------
+        # Read-only action checklist derived from AttackWindow/Gate/Execution.
+        try:
+            from core.reporters.blocks.position_playbook_block import render_position_playbook
+
+            aw = context.slots.get("attack_window")
+            if isinstance(aw, dict) and aw:
+                title_pb, lines_pb, raw_pb = render_position_playbook(context.slots)
+                if lines_pb:
+                    blocks.append(
+                        ReportBlock(
+                            block_alias="position.playbook",
+                            title=title_pb,
+                            payload={"content": lines_pb, "raw": raw_pb},
+                            warnings=[],
+                        )
+                    )
+        except Exception as _e:
+            LOG.warning("position_playbook block append failed: %s", _e)
+
+# -------- Data Freshness (auto block) --------
+        try:
+            dfresh = context.slots.get("data_freshness")
+            if isinstance(dfresh, dict):
+                content = dfresh.get("render_lines")
+                if isinstance(content, list) and content:
+                    blocks.append(
+                        ReportBlock(
+                            block_alias="data.freshness",
+                            title="数据新鲜度（Data Freshness）",
+                            payload={"content": content},
+                            warnings=[],
+                        )
+                    )
+        except Exception as _e:
+            LOG.warning("data_freshness block append failed: %s", _e)
+        
         from core.reporters.cn.semantic_guard import SemanticGuard
 
         # 假设你已经有：
@@ -607,6 +747,7 @@ class ReportEngine:
         warnings = guard.check(
             gate_final=gate_final,
             blocks={b.block_alias: b.payload for b in blocks},
+            governance=gov,
         )
 
         for w in warnings:

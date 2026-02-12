@@ -58,7 +58,8 @@ class EtfSpotSyncExplainBlock(ReportBlockRendererBase):
         if isinstance(adv_ratio, (int, float)):
             lines.append(f"- adv_ratio: **{adv_ratio:.4f}**")
         if isinstance(top20, (int, float)):
-            lines.append(f"- top20_amount_ratio: **{top20:.3f}**")
+            lines.append(f"- top20_amount_ratio (proxy_top20pct): **{top20:.3f}**")
+            lines.append("  - NOTE: 这是**拥挤代理口径**，不要当作全市场 Top20 成交占比；全市场口径见 `liquidity_quality.details.top20_ratio`。")
         if isinstance(dispersion, (int, float)):
             lines.append(f"- dispersion: **{dispersion:.4f}**")
         if isinstance(same_dir, bool):

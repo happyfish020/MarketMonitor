@@ -38,7 +38,7 @@ class SqliteDecisionEvidenceStore(DecisionEvidenceStoreContract):
         #except Exception as e:
         #    raise InvalidPayloadError("des", f"payload_json_encode_failed:{e}")
         except sqlite3.IntegrityError as e:
-            raise AlreadyPublishedError(trade_date, report_kind) from e
+             raise AlreadyPublishedError(trade_date, report_kind) from e
 
         h = des_hash(trade_date, report_kind, engine_version, payload_json)
         created_at_utc = int(time.time())
@@ -53,7 +53,7 @@ class SqliteDecisionEvidenceStore(DecisionEvidenceStoreContract):
         except sqlite3.IntegrityError as e:
             raise AlreadyPublishedError(trade_date, report_kind)
         except Exception as e:
-            raise PersistenceError("Failed to save report", e)
+            raise PersistenceError("Failed to save DES", e)
 
         return h
 

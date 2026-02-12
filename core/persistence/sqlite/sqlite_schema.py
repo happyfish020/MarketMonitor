@@ -8,7 +8,6 @@ def ensure_schema_l2(conn: sqlite3.Connection) -> None:
     """Ensure L2 (institutional) tables exist. Idempotent."""
     conn.executescript(
         """
-        
         CREATE TABLE IF NOT EXISTS ur_report_artifact (
           trade_date       TEXT    NOT NULL,
           report_kind      TEXT    NOT NULL,
@@ -16,6 +15,7 @@ def ensure_schema_l2(conn: sqlite3.Connection) -> None:
           content_hash     TEXT    NOT NULL,
           meta_json        TEXT,
           created_at_utc   INTEGER NOT NULL,
+          created_at      TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
           PRIMARY KEY (trade_date, report_kind)
         );
 
@@ -32,6 +32,7 @@ def ensure_schema_l2(conn: sqlite3.Connection) -> None:
           des_payload_json  TEXT    NOT NULL,
           des_hash          TEXT    NOT NULL,
           created_at_utc    INTEGER NOT NULL,
+          created_at      TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
           PRIMARY KEY (trade_date, report_kind)
         );
 
@@ -47,6 +48,7 @@ def ensure_schema_l2(conn: sqlite3.Connection) -> None:
           report_hash      TEXT    NOT NULL,
           des_hash         TEXT    NOT NULL,
           created_at_utc   INTEGER NOT NULL,
+          created_at      TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
           PRIMARY KEY (trade_date, report_kind),
           FOREIGN KEY (trade_date, report_kind)
             REFERENCES ur_report_artifact (trade_date, report_kind)
@@ -58,7 +60,8 @@ def ensure_schema_l2(conn: sqlite3.Connection) -> None:
           report_kind      TEXT    NOT NULL,
           event            TEXT    NOT NULL,
           note             TEXT,
-          created_at_utc   INTEGER NOT NULL
+          created_at_utc   INTEGER NOT NULL,
+          created_at      TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
         );
 
         CREATE INDEX IF NOT EXISTS idx_ur_audit_created_at

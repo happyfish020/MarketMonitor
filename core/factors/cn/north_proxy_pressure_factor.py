@@ -46,13 +46,8 @@ def _wrap_factor(fr: Any) -> Dict[str, Any]:
 class NorthProxyPressureFactor(FactorBase):
     def __init__(self) -> None:
         super().__init__(name="north_proxy_pressure")
-
-        # 你当前工程里已有的 3 ETF proxy（可在 config 里换）
-        self._SYMBOLS = {
-            "hs300": "510300.SS",
-            "large": "510050.SS",   # 你目前用 510050；如后续换 ZZ500 可改这里
-            "kc50": "159915.SZ",
-        }
+        # ✅ 不允许在 Factor 层硬编码 symbols。
+        # 上游 raw block（north_nps_raw / north_proxy_raw）必须提供 role->(symbol, window)。
 
         # proxy 聚合权重（冻结：偏重 hs300，兼顾高beta）
         self._W = {"hs300": 0.40, "large": 0.30, "kc50": 0.30}
@@ -70,10 +65,8 @@ class NorthProxyPressureFactor(FactorBase):
         proxies = self._normalize_raw(raw)
 
         # pick required symbols if present
-        picked = {}
-        for k, sym in self._SYMBOLS.items():
-            if sym in proxies:
-                picked[k] = proxies[sym]
+        # picked by role (Factor only consumes roles; symbols come from raw)
+        picked = {r: blk for r, blk in proxies.items() if r in self._W}
 
         if len(picked) < 2:
             # 至少要有 2 个 proxy 才有一致性意义
@@ -388,15 +381,65 @@ class NorthProxyPressureFactor(FactorBase):
     @staticmethod
     def _normalize_raw(raw: Any) -> Dict[str, Dict[str, Any]]:
         """
-        返回 dict: symbol -> block
+        返回 dict: role -> block
+
+        期望上游 raw 结构（推荐）：
+          {
+            "hs300": {"symbol": "...", "window": [...]},
+            "large": {"symbol": "...", "window": [...]},
+            "kc50":  {"symbol": "...", "window": [...]},
+          }
+
+        兼容旧结构（必须携带 role）：
+          {
+            "<any_key>": {"role": "hs300", "symbol":"...", "window":[...]},
+            ...
+          }
         """
         out: Dict[str, Dict[str, Any]] = {}
 
-        if isinstance(raw, dict) and "symbol" in raw and "window" in raw:
+        role_alias = {
+            "hs300": "hs300",
+            "large": "large",
+            "sz50": "large",
+            "zz50": "large",
+            "kc50": "kc50",
+        }
+
+        def _canon_role(r: Any) -> Optional[str]:
+            if not isinstance(r, str):
+                return None
+            r2 = r.strip().lower()
+            return role_alias.get(r2)
+
+        # case-1: single block
+        if isinstance(raw, dict) and "window" in raw and isinstance(raw.get("window"), list):
+            role = _canon_role(raw.get("role"))
             sym = raw.get("symbol")
-            if isinstance(sym, str):
-                out[sym] = raw
+            if role and isinstance(sym, str):
+                out[role] = raw
             return out
+
+        # case-2: dict container
+        if isinstance(raw, dict):
+            for k, v in raw.items():
+                if not isinstance(v, dict) or not isinstance(v.get("window"), list):
+                    continue
+
+                # prefer key-as-role
+                role = _canon_role(k)
+                if role is None:
+                    role = _canon_role(v.get("role"))
+
+                if role is None:
+                    # 无 role 则无法加权/确认：跳过（防止隐性 hardcode）
+                    continue
+
+                sym = v.get("symbol")
+                if isinstance(sym, str):
+                    out[role] = v
+
+        return out
 
         if isinstance(raw, dict):
             for _, v in raw.items():
@@ -431,6 +474,9 @@ class NorthProxyPressureFactor(FactorBase):
                 "data_status": "DATA_NOT_CONNECTED",
                 "note": reason,
                 "score_semantics": "QUALITY_HIGH_IS_LOW_PRESSURE",
+                "quality_score": 50.0,
+                "pressure_score": 50.0,
+                "pressure_level": "NEUTRAL",
                 "evidence": {"quality_score": 50.0, "pressure_score": 50.0, "pressure_level": "NEUTRAL"},
             },
         )

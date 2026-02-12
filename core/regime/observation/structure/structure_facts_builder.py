@@ -34,7 +34,9 @@ class StructureFactsBuilder:
       "<factor_key>": {
          "state": "<state>",
          "meaning": "<optional>",
-         "evidence": { ... , "modifier": "<modifier>" }
+         "evidence": { ... , "_modifier": "<modifier>", "modifier": "<modifier optional>" }
+      },
+      "_meta": {"modifier":"<modifier>"}
       },
       "_summary": {"tags":[...]}
     }
@@ -66,6 +68,11 @@ class StructureFactsBuilder:
         keys = [k for k in (structure_keys or []) if isinstance(k, str) and k.strip()]
         structure: Dict[str, Dict[str, Any]] = {}
 
+        # modifier is a global context label; to reduce repetition in reports,
+        # we emit `evidence["modifier"]` at most once (first structure item).
+        emit_modifier_once = (modifier != MOD_NONE)
+        emitted_modifier = False
+
         # factor specs
         factor_specs: Dict[str, Any] = {}
         if isinstance(self.spec.get("factors"), dict):
@@ -76,10 +83,17 @@ class StructureFactsBuilder:
             fr = self._resolve_factor(factors=factors, key=key, fspec=fspec)
             if fr is None:
                 # 缺失 ≠ 错误：以占位输出，方便 rule/report 发现缺口
-                structure[key] = self._placeholder_fact(key=key, modifier=modifier)
+                emit_modifier = emit_modifier_once and (not emitted_modifier)
+                structure[key] = self._placeholder_fact(key=key, modifier=modifier, emit_modifier=emit_modifier)
+                if emit_modifier:
+                    emitted_modifier = True
                 continue
-            structure[key] = self._map_factor(key=key, fr=fr, fspec=fspec, modifier=modifier)
+            emit_modifier = emit_modifier_once and (not emitted_modifier)
+            structure[key] = self._map_factor(key=key, fr=fr, fspec=fspec, modifier=modifier, emit_modifier=emit_modifier)
+            if emit_modifier:
+                emitted_modifier = True
 
+        structure["_meta"] = {"modifier": modifier}
         structure["_summary"] = self._build_summary(structure=structure, modifier=modifier)
         return structure
 
@@ -127,12 +141,12 @@ class StructureFactsBuilder:
                     return factors.get(alt)
         return None
 
-    def _map_factor(self, *, key: str, fr: FactorResult, fspec: Dict[str, Any], modifier: str) -> Dict[str, Any]:
+    def _map_factor(self, *, key: str, fr: FactorResult, fspec: Dict[str, Any], modifier: str, emit_modifier: bool) -> Dict[str, Any]:
         level, score, details = self._unpack_factor(fr)
 
         state = self._derive_state(key=key, level=level, details=details, fspec=fspec)
         meaning = self._derive_meaning(state=state, details=details, fspec=fspec)
-        evidence = self._derive_evidence(details=details, fspec=fspec, modifier=modifier)
+        evidence = self._derive_evidence(details=details, fspec=fspec, modifier=modifier, emit_modifier=emit_modifier)
 
         out: Dict[str, Any] = {"state": state, "evidence": evidence}
         if isinstance(meaning, str) and meaning.strip():
@@ -259,7 +273,7 @@ class StructureFactsBuilder:
 
         return None
 
-    def _derive_evidence(self, *, details: Dict[str, Any], fspec: Dict[str, Any], modifier: str) -> Dict[str, Any]:
+    def _derive_evidence(self, *, details: Dict[str, Any], fspec: Dict[str, Any], modifier: str, emit_modifier: bool) -> Dict[str, Any]:
         ev_spec = fspec.get("evidence") if isinstance(fspec.get("evidence"), dict) else {}
         include = ev_spec.get("include_details_keys")
         rename = ev_spec.get("rename") if isinstance(ev_spec.get("rename"), dict) else {}
@@ -289,8 +303,11 @@ class StructureFactsBuilder:
                 if isinstance(k, str):
                     evidence[k] = self._safe_value(v)
 
-        # always include modifier
-        evidence["modifier"] = modifier
+        # modifier is a global context label.
+        # Always keep a private copy for debugging; only emit public `modifier` once to reduce noise.
+        evidence["_modifier"] = modifier
+        if emit_modifier:
+            evidence["modifier"] = modifier
         return evidence
 
     def _safe_value(self, v: Any) -> Any:
@@ -314,11 +331,11 @@ class StructureFactsBuilder:
             return out
         return str(v)
 
-    def _placeholder_fact(self, *, key: str, modifier: str) -> Dict[str, Any]:
+    def _placeholder_fact(self, *, key: str, modifier: str, emit_modifier: bool) -> Dict[str, Any]:
         return {
             "state": "missing",
             "meaning": f"结构项缺失：{key}（未计算或未注入 structure）。",
-            "evidence": {"modifier": modifier},
+            "evidence": ({"_modifier": modifier, "modifier": modifier} if emit_modifier else {"_modifier": modifier}),
         }
 
     # ---------------------------
@@ -364,7 +381,7 @@ class StructureFactsBuilder:
             seen.add(t)
             out_tags.append(t)
 
-        return {"tags": out_tags}
+        return {"tags": out_tags, "context_modifier": modifier}
 
     def _match_when(self, *, cond: Any, structure: Dict[str, Dict[str, Any]], modifier: str) -> bool:
         # allow empty cond => false

@@ -1,52 +1,60 @@
 north_nps:
   hs300:
     symbol: 510300.SS
-    provider: yf
-    method: etf
+    provider: db
+    method: ETF
     alias: 沪深300ETF
-  sz50:
-    symbol: 510050.SS
-    provider: yf
+  #sz50:
+  #  symbol: 510050.SS
+  #  provider: db
+  #  method: ETF
+  #  alias: 上证50ETF
+  zz500:
+    symbol: 510500.SS
+    provider: db
     method: etf
-    alias: 上证50ETF
+    alias: 中证500ETF
+  
   cyb:
     symbol: 159915.SZ
-    provider: yf
-    method: etf
+    provider: db
+    method: ETF
     alias: 创业板ETF
 cn_index:
   etf_sh:
     symbol: 510300.SS
-    provider: yf
+    provider: db
+    method: ETF
     alias: 沪深300ETF
   etf_sz:
     symbol: 159901.SZ
-    provider: yf
+    provider: db
+    method: ETF
     alias: 深成指ETF
 index_core:
   sh:
-    symbol: 000001.SS
-    provider: yf
+    symbol: sh000001
+    provider: db
     method: index
     alias: 上证指数
   sz:
-    symbol: 399001.SZ
-    provider: yf
+    symbol: sz399001
+    provider: db
     method: index
     alias: 深证成指
   hs300:
-    symbol: 000300.SS
-    provider: yf
+    symbol: sh000300
+    provider: db
     method: index
     alias: 沪深300
   zz500:
-    symbol: sh.000905
-    provider: bs
+    symbol: sh000905
+    provider: db
     method: index
     alias: 中证500
   kc50:
-    symbol: sz.000688
-    provider: bs
+    symbol: sh000688
+    provider: db
     method: index
     alias: 科创50
 global_index:
@@ -114,18 +122,18 @@ global_lead:
 etf_proxy:
   csi300:
     symbol: 510300.SS
-    provider: yf
-    method: equity
+    provider: db
+    method: ETF
     alias: 沪深300 ETF
   csi500:
     symbol: 510500.SS
-    provider: yf
-    method: equity
+    provider: db
+    method: ETF
     alias: 中证500 ETF
   csi1000:
     symbol: 159845.SZ
-    provider: yf
-    method: equity
+    provider: db
+    method: ETF
     alias: 中证100
 index_global:
   spx:
@@ -186,48 +194,48 @@ core_theme:
     method: index
   ai_etf:
     symbol: 159819.SZ
-    provider: yf
-    method: index
+    provider: db
+    method: ETF
 sector_proxy:
   benchmark:
     symbol: 510300.SS
-    provider: yf
-    method: etf
+    provider: db
+    method: ETF
     alias: 沪深300 ETF
   sectors:
     ai_etf:
       symbol: 159819.SZ
-      provider: yf
-      method: index
+      provider: db
+      method: ETF
       alias: AI ETF
       group: risk_on
     cyb_etf:
       symbol: 159915.SZ
-      provider: yf
-      method: etf
+      provider: db
+      method: ETF
       alias: 创业板ETF
       group: risk_on
     kc50:
-      symbol: sz.000688
-      provider: bs
+      symbol: sh000688
+      provider: db
       method: index
       alias: 科创50
       group: risk_on
     csi1000:
       symbol: 159845.SZ
-      provider: yf
-      method: etf
+      provider: db
+      method: ETF
       alias: 中证1000ETF
       group: risk_on
     sz50:
       symbol: 510050.SS
-      provider: yf
-      method: etf
+      provider: db
+      method: ETF
       alias: 上证50ETF
       group: defensive
     sh_index:
       symbol: 000001.SS
-      provider: yf
+      provider: db
       method: index
       alias: 上证指数
       group: defensive

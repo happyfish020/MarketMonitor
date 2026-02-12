@@ -85,13 +85,13 @@ class ASharesGateDecider:
             evidence["participation"] = participation.level
 
         # ------------------------------
-        # ETF × Index Sync
+        # ETF × crowding_conce
         # ------------------------------
-        sync = factors.get("etf_index_sync_daily")
+        sync = factors.get("crowding_concentration")
         if sync and getattr(sync, "level", None) == "HIGH":
             gate = _max_gate(gate, "CAUTION")
-            reasons.append("etf_index_sync_daily=HIGH")
-            evidence["etf_index_sync_daily"] = sync.level
+            reasons.append("crowding_concentration=HIGH")
+            evidence["crowding_concentration"] = sync.level
 
         # ------------------------------
         # Northbound Proxy Pressure (price-trend proxy)

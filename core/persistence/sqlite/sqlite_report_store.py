@@ -52,7 +52,7 @@ class SqliteReportStore(ReportStoreContract):
 
     def get_report(self, trade_date: str, report_kind: str) -> Optional[ReportArtifact]:
         row = self._conn.execute(
-            """SELECT trade_date, report_kind, content_text, content_hash, meta_json, created_at_utc
+            """SELECT trade_date, report_kind, content_text, content_hash, meta_json, created_at
                FROM ur_report_artifact WHERE trade_date=? AND report_kind=?;""",
             (trade_date, report_kind),
         ).fetchone()
@@ -71,7 +71,7 @@ class SqliteReportStore(ReportStoreContract):
             content_text=row["content_text"],
             content_hash=row["content_hash"],
             meta=meta,
-            created_at_utc=int(row["created_at_utc"]),
+            created_at_utc=int(row["created_at"]),
         )
 
     def verify_report(self, trade_date: str, report_kind: str) -> bool:

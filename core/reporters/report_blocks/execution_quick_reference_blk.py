@@ -42,7 +42,8 @@ class ExecutionQuickReferenceBlock(ReportBlockRendererBase):
         # Compose content (keep stable, readable, frozen)
         lines: List[str] = []
         lines.append("【决策优先级】")
-        lines.append("Execution ＞ Gate ＞ DRS")
+        # Governance first: DRS is the hard veto; Gate defines permission boundary; Execution affects *how* to act.
+        lines.append("DRS（否决） ＞ Gate（权限边界） ＞ Execution（摩擦/节奏）")
         lines.append("")
         lines.append("【Gate 含义】")
         lines.append("- ALLOW (A)：允许进攻")
@@ -51,8 +52,10 @@ class ExecutionQuickReferenceBlock(ReportBlockRendererBase):
         lines.append("- D / FREEZE：必须防守")
         lines.append("")
         lines.append("【Execution（执行摩擦）】")
-        lines.append("- Execution = A / N：执行顺")
-        lines.append("- Execution = D / D2：执行不顺")
+        lines.append("- Execution band = D1：轻摩擦/偏中性（仍需服从 Gate/DRS）")
+        lines.append("- Execution band = D2：摩擦偏高（追价/频繁调仓胜率下降）")
+        lines.append("- Execution band = D3：摩擦很高/结构压力大（制度倾向去风险）")
+        lines.append("- Execution band = NA：数据不足（不影响 Gate/DRS）")
         lines.append("")
         lines.append("【DRS（日度风险信号）】")
         lines.append("👉 - GREEN：风险环境可控（不是进攻信号）")

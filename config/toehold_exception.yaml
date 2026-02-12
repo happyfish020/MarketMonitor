@@ -1,0 +1,24 @@
+toehold_exception:
+  version: TOEHOLD-EXCEPTION-V1
+  enabled: true
+  max_lots: 1
+  allow_when:
+    rotation_mode:
+    - 'OFF'
+    - PARTIAL
+    gate_any_of:
+    - CAUTION
+    - FREEZE
+    drs_any_of:
+    - YELLOW
+    - ORANGE
+    - RED
+  whitelist:
+  - symbol: 002318.SZ
+    alias: 久立特材
+    tag: BRAKE_LOW_BETA
+  rules:
+    no_add: true
+    no_chase: true
+    no_rotate: true
+    note: 脚尖仓仅用于占位跟踪：最多1手，不得加仓/追涨/轮动换仓；如制度继续恶化，可直接撤销脚尖仓。

@@ -99,6 +99,7 @@ class SectorProxyDataSource(DataSourceBase):
                 LOG.error("[DS.SectorProxy] CacheReadError: %s", exc)
 
         # Step2: build raw block
+        LOG.info("[DS.SectorProxy] Init Neutral block for benchmark")
         result: Dict[str, Any] = {
             "benchmark": self._neutral_block("benchmark"),
             "sectors": {},
@@ -144,13 +145,32 @@ class SectorProxyDataSource(DataSourceBase):
             return self._neutral_block("invalid_symbol")
 
         try:
-            df = self.store.get_series(
-                symbol=symbol,
-                window=self.window,
-                refresh_mode=refresh_mode,
-                method=method,
-                provider=provider,
-            )
+            # db-first, yf-fallback (yf may miss EOD close for CN symbols)
+            if provider in ("yf", "db"):
+                try:
+                    df = self.store.get_series(
+                        symbol=symbol,
+                        window=self.window,
+                        refresh_mode=refresh_mode,
+                        method=method,
+                        provider="db",
+                    )
+                except Exception:
+                    df = self.store.get_series(
+                        symbol=symbol,
+                        window=self.window,
+                        refresh_mode=refresh_mode,
+                        method=method,
+                        provider="yf",
+                    )
+            else:
+                df = self.store.get_series(
+                    symbol=symbol,
+                    window=self.window,
+                    refresh_mode=refresh_mode,
+                    method=method,
+                    provider=provider,
+                )
         except SystemExit:
             raise
         except Exception as exc:
@@ -189,7 +209,7 @@ class SectorProxyDataSource(DataSourceBase):
 
     @staticmethod
     def _neutral_block(symbol: str) -> Dict[str, Any]:
-        LOG.warning("[DS.SectorProxy] Neutral block for %s", symbol)
+        LOG.info("[DS.SectorProxy] Neutral block for %s", symbol)
         return {"symbol": symbol, "close": None, "prev_close": None, "pct": None, "window": []}
 
     @staticmethod

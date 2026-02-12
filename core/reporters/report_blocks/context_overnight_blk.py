@@ -55,21 +55,21 @@ class ContextOvernightBlock(ReportBlockRendererBase):
         if overnight is None:
             warnings.append("empty:overnight")
             payload = {
-                "note": (
-                    "未提供隔夜维度数据（overnight slot 为空）。"
-                    "该区块仅用于补充说明海外市场、宏观或情绪背景，"
-                    "不影响 Gate / ActionHint 的有效性。"
-                )
+                #"note": (
+                #    "未提供隔夜维度数据（overnight slot 为空）。"
+                #    "该区块仅用于补充说明海外市场、宏观或情绪背景，"
+                #    "不影响 Gate / ActionHint 的有效性。"
+                #)
             }
             if trend_notice:
                 payload["trend_notice"] = trend_notice
         else:
             payload = {
                 "overnight": overnight,
-                "note": (
-                    "隔夜维度用于说明 A 股开盘前的外部环境背景，"
-                    "仅作为情境补充，不构成交易信号或操作建议。"
-                ),
+                #"note": (
+                #    "隔夜维度用于说明 A 股开盘前的外部环境背景，"
+                #    "仅作为情境补充，不构成交易信号或操作建议。"
+                #),
             }
             if trend_notice:
                 payload["trend_notice"] = trend_notice

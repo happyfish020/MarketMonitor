@@ -109,7 +109,10 @@ class ParticipationDataSource(DataSourceBase):
                 return None
             return c1 / c0 - 1.0
 
-        rets = last2.groupby("symbol", sort=False).apply(_ret_one)
+        #rets = last2.groupby("symbol", sort=False).apply(_ret_one)
+        #
+        rets = last2.groupby("symbol", sort=False, group_keys=False).apply(_ret_one, include_groups=False)
+
         rets = rets.dropna().astype(float)
         return rets
 

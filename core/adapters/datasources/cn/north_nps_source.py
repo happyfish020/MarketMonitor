@@ -94,7 +94,7 @@ class NorthNPSDataSource(DataSourceBase):
         for name, entry in self.nps_cfg.items():
             symbol = entry.get("symbol")
             method = entry.get("method", "etf")
-            provider = entry.get("provider", "yf")
+            provider = entry.get("provider", "db")
 
             if not symbol:
                 LOG.error("[DS.NorthNPS] Invalid entry: %s", entry)
@@ -121,13 +121,33 @@ class NorthNPSDataSource(DataSourceBase):
 
             # Step2: 通过 SymbolSeriesStore 拉 ETF 序列
             try:
-                df = self.store.get_series(
-                    symbol=symbol,
-                    window=self.window,
-                    refresh_mode=mode,
-                    method=method,
-                    provider=provider,
-                )
+                # db-first, yf-fallback (yf may miss EOD close for CN symbols)
+                if provider in ("yf", "db"):
+                    try:
+                        df = self.store.get_series(
+                            symbol=symbol,
+                            window=self.window,
+                            refresh_mode=mode,
+                            method=method,
+                            provider="db",
+                        )
+                    except Exception as e :
+                        LOG.warning(f"Nps source - Symbol:{symbol} e:{e}")
+                        df = self.store.get_series(
+                            symbol=symbol,
+                            window=self.window,
+                            refresh_mode=mode,
+                            method=method,
+                            provider="yf",
+                        )
+                else:
+                    df = self.store.get_series(
+                        symbol=symbol,
+                        window=self.window,
+                        refresh_mode=mode,
+                        method=method,
+                        provider=provider,
+                    )
             except SystemExit:
                 raise
             except Exception as exc:

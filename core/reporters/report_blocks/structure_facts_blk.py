@@ -40,7 +40,7 @@ class StructureFactsBlock(ReportBlockRendererBase):
                         "content": [
                             "（结构事实为空或未接入）",
                         ],
-                        "note": "注：结构事实为只读解释层，不构成预测或操作建议。",
+                        #"note": "注：结构事实为只读解释层，不构成预测或操作建议。",
                     },
                 )
 
@@ -78,7 +78,12 @@ class StructureFactsBlock(ReportBlockRendererBase):
                             continue
                         if isinstance(ek, str) and ek.startswith("_"):
                             continue
-                        lines.append(f"        - {ek}: {ev}")
+                        # Unit fix: if adv_ratio is a ratio (0~1), show both ratio and percent
+                        if ek == "adv_ratio" and isinstance(ev, (int, float)) and 0 <= float(ev) <= 1.0:
+                            pct = round(float(ev) * 100.0, 2)
+                            lines.append(f"        - {ek}: {float(ev):.4f} ({pct:.2f}%)")
+                        else:
+                            lines.append(f"        - {ek}: {ev}")
                 else:
                     lines.append("      关键证据：")
                     lines.append("        - (none)")
@@ -92,7 +97,7 @@ class StructureFactsBlock(ReportBlockRendererBase):
                 warnings=warnings,
                 payload={
                     "content": lines,
-                    "note": "注：以上为 Phase-2 冻结后的结构性事实，仅用于解释 Gate / ActionHint 背景，不构成新的判断、预测或操作建议。",
+                    #"note": "注：以上为 Phase-2 冻结后的结构性事实，仅用于解释 Gate / ActionHint 背景，不构成新的判断、预测或操作建议。",
                 },
             )
 

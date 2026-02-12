@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from core.reporters.report_types import ReportBlock
 from core.reporters.report_context import ReportContext
 from core.reporters.report_blocks.report_block_base import ReportBlockRendererBase
+from core.reporters.utils.state_render import actionhint_zh, gate_zh, drs_zh, execution_zh, stage_zh, safe_dict
 
 
 
@@ -23,9 +24,9 @@ class SummaryANDBlock(ReportBlockRendererBase):
     UnifiedRisk V12 · Summary (A / N / D) Block（语义一致性冻结版）
 
     Fixes (Frozen Engineering):
-    - (B) Execution band must be a single value (A/N/D/D1/D2), never "A/D1".
+    - (B) Execution band must be a single value (D1/D2/D3/NA), never "A/D1".
     - (C) Summary must explicitly show Gate → Permission mapping when needed.
-    - Add "体感" line when Execution indicates friction (D1/D2) to avoid optimistic misread.
+    - Add "体感" line when Execution indicates higher friction (D2/D3) to avoid optimistic misread.
     - Missing/invalid inputs MUST NOT crash report rendering; use warnings + placeholders.
     """
 
@@ -67,18 +68,43 @@ class SummaryANDBlock(ReportBlockRendererBase):
 
         lines: List[str] = []
 
-        # Header line: Code + Gate permission mapping
+
+        # Header (structured): avoid misreading Code as Gate
+        lines.append(f"ActionHintCode: {summary_code} — {actionhint_zh(summary_code)}")
+        ms = safe_dict(context.slots.get("market_state"))
+        if ms:
+            stg = ms.get("stage") or ms.get("stage_raw")
+            sev = ms.get("severity")
+            label = ms.get("label") or "MarketState"
+            lines.append(f"{label}: {stage_zh(stg)} | 严重度={sev}")
+        # Gate permission mapping (explicit)
         if gate_for_perm and gate_perm:
-            lines.append(f"Code:{summary_code}（Gate={gate_for_perm}：{gate_perm}）")
+            lines.append(f"Gate: {gate_for_perm} — {gate_zh(gate_for_perm)} — {gate_perm}")
+        elif gate_for_perm:
+            lines.append(f"Gate: {gate_for_perm} — {gate_zh(gate_for_perm)}")
         else:
-            lines.append(f"Code:{summary_code}")
+            lines.append("Gate: N/A")
+
+        # AttackPermit (DOS) — explicit overlay indicator (read-only)
+        gov = context.slots.get("governance")
+        ap = gov.get("attack_permit") if isinstance(gov, dict) else None
+        if isinstance(ap, dict) and str(ap.get("permit") or "").upper() == "YES":
+            ap_label = ap.get("label") or "YES"
+            lines.append(f"AttackPermit: {str(ap_label).strip()}（允许底仓小步；禁止追涨/杠杆/逆势抄底扩大敞口）")
 
         # Main meaning
         lines.append(reason)
-        lines.append("趋势结构仍在，但成功率下降，制度不支持主动扩大风险敞口。")
+
+        # Trend-in-force summary must not contradict structure facts.
+        trend_line = self._trend_line(context)
+        if trend_line:
+            lines.append(trend_line)
+        else:
+            # conservative fallback (avoid optimistic wording)
+            lines.append("趋势结构处于谨慎区间，制度不支持主动扩大风险敞口。")
 
         # "体感" line（证据驱动；避免仅凭 Execution 推断盘面事实）
-        if exec_band in ("D1", "D2"):
+        if exec_band in ("D2", "D3"):
             feeling = self._derive_execution_feeling(context)
             if feeling:
                 lines.append(feeling)
@@ -96,9 +122,9 @@ class SummaryANDBlock(ReportBlockRendererBase):
             if sig_s and not m_s:
                 m_s = _DRS_MEANING_FALLBACK.get(sig_s.upper(), "")
             if sig_s and m_s:
-                lines.append(f"【DRS · 日度风险信号】{sig_s} —— {m_s}")
+                lines.append(f"【DRS · 日度风险信号】{drs_zh(sig_s)} —— {m_s}")
             elif sig_s:
-                lines.append(f"【DRS · 日度风险信号】{sig_s}")
+                lines.append(f"【DRS · 日度风险信号】{drs_zh(sig_s)}")
             elif m_s:
                 lines.append(f"【DRS · 日度风险信号】{m_s}")
             else:
@@ -109,7 +135,7 @@ class SummaryANDBlock(ReportBlockRendererBase):
         # Execution line
         if exec_band:
             lines.append(
-                f"【Execution · 2–5D】{exec_band} —— "
+                f"【Execution · 2–5D】{execution_zh(exec_band)} —— "
                 "Execution 仅评估执行摩擦；在 Gate 约束下不构成放行或进攻依据。"
             )
         elif execu is not None:
@@ -151,6 +177,29 @@ class SummaryANDBlock(ReportBlockRendererBase):
             return obj.get(key)
         return getattr(obj, key, None)
 
+    def _trend_line(self, context: ReportContext) -> Optional[str]:
+        """Return a single summary line for trend-in-force, without contradicting structure facts."""
+        structure = context.slots.get("structure")
+        if not isinstance(structure, dict):
+            return None
+        trend = structure.get("trend_in_force")
+        if not isinstance(trend, dict):
+            return None
+        state = trend.get("state")
+        if not isinstance(state, str) or not state.strip():
+            return None
+
+        s = state.strip().lower()
+        if s in ("broken", "fail", "failed", "invalid"):
+            return "趋势结构已破坏（trend_in_force=broken），制度上不支持主动扩大风险敞口。"
+        if s in ("weakening", "weak", "fragile"):
+            return "趋势结构走弱（trend_in_force=weakening），成功率下降，避免追涨与放大试错。"
+        if s in ("in_force", "inforce", "strong", "healthy"):
+            return "趋势结构仍在（trend_in_force=in_force），但需结合成功率/执行摩擦控制追价风险。"
+
+        # Unknown state: do not guess
+        return None
+
     def _extract_execution_band(self, execu: Any, warnings: List[str]) -> Optional[str]:
         """
         Extract a single execution band string.
@@ -183,12 +232,21 @@ class SummaryANDBlock(ReportBlockRendererBase):
         # Normalize spaces
         s = s.replace(" ", "")
 
-        allowed = {"A", "N", "D", "D1", "D2"}
-        if s not in allowed:
-            warnings.append("invalid:execution_band_value")
-            # return raw normalized so UX has something to show (frozen principle)
+        # Canonical allowed bands
+        allowed = {"D1", "D2", "D3", "NA"}
+        if s in allowed:
             return s
 
+        # Legacy code mapping (conservative)
+        if s in ("A", "N"):
+            warnings.append("fallback:execution_code_mapped")
+            return "D1"
+        if s in ("D",):
+            warnings.append("fallback:execution_code_mapped")
+            return "D2"
+
+        warnings.append("invalid:execution_band_value")
+        # return raw normalized so UX has something to show (frozen principle)
         return s
 
     def _gate_permission_text(self, gate: Any) -> str:
@@ -228,7 +286,11 @@ class SummaryANDBlock(ReportBlockRendererBase):
             details.get("adv_ratio"),
             self._pick_number(self._get_nested(context.slots.get("market_overview"), ("breadth", "adv_ratio")), None),
         )
-        top20 = self._pick_number(
+        top20_ratio = self._pick_number(
+            details.get("top20_ratio"),
+            self._pick_number(self._get_nested(context.slots.get("market_overview"), ("amount", "top20_ratio")), None),
+        )
+        top20_proxy = self._pick_number(
             details.get("top20_amount_ratio"),
             self._pick_number(self._get_nested(context.slots.get("market_overview"), ("amount", "top20_amount_ratio")), None),
         )
@@ -237,10 +299,20 @@ class SummaryANDBlock(ReportBlockRendererBase):
         crowding = str(interp.get("crowding", "")).lower()
 
         weak = (participation in ("weak", "low")) or (isinstance(adv_ratio, (int, float)) and adv_ratio <= 0.42)
-        crowded = (crowding in ("high", "very_high")) or (isinstance(top20, (int, float)) and top20 >= 0.70)
+        crowded = (
+            (crowding in ("high", "very_high"))
+            or (isinstance(top20_ratio, (int, float)) and top20_ratio >= 0.12)
+            or (isinstance(top20_proxy, (int, float)) and top20_proxy >= 0.70)
+        )
 
         # evidence sufficiency guard
-        has_ev = isinstance(adv_ratio, (int, float)) or isinstance(top20, (int, float)) or participation or crowding
+        has_ev = (
+            isinstance(adv_ratio, (int, float))
+            or isinstance(top20_ratio, (int, float))
+            or isinstance(top20_proxy, (int, float))
+            or participation
+            or crowding
+        )
         if not has_ev:
             return None
 
@@ -258,7 +330,7 @@ class SummaryANDBlock(ReportBlockRendererBase):
 
     def _extract_etf_sync_details(self, context: ReportContext) -> Dict[str, Any]:
         """
-        提取 etf_spot_sync / etf_index_sync 的 details（best-effort）。
+        提取 etf_spot_sync / crowding_concentration 的 details（best-effort）。
         """
         v = context.slots.get("etf_spot_sync")
         d = self._unwrap_details(v)
@@ -267,7 +339,7 @@ class SummaryANDBlock(ReportBlockRendererBase):
 
         overlay = context.slots.get("intraday_overlay") or context.slots.get("overlay") or context.slots.get("intraday")
         if isinstance(overlay, dict):
-            for k in ("etf_spot_sync", "etf_index_sync", "etf_index_sync_daily"):
+            for k in ("etf_spot_sync",  "crowding_concentration"):
                 d = self._unwrap_details(overlay.get(k))
                 if d:
                     return d
@@ -277,7 +349,7 @@ class SummaryANDBlock(ReportBlockRendererBase):
 
         obs = context.slots.get("observations")
         if isinstance(obs, dict):
-            for k in ("etf_spot_sync", "etf_index_sync", "intraday_overlay", "overlay"):
+            for k in ("etf_spot_sync", "crowding_concentration", "intraday_overlay", "overlay"):
                 d = self._unwrap_details(obs.get(k))
                 if d:
                     return d
@@ -290,7 +362,7 @@ class SummaryANDBlock(ReportBlockRendererBase):
             return {}
         if isinstance(obj.get("details"), dict):
             return obj.get("details")  # type: ignore[return-value]
-        keys = ("adv_ratio", "top20_amount_ratio", "interpretation")
+        keys = ("adv_ratio", "top20_ratio", "top20_amount_ratio", "interpretation")
         if any(k in obj for k in keys):
             return obj
         return {}

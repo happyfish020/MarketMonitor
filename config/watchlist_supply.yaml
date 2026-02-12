@@ -1,0 +1,41 @@
+# Watchlist Supply (RAW MVP / UAT)
+# - 董监高增减持 + 大宗交易：用于“持仓/观察股”的供给压力观察（只读，不进 Gate/DRS）
+# - 本配置对应 DataSource + Fetcher 的底层可行性验证（RAW，不做聚合/打分）
+schema: WL_SUPPLY_RAW_MVP_2026Q1
+version: "v1"
+
+lookback_days: 60
+
+source:
+  name: akshare
+  notes:
+    - ggcg: stock_em_ggcg(symbol=股票6位代码)
+    - dzjy: stock_dzjy_mrmx(symbol=股票6位代码)
+
+fetch:
+  # 每个 symbol 最多保留多少条原始记录进 cache（避免 JSON 过大）
+  top_n_records: 60
+
+symbols:
+  - key: cn_tianfu
+    symbol: 300394.SZ
+    alias: 天孚通信
+  - key: cn_catl
+    symbol: 300750.SZ
+    alias: 宁德时代
+  - key: cn_byd
+    symbol: 002594.SZ
+    alias: 比亚迪
+  - key: cn_sungrow
+    symbol: 300274.SZ
+    alias: 阳光电源
+  - key: cn_zijin
+    symbol: 601899.SS
+    alias: 紫金矿业
+observe:
+  - 000977
+  - '601138'
+  - '603019'
+  - '300383'
+  - '300738'
+  - '002335'

@@ -16,7 +16,7 @@ class StructureDistributionContinuity:
         Phase-3 Structure Distribution Continuity
         """
 
-        sync = factors.get("etf_index_sync_daily")
+        sync = factors.get("crowding_concentration")
         part = factors.get("participation")
 
         is_bad = False

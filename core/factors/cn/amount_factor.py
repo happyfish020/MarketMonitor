@@ -64,11 +64,49 @@ class AmountFactor(FactorBase):
         ma = self._mean(series[-self.ma_window :]) if series else None
         ratio = (total / ma) if (total is not None and ma not in (None, 0.0)) else None
 
+        
+        # prev / delta vs previous day (best-effort)
+        latest_val = total
+        prev_val: Optional[float] = None
+        delta_prev: Optional[float] = None
+        ratio_prev: Optional[float] = None
+
+        try:
+            w = raw.get("window")
+            if isinstance(w, list) and len(w) >= 2:
+                rows = []
+                for r in w:
+                    if isinstance(r, dict):
+                        td = r.get("trade_date") or r.get("date") or r.get("dt")
+                        tv = self._to_float(r.get("total_amount") or r.get("amount") or r.get("total"))
+                        if td and tv is not None:
+                            rows.append((str(td), float(tv)))
+                if len(rows) >= 2:
+                    # Sort by trade_date descending (latest first)
+                    rows.sort(key=lambda x: x[0], reverse=True)
+                    latest_val = float(rows[0][1])
+                    prev_val = float(rows[1][1])
+                    delta_prev = latest_val - prev_val
+        except Exception:
+            pass
+
+        # if snapshot total is missing, fallback to computed latest
+        if total is None and latest_val is not None:
+            total = latest_val
+
+        if prev_val is not None and ma not in (None, 0.0):
+            try:
+                ratio_prev = float(prev_val) / float(ma)
+            except Exception:
+                ratio_prev = None
         details: Dict[str, Any] = {
             "data_status": "OK" if total is not None else "MISSING",
             "amount_total": total,
             "amount_ma20": ma,
             "amount_ratio": ratio,
+            "amount_prev": prev_val,
+            "amount_delta_prev": delta_prev,
+            "amount_ratio_prev": ratio_prev,
             "_raw_data": json.dumps(raw, ensure_ascii=False)[:2000],
         }
 

@@ -43,3 +43,14 @@ def logs_path(*p):
 
 def reports_path(*p):
     return os.path.join(ROOT_DIR, "reports", *p)
+
+
+@lru_cache()
+def load_watchlist_lead() -> Dict[str, Any]:
+    """Load config/watchlist_lead.yaml.
+
+    Frozen Engineering contract:
+    - Missing file => {}
+    - Always returns dict
+    """
+    return _load_yaml("watchlist_lead.yaml")

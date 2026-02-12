@@ -1,3 +1,5 @@
+gate_rules_path: "config/gate_rules.yaml"
+
 dev_mode: true
 
 # ------------------------------------------------------------
@@ -18,3 +20,12 @@ db:
       stock_daily: "CN_STOCK_DAILY_PRICE"
       index_daily: "CN_INDEX_DAILY_PRICE"
       universe: "CN_UNIVERSE_SYMBOLS"
+      # 新增 ETF 日线表映射（C Block）
+      # 用于查询基金 ETF 日行情（如份额净申购/赎回代理）
+      fund_etf_hist: "CN_FUND_ETF_HIST_EM"
+      # 新增期指日行情表映射（D Block）
+      # 用于查询股指期货与指数收盘价计算基差
+      fut_index_hist: "CN_FUT_INDEX_HIS"
+      # 新增 ETF 期权日行情表映射（E Block）
+      # 用于查询 ETF 期权日行情计算风险
+      option_daily: "CN_OPTION_SSE_DAILY"

@@ -22,7 +22,10 @@ class FactorResult:
     name: str
     score: float
     level: RiskLevel
+    #version: str
     details: Dict[str, Any] = field(default_factory=dict)
+    
+ 
 
     def __post_init__(self) -> None:
         # dataclass(frozen=True) 下需要 object.__setattr__ 做纠正或报错

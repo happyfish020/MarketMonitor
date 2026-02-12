@@ -14,10 +14,14 @@ factor_pipeline:
   - margin
   - north_proxy_pressure
   - sector_proxy
-  - etf_index_sync
-  - etf_index_sync_daily
+  - watchlist_lead
+  - crowding_concentration
   - trend_in_force
   - failure_rate
+  - etf_flow
+  - futures_basis
+  - liquidity_quality
+  - options_risk
 
   registry:
     unified_emotion: "core.factors.cn.unified_emotion_factor:UnifiedEmotionFactor"
@@ -31,16 +35,24 @@ factor_pipeline:
     margin: "core.factors.cn.margin_factor:MarginFactor"
     north_proxy_pressure: "core.factors.cn.north_proxy_pressure_factor:NorthProxyPressureFactor"
     sector_proxy: "core.factors.cn.sector_proxy_factor:SectorProxyFactor"
-    etf_index_sync: "core.factors.cn.etf_index_sync_factor:ETFIndexSyncFactor"
-    etf_index_sync_daily: "core.factors.cn.etf_index_sync_daily_factor:ETFIndexSyncDailyFactor"
+    watchlist_lead: "core.factors.cn.watchlist_lead_factor:WatchlistLeadFactor"
+    crowding_concentration: "core.factors.cn.crowding_concentration_factor:CrowdingConcentrationFactor"    
     trend_in_force: "core.factors.cn.trend_in_force_factor:TrendInForceFactor"
     failure_rate: "core.factors.cn.frf_factor:FRFFactor"
+    # C Block: ETF Flow Factor
+    etf_flow: "core.factors.cn.etf_flow_factor:ETFFlowFactor"
+    # D Block: Futures Basis Factor
+    futures_basis: "core.factors.cn.futures_basis_factor:FuturesBasisFactor"
+    # F Block: Liquidity Quality Factor
+    liquidity_quality: "core.factors.cn.liquidity_quality_factor:LiquidityQualityFactor"
+    # E Block: Options Risk Factor
+    options_risk: "core.factors.cn.options_risk_factor:OptionsRiskFactor"
 
   structure_factors:
   - sector_proxy
   - north_proxy_pressure
   - amount
-  - etf_index_sync_daily
+  - crowding_concentration
   - trend_in_force
   - failure_rate
   - index_tech
@@ -64,6 +76,10 @@ prediction_weights:
   trend_in_force: 0.0
   failure_rate: 0.0
   participation: 0.0
+  etf_flow: 0.05
+  futures_basis: 0.05
+  liquidity_quality: 0.05
+  options_risk: 0.05
 validation_weights:
   sector_proxy: 1.0
   north_proxy_pressure: 1.0
@@ -73,6 +89,10 @@ validation_weights:
   breadth: 1.0
   index_tech: 1.0
   participation: 1.0
+  etf_flow: 1.0
+  futures_basis: 1.0
+  liquidity_quality: 1.0
+  options_risk: 1.0
 gate_rules:
   mode: downgrade_only
   order:

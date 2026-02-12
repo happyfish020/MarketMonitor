@@ -127,6 +127,18 @@ class ExecutionSummaryBuilder:
         breadth = structure.get("breadth")
         breadth_state = breadth.get("state") if isinstance(breadth, dict) else None
 
+        # crowding / concentration (read-only structural fact)
+        cc = None
+        if isinstance(structure, dict):
+            cc = (
+                structure.get("crowding_concentration")
+                or structure.get("etf_index_sync")
+                or structure.get("etf_spot_sync")
+            )
+        crowding_state = cc.get("state") if isinstance(cc, dict) else None
+        top20_amount_ratio = self._find_number(cc, ["top20_amount_ratio", "top20_ratio"]) if isinstance(cc, dict) else None
+        adv_ratio = self._find_number(cc, ["adv_ratio"]) if isinstance(cc, dict) else None
+
         # =========================
         # 1. 读取 DRS（执行观测）
         # =========================
@@ -229,8 +241,38 @@ class ExecutionSummaryBuilder:
         # =========================
         # 5. A / D1：执行环境尚可
         # =========================
-        meaning = "短期（2–5D）未观察到显著执行风险，可在控制仓位的前提下按结构计划执行。"
+        d1_hits: List[str] = []
+        cs = str(crowding_state or "").lower().strip()
+        if cs in {"high", "crowding_high", "medium_high"}:
+            d1_hits.append(f"crowding={cs}")
 
+        # Phase-3 分布风险：只影响“成功率环境”的语义，不把 band 拉到 D2/D3
+        if phase3_evidence is not None:
+            d1_hits.append("phase3_distribution_risk")
+
+        if d1_hits:
+            meaning = (
+                "短期（2–5D）执行摩擦偏高：结构未坏，但拥挤/集中度与成功率环境提示"
+                "追价与频繁进攻性调仓胜率偏低；更适合等待确认或以‘卖在反弹/分批’方式执行。"
+            )
+            if phase3_meaning:
+                meaning = f"{meaning}\n{phase3_meaning}"
+
+            return ExecutionSummary(
+                code="N",
+                band="D1",
+                meaning=meaning,
+                evidence={
+                    "hits": d1_hits,
+                    "crowding_state": crowding_state,
+                    "top20_amount_ratio": top20_amount_ratio,
+                    "adv_ratio": adv_ratio,
+                    "phase3": phase3_evidence,
+                },
+                meta={"asof": asof, "status": "ok"},
+            )
+
+        meaning = "短期（2–5D）未观察到显著执行摩擦，可在控制仓位的前提下按结构计划执行。"
         if phase3_meaning:
             meaning = f"{meaning}\n{phase3_meaning}"
 
@@ -239,7 +281,44 @@ class ExecutionSummaryBuilder:
             band="D1",
             meaning=meaning,
             evidence={
+                "crowding_state": crowding_state,
+                "top20_amount_ratio": top20_amount_ratio,
+                "adv_ratio": adv_ratio,
                 "phase3": phase3_evidence,
             },
             meta={"asof": asof, "status": "ok"},
         )
+
+    @staticmethod
+    def _find_number(d: Any, keys: List[str]) -> Optional[float]:
+        """Best-effort numeric extraction from dict with common nesting patterns."""
+        if not isinstance(d, dict):
+            return None
+
+        def _pick(src: Any, k: str) -> Optional[float]:
+            if not isinstance(src, dict):
+                return None
+            v = src.get(k)
+            if isinstance(v, (int, float)):
+                return float(v)
+            try:
+                if isinstance(v, str) and v.strip():
+                    return float(v)
+            except Exception:
+                return None
+            return None
+
+        # direct
+        for k in keys:
+            v = _pick(d, k)
+            if v is not None:
+                return v
+
+        # nested
+        for nest in ("evidence", "details", "key_evidence", "关键证据"):
+            src = d.get(nest)
+            for k in keys:
+                v = _pick(src, k)
+                if v is not None:
+                    return v
+        return None

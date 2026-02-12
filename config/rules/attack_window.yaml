@@ -1,0 +1,142 @@
+schema_version: 1
+rule_id: AW-V12-ATTACK-WINDOW-V1
+name: Attack Window (进攻窗口) 规则
+owner: UnifiedRisk V12
+status: FROZEN
+
+inputs:
+  required_slots:
+    - market_overview
+    - breadth
+    - trend_in_force
+    - failure_rate
+    - north_proxy_pressure
+    - leverage_constraints
+    - options_risk
+    - gate_decision
+
+  freshness_policy:
+    hard_required:
+      - market_overview
+      - breadth
+      - trend_in_force
+    confirm_only:
+      - failure_rate
+      - leverage_constraints
+      - options_risk
+      - north_proxy_pressure
+    readonly:
+      - watchlist_lead
+      - sector_proxy
+
+thresholds:
+  A_structure:
+    trend_states_allowed: ["intact", "recovering"]
+    price_above_ma20_min_days: 2
+    ma20_slope_min: 0.0
+    forbid_first_rebound: true
+
+    # When structure is BROKEN, allow a strictly limited VERIFY_ONLY observing window.
+    observing:
+      enable: true
+      pct_above_ma20_min: 0.50
+      new_low_ratio_pct_max: 1.50
+      amount_ma20_ratio_min: 0.75
+      proxy_top20_amount_ratio_max: 0.80
+
+  # LIGHT_ON thresholds are handled in code as a controlled state (not a full ON).
+
+  B_failure_rate:
+    level_forbid: ["HIGH"]
+    improvement_min_days: 3
+    allow_if_level: ["LOW", "MED"]
+
+  C_participation:
+    require_any: true
+    conditions:
+      - id: adv_ratio_stable
+        adv_ratio_min: 0.55
+        stable_days: 2
+      - id: pct_above_ma20_expand
+        pct_above_ma20_min: 0.55
+        stable_days: 2
+      - id: amount_ok_and_top20_not_worse
+        amount_ma20_ratio_min: 1.00
+        top20_ratio_max: 0.75
+
+  D_constraints_release:
+    north_proxy_forbid_levels: ["HIGH"]
+    leverage_forbid_levels: ["HIGH"]
+    options_forbid_levels: ["HIGH"]
+    allow_if_all_not_forbid: true
+
+output:
+  slot: attack_window
+  schema: AW_V1
+  fields:
+    - asof
+    - state
+    - gate
+    - offense_permission
+    - reasons_yes
+    - reasons_no
+    - evidence
+    - data_freshness
+
+governance_mapping:
+  gate_to_permission:
+    NORMAL:
+      ON:        "ALLOW"
+      LIGHT_ON:  "ALLOW"
+      VERIFY_ONLY: "LITE"
+      OFF:  "FORBID"
+    CAUTION:
+      ON:        "LITE"
+      LIGHT_ON:  "LITE"
+      VERIFY_ONLY: "FORBID"
+      OFF:  "FORBID"
+    D1:
+      ON:        "FORBID"
+      LIGHT_ON:  "FORBID"
+      VERIFY_ONLY: "FORBID"
+      OFF:  "FORBID"
+    D2:
+      ON:        "FORBID"
+      LIGHT_ON:  "FORBID"
+      VERIFY_ONLY: "FORBID"
+      OFF:  "FORBID"
+    D3:
+      ON:        "FORBID"
+      LIGHT_ON:  "FORBID"
+      VERIFY_ONLY: "FORBID"
+      OFF:  "FORBID"
+
+report:
+  block_title: "进攻窗口（Attack Window）"
+  render_style: bullet
+  show_evidence_keys:
+    - trend_state
+    - adv_ratio
+    - pct_above_ma20
+    - new_low_ratio_pct
+    - amount_ma20_ratio
+    - market_top20_trade_ratio
+    - proxy_top20_amount_ratio
+    - top20_ratio
+    - failure_rate_level
+    - failure_rate_improve_days
+    - north_proxy_level
+    - leverage_level
+    - options_level
+    - decision_reasons
+    - constraint_summary
+    - allowed_actions
+    - forbidden_actions
+    - rollback_triggers_hit
+    - audit_notes
+    - decision_reasons
+    - constraint_summary
+    - allowed_actions
+    - forbidden_actions
+    - rollback_triggers_hit
+    - audit_notes

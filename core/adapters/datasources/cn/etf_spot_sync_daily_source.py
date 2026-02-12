@@ -38,7 +38,7 @@ class ETFSpotSyncDailyDataSource(DataSourceBase):
     """
 
     def __init__(self, config: DataSourceConfig):
-        super().__init__(name="etf_index_sync_daily")
+        super().__init__(name="etf_spot")
 
         self.config = config
         self.cache_root = config.cache_root

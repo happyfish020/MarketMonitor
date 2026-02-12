@@ -143,13 +143,32 @@ class CoreThemeDataSource(DataSourceBase):
 
             # Step2: 从 SymbolSeriesStore 获取序列
             try:
-                df = self.store.get_series(
-                    symbol=symbol,
-                    window=self.window,
-                    refresh_mode=mode,
-                    method=method,
-                    provider=provider_label,
-                )
+                # db-first, yf-fallback (yf may miss EOD close for CN symbols)
+                if provider_label in ("yf", "db"):
+                    try:
+                        df = self.store.get_series(
+                            symbol=symbol,
+                            window=self.window,
+                            refresh_mode=mode,
+                            method=method,
+                            provider="db",
+                        )
+                    except Exception:
+                        df = self.store.get_series(
+                            symbol=symbol,
+                            window=self.window,
+                            refresh_mode=mode,
+                            method=method,
+                            provider="yf",
+                        )
+                else:
+                    df = self.store.get_series(
+                        symbol=symbol,
+                        window=self.window,
+                        refresh_mode=mode,
+                        method=method,
+                        provider=provider_label,
+                    )
             except SystemExit:
                 raise
             except Exception as exc:

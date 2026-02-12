@@ -1,35 +1,53 @@
 reports:
   EOD:
     blocks:
-      - market.overview
-      - governance.gate
-      - structure.facts
-      - summary
-      - sector.proxy
-      - execution.summary
-      - exit.readiness
-      - etf_spot_sync.explain
-      - execution_quick_reference
-
-
+    - market.overview
+    - governance.gate
+    - governance.attack_permit
+    - structure.facts
+    - market.regime_narrative
+    - market.regime_repair_path
+    - market.regime_history
+    - summary
+    - sector.proxy
+    - rotation.switch
+    - rotation.snapshot
+    - watchlist.lead
+    - execution.summary
+    - exit.readiness
+    - crowding_concentration.explain
+    - rew.derisk_quickcard
+    - execution_quick_reference
     titles:
-      market.overview: "大盘概述（收盘事实）"
-      governance.gate: "制度门禁（Gate · Decision）"
-      execution.summary: "执行层评估（Execution · 2–5D）"
-      execution_quick_reference: "执行速查卡（只读）"
-      structure.facts: "结构事实（技术轨）"
-      etf_spot_sync.explain: "核心字段解释（拥挤/不同步/参与度）"
-      exit.readiness: "出场准备度（Exit Readiness · Governance）"
-      summary: "简要总结（Summary · A / N / D）"
-      sector.proxy: "板块代理验证（Sector Proxy · Validation）"
-
+      market.overview: 大盘概述（收盘事实）
+      governance.gate: 制度门禁（Gate · Decision）
+      governance.attack_permit: 进攻许可（AttackPermit · DOS）
+      execution.summary: 执行层评估（Execution · 2–5D）
+      execution_quick_reference: 执行速查卡（只读）
+      rew.derisk_quickcard: REW→De-risk 执行速查卡（只读）
+      structure.facts: 结构事实（技术轨）
+      crowding_concentration.explain: 核心字段解释（拥挤/不同步/参与度）
+      exit.readiness: 出场准备度（Exit Readiness · Governance）
+      summary: 简要总结（Summary · A / N / D）
+      sector.proxy: 板块代理验证（Sector Proxy · Validation）
+      rotation.switch: 板块轮动开关（Rotation Switch）
+      rotation.snapshot: 板块轮换（Sector Rotation · Snapshot）
+      watchlist.lead: WatchlistLead（持仓/关注池 · 观察层）
 builders:
-  market.overview: "core.reporters.report_blocks.market_overview_blk:MarketOverviewBlock"
-  governance.gate: "core.reporters.report_blocks.gate_decision_blk:GateDecisionBlock"
-  execution.summary: "core.reporters.report_blocks.execution_summary_blk:ExecutionSummaryBlock"
-  execution_quick_reference: "core.reporters.report_blocks.execution_quick_reference_blk:ExecutionQuickReferenceBlock"
-  structure.facts: "core.reporters.report_blocks.structure_facts_blk:StructureFactsBlock"
-  etf_spot_sync.explain: "core.reporters.report_blocks.etf_spot_sync_explain_blk:EtfSpotSyncExplainBlock"
-  exit.readiness: "core.reporters.report_blocks.exit_readiness_blk:ExitReadinessBlock"
-  summary: "core.reporters.report_blocks.summary_a_n_d_blk:SummaryANDBlock"
-  sector.proxy: "core.reporters.report_blocks.sector_proxy_blk:SectorProxyBlock"
+  market.overview: core.reporters.report_blocks.market_overview_blk:MarketOverviewBlock
+  governance.gate: core.reporters.report_blocks.gate_decision_blk:GateDecisionBlock
+  governance.attack_permit: core.reporters.report_blocks.attack_permit_blk:AttackPermitBlock
+  execution.summary: core.reporters.report_blocks.execution_summary_blk:ExecutionSummaryBlock
+  execution_quick_reference: core.reporters.report_blocks.execution_quick_reference_blk:ExecutionQuickReferenceBlock
+  rew.derisk_quickcard: core.reporters.report_blocks.rew_derisk_quickcard_blk:RewDeriskQuickcardBlock
+  structure.facts: core.reporters.report_blocks.structure_facts_blk:StructureFactsBlock
+  crowding_concentration.explain: core.reporters.report_blocks.crowding_concentration_explain_blk:CrowdingConcentrationExplainBlock
+  exit.readiness: core.reporters.report_blocks.exit_readiness_blk:ExitReadinessBlock
+  summary: core.reporters.report_blocks.summary_a_n_d_blk:SummaryANDBlock
+  sector.proxy: core.reporters.report_blocks.sector_proxy_blk:SectorProxyBlock
+  rotation.switch: core.reporters.report_blocks.rotation_switch_blk:RotationSwitchBlock
+  rotation.snapshot: core.reporters.report_blocks.rotation_snapshot_blk:RotationSnapshotBlock
+  watchlist.lead: core.reporters.report_blocks.watchlist_lead_blk:WatchlistLeadBlock
+  market.regime_narrative: core.reporters.report_blocks.market_regime_narrative_blk:MarketRegimeNarrativeBlock
+  market.regime_repair_path: core.reporters.report_blocks.market_regime_repair_path_blk:MarketRegimeRepairPathBlock
+  market.regime_history: core.reporters.report_blocks.market_regime_history_blk:MarketRegimeHistoryBlock

@@ -13,6 +13,32 @@ from datetime import datetime
 from typing import Dict, Any, Optional
 
 import pandas as pd
+def _attach_asof_attrs(df: pd.DataFrame, *, symbol: str, provider: str) -> pd.DataFrame:
+    """Attach lightweight metadata for downstream data freshness checks."""
+    try:
+        if df is None or df.empty:
+            return df
+        col = None
+        if "date" in df.columns:
+            col = "date"
+        elif "trade_date" in df.columns:
+            col = "trade_date"
+        elif "DATA_DATE" in df.columns:
+            col = "DATA_DATE"
+        if col:
+            # best-effort parse
+            try:
+                asof = pd.to_datetime(df[col]).max()
+                if asof is not None and str(asof) != "NaT":
+                    df.attrs["asof"] = str(asof)[:10]
+            except Exception:
+                pass
+        df.attrs["symbol"] = symbol
+        df.attrs["provider"] = provider
+    except Exception:
+        pass
+    return df
+
 import yaml
 
 from core.utils.logger import get_logger
@@ -133,7 +159,9 @@ class SymbolSeriesStore:
                 raise ValueError("missing required columns")
 
             df = df[cols]
-            df["date"] = df["date"].astype(str)
+            #df["date"] = df["date"].astype(str)
+            df = df.copy()
+            df.loc[:, "date"] = df["date"].astype("string")
             return df
 
         except SystemExit:
@@ -165,7 +193,7 @@ class SymbolSeriesStore:
         if key in self.memory_cache and refresh_mode in ("none", "readonly") :
             df = self.memory_cache[key]
             if len(df) >= window:
-                return df.tail(window).reset_index(drop=True).copy()
+                return _attach_asof_attrs(df.tail(window).reset_index(drop=True).copy(), symbol=symbol, provider=provider)
 
         # 2. history
         hist = self._load_history(symbol)
@@ -177,7 +205,7 @@ class SymbolSeriesStore:
         if refresh_mode in ("none", "readonly")  and len(df_hist) >= window:
             df_hist = df_hist.sort_values("date")
             self.memory_cache[key] = df_hist.copy()
-            return df_hist.tail(window).reset_index(drop=True).copy()
+            return _attach_asof_attrs(df_hist.tail(window).reset_index(drop=True).copy(), symbol=symbol, provider=provider)
 
         # 3. provider
         df_new = self._fetch_from_provider(symbol, provider, window, method)
@@ -209,4 +237,4 @@ class SymbolSeriesStore:
             "series": self._df_to_series(df_all),
         })
 
-        return df_all.tail(window).reset_index(drop=True).copy()
+        return _attach_asof_attrs(df_all.tail(window).reset_index(drop=True).copy(), symbol=symbol, provider=provider)

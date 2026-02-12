@@ -46,10 +46,10 @@ class MarkdownRenderer:
         title = "A股风险报告（Pre-open）" if kind == "PRE_OPEN" else "A股风险报告（EOD）"
 
         lines.append(f"# {title}")
-        lines.append("本报告由个人程序自动生成，个人编程实验爱好，不构成投资建议。")
+        lines.append("本报告由个人程序自动生成，个人代码实践，不构成投资建议。")
         lines.append("非预测系统，目的是提供大市的结构性风险情况，只提供风险事实检测，并提供操作指导，避免个人情绪，")
         lines.append("数据主要根据大盘，板块数据的相关性，如趋势是否仍成立、失败率/结构破坏、流动性与成交、北向代理压力、")
-        lines.append("ETF–指数同步与拥挤/参与度等, 输出“允许/禁止加仓、防守/观望”等可执行边界。")
+        lines.append("ETF–指数同步  与拥挤/参与度等, 输出“允许/禁止加仓、防守/观望”等可执行边界, 减少人为情绪操作。")
         lines.append("持续改时中。。。")
 
         lines.append("")
@@ -65,10 +65,83 @@ class MarkdownRenderer:
 
         lines.append("## 系统裁决（ActionHint）")
         lines.append("")
+
+        # Summary (legacy, keep)
         lines.append(f"**当前制度状态：{doc.summary}**")
         lines.append("")
-        lines.append(f"**裁决依据：** {ah.get('reason')}")
-        lines.append("")
+
+        # Explicit opportunity permission
+        ap = ah.get("attack_permit")
+        if isinstance(ap, dict):
+            label = ap.get("label") if isinstance(ap.get("label"), str) else None
+            permit = ap.get("permit") if isinstance(ap.get("permit"), str) else "-"
+            mode = ap.get("mode") if isinstance(ap.get("mode"), str) else "-"
+            lines.append(f"**进攻许可（AttackPermit）：** {label or (str(permit) + ' (' + str(mode) + ')')}")
+            # show key evidence compactly (avoid noise)
+            ev = ap.get("evidence") if isinstance(ap.get("evidence"), dict) else {}
+            adv = ev.get("adv_ratio")
+            top20 = ev.get("top20_ratio")
+            if isinstance(adv, (int, float)) or isinstance(top20, (int, float)):
+                parts = []
+                if isinstance(adv, (int, float)):
+                    parts.append(f"adv_ratio={float(adv):.3f}")
+                if isinstance(top20, (int, float)):
+                    parts.append(f"top20_ratio={float(top20):.4f} (strict)")
+                if parts:
+                    lines.append(f"- 关键证据：{', '.join(parts)}")
+            # show warnings (if any)
+            ws = ap.get("warnings")
+            if isinstance(ws, list) and ws:
+                for w in ws[:6]:
+                    lines.append(f"> ⚠️ {w}")
+            lines.append("")
+
+        # DOS (Daily Opportunity Signal)
+        dos = ah.get("dos")
+        if isinstance(dos, dict):
+            lvl = dos.get("level") if isinstance(dos.get("level"), str) else "-"
+            mode = dos.get("mode") if isinstance(dos.get("mode"), str) else "-"
+            allowed = dos.get("allowed") if isinstance(dos.get("allowed"), list) else []
+            lines.append(f"**机会信号（DOS）：** {lvl} ({mode})")
+            if allowed:
+                al = ", ".join([str(x) for x in allowed[:10]])
+                lines.append(f"- allowed: {al}")
+            ws = dos.get("warnings")
+            if isinstance(ws, list) and ws:
+                for w in ws[:6]:
+                    lines.append(f"> ⚠️ {w}")
+            lines.append("")
+
+        # Core reason
+        reason = ah.get("reason")
+        if reason:
+            lines.append(f"**裁决依据：** {reason}")
+            lines.append("")
+
+        # Allowed / Forbidden / Limits (explicit)
+        allowed = ah.get("allowed")
+        if isinstance(allowed, list) and allowed:
+            lines.append("**允许：**")
+            for a in allowed:
+                lines.append(f"- {a}")
+            lines.append("")
+
+        forbidden = ah.get("forbidden")
+        if isinstance(forbidden, list) and forbidden:
+            lines.append("**禁止：**")
+            for x in forbidden:
+                lines.append(f"- {x}")
+            lines.append("")
+
+        limits = ah.get("limits")
+        if isinstance(limits, str) and limits.strip():
+            lines.append(f"**行为边界：** {limits.strip()}")
+            lines.append("")
+
+        cond = ah.get("conditions")
+        if isinstance(cond, str) and cond.strip():
+            lines.append(f"**条件/备注：** {cond.strip()}")
+            lines.append("")
 
     # ===============================
     # Block dispatcher

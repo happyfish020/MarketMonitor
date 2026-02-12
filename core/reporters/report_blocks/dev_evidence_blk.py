@@ -52,10 +52,10 @@ class DevEvidenceBlock(ReportBlockRendererBase):
 
         payload = {
             "slot_overview": slot_overview,
-            "note": (
-                "该区块用于审计与回溯 Phase-3 Report 的输入证据轮廓，"
-                "仅展示 slots 的存在性与类型信息，不包含原始数据内容。"
-            ),
+            #"note": (
+            #    "该区块用于审计与回溯 Phase-3 Report 的输入证据轮廓，"
+            #    "仅展示 slots 的存在性与类型信息，不包含原始数据内容。"
+            #),
         }
 
         block = ReportBlock(

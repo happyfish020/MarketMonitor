@@ -1,0 +1,249 @@
+# UnifiedRisk V12 · WatchlistLead (MVP · Frozen Observation Layer)
+# ---------------------------------------------------------------
+# 目标：
+# - 独立观察层：输出 slots["watchlist_lead"]
+# - 不参与 GateDecision / DRS / 全市场评分（仅观察/提示）
+# - 分池：AI 主线 / 硬科技 / 新能源 / 稳定器&对冲
+# - 缺数据：不抛异常，输出 MISSING + warnings（可定位）
+#
+# 数据来源：
+# - DataSource: core.adapters.datasources.cn.watchlist_lead_source:WatchlistLeadDataSource
+#   -> snapshot["watchlist_lead_raw"]
+# - Factor: core.factors.cn.watchlist_lead_factor:WatchlistLeadFactor
+# - Builder: core.watchlist.watchlist_lead_builder:WatchlistLeadBuilder
+
+schema_version: "WL_MVP_2026Q1"
+
+# 统一阈值（小数表示：-0.03 = -3%）
+# 你可以对单个 symbol 覆盖 threshold_profile。
+thresholds:
+  supply_pressure:
+    windows: [5, 10, 20]
+    insider:
+      sell_cnt_yellow_20: 1
+      sell_cnt_orange_10: 1
+      sell_cnt_red_10: 2
+    block_trade:
+      cnt_yellow_20: 2
+      cnt_orange_10: 3
+      cnt_red_10: 5
+      worst_discount_yellow: -2.0
+      worst_discount_orange: -5.0
+      worst_discount_red: -8.0
+  profiles:
+    core_etf:
+      yellow_1d: -0.015
+      orange_1d: -0.025
+      red_1d: -0.035
+      yellow_2d: -0.025
+      orange_2d: -0.045
+      red_2d: -0.060
+
+    satellite_stock:
+      yellow_1d: -0.020
+      orange_1d: -0.030
+      red_1d: -0.045
+      yellow_2d: -0.030
+      orange_2d: -0.055
+      red_2d: -0.080
+
+    stabilizer:
+      yellow_1d: -0.010
+      orange_1d: -0.018
+      red_1d: -0.028
+      yellow_2d: -0.015
+      orange_2d: -0.030
+      red_2d: -0.045
+
+  # 分组聚合阈值（按组内“触发项数量”升档）
+  group_aggregation:
+    yellow_k: 1
+    orange_k: 2
+    red_any_2d: true
+
+# 分池/分组（append-only）
+groups:
+  BUCKET_AI:
+    title: "池1 · AI 主线（ETF 底座 + 光模块卫星）"
+    items:
+      - key: cn_ai_etf
+        weight: 0.55
+        role: core
+      - key: cn_ai_etf_alt
+        weight: 0.15
+        role: core
+      - key: cn_tianfu
+        weight: 0.30
+        role: satellite
+    note: "主仓ETF，个股只做卫星仓。"
+
+  BUCKET_HARDTECH:
+    title: "池2 · 硬科技/先进制造（只选 1 只 ETF）"
+    items:
+      - key: cn_semicon_etf
+        weight: 1.0
+        role: core
+    note: "MVP 仅观察 512480。后续可扩展制造/军工等。"
+
+  BUCKET_NE:
+    title: "池3 · 新能源核心（宁德 + 比亚迪 + 阳光）"
+    items:
+      - key: cn_catl
+        weight: 0.45
+        role: satellite
+      - key: cn_byd
+        weight: 0.35
+        role: satellite
+      - key: cn_sungrow
+        weight: 0.20
+        role: satellite
+    note: "该池允许高占比，但必须接受回撤触发降档（见报告中的提示，不自动交易）。"
+
+  BUCKET_STABLE_HEDGE:
+    title: "池4 · 稳定器/对冲（红利 + 黄金/资源）"
+    items:
+      - key: cn_div_lowvol
+        weight: 0.55
+        role: stabilizer
+      - key: cn_zijin
+        weight: 0.25
+        role: hedge
+      - key: us_gld
+        weight: 0.20
+        role: hedge
+    note: "稳定器用于降低组合波动；资源/黄金用于对冲风险事件。"
+  
+
+
+# 观察对象定义（不等于交易指令；仅用于观察/预警）
+# provider: 目前 SymbolSeriesStore 支持 yf/bs；为兼容，CN/US 均建议使用 yf。
+symbols:
+  # --- CN: ETFs ---
+  cn_ai_etf:
+    symbol: "159819.SZ"
+    provider: "db"
+    method: "ETF"
+    alias: "AI ETF（主仓底座）"
+    threshold_profile: "core_etf"
+  cn_ai_etf_alt:
+    symbol: "512760.SS"
+    provider: "db"
+    method: "ETF"
+    alias: "AI 备选 ETF（云/算力相关，卫星ETF）"
+    threshold_profile: "core_etf"
+  cn_semicon_etf:
+    symbol: "512480.SS"
+    provider: "db"
+    method: "ETF"
+    alias: "半导体 ETF（硬科技池底座）"
+    threshold_profile: "core_etf"
+  cn_div_lowvol:
+    symbol: "512890.SS"
+    provider: "yf"
+    method: "ETF"
+    alias: "红利低波 ETF（稳定器）"
+    threshold_profile: "stabilizer"
+
+  # --- CN: Stocks ---
+  cn_tianfu:
+    symbol: "300394.SZ"
+    provider: "yf"
+    method: "equity"
+    alias: "天孚通信（光模块/AI基础设施卫星）"
+    threshold_profile: "satellite_stock"
+  cn_catl:
+    symbol: "300750.SZ"
+    provider: "yf"
+    method: "equity"
+    alias: "宁德时代（电池）"
+    threshold_profile: "satellite_stock"
+  cn_byd:
+    symbol: "002594.SZ"
+    provider: "yf"
+    method: "equity"
+    alias: "比亚迪（新能源车）"
+    threshold_profile: "satellite_stock"
+  cn_sungrow:
+    symbol: "300274.SZ"
+    provider: "yf"
+    method: "equity"
+    alias: "阳光电源（逆变器/储能）"
+    threshold_profile: "satellite_stock"
+  cn_zijin:
+    symbol: "601899.SS"
+    provider: "db"
+    method: "equity"
+    alias: "紫金矿业（资源/黄金相关）"
+    threshold_profile: "satellite_stock"
+
+  # --- US: Hedge / Leads ---
+  us_gld:
+    symbol: "GLD"
+    provider: "yf"
+    method: "equity"
+    alias: "GLD（黄金ETF，对冲观察）"
+    threshold_profile: "stabilizer"
+# ============================================================
+# Supply Eval (watchlist_supply_raw -> watchlist_lead_factor)
+# Frozen rules:
+# - append-only; do NOT change old semantics
+# - observation-only; does NOT feed Gate/DRS/MarketScore
+# ============================================================
+supply_eval:
+  windows: [5, 10, 20]
+
+  block_trade:
+    # event count thresholds per window (>= triggers)
+    event_thresholds:
+      "5": 1
+      "10": 2
+      "20": 3
+    # discount percent thresholds (<= triggers), unit: pct points (e.g. -8 means -8%)
+    discount_pct_thresholds:
+      orange: -8
+      red: -15
+
+  insider_change:
+    negative_keywords: ["减持", "卖出", "拟减持", "计划减持", "退出", "套现"]
+    positive_keywords: ["增持", "买入", "拟增持"]
+    event_thresholds:
+      yellow: 1
+      orange: 2
+      red: 3
+
+# ============================================================
+# Leading Panels (A~G) thresholds (observation-only)
+# Append-only: do NOT change existing keys
+# ============================================================
+leading_panels:
+  market_sentiment:
+    thresholds:
+      # ratios are 0~1, pct fields use 0~100
+      broken_orange: 0.15
+      broken_red: 0.25
+      max_streak_orange: 6
+      max_streak_red: 10
+      limit_up_ratio_orange: 0.012
+      limit_up_ratio_red: 0.018
+      limit_down_ratio_orange: 0.002
+      limit_down_ratio_red: 0.005
+      adv_ratio_yellow_pct: 55
+
+buckets:
+  AI_SHOVEL_OBSERVE:
+    desc: AI卖铲子观察池（服务器/IDC/电源）
+    stage_policy: ONLY_C_TO_D
+    execution: OBSERVE_ONLY
+    stocks:
+    - code: 000977
+      name: 浪潮信息
+    - code: '601138'
+      name: 工业富联
+    - code: '603019'
+      name: 中科曙光
+    - code: '300383'
+      name: 光环新网
+    - code: '300738'
+      name: 奥飞数据
+    - code: '002335'
+      name: 科华数据

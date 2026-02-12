@@ -12,7 +12,7 @@ class RunPersistenceContract(ABC):
         trade_date: str,
         report_kind: str,
         engine_version: str,
-        started_at_utc: Optional[int] = None,
+        started_at: Optional[int] = None,
     ) -> str:
         """Start a run and return run_id."""
         raise NotImplementedError

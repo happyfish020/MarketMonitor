@@ -20,7 +20,7 @@ factors:
         defensive_lead: 板块代理偏防御，风险偏好下降证据。
         broad_weak: 风险资产扩散不足，偏“指数稳但个股弱”的盘面。
         mixed: 板块信号混合（风险偏好未形成一致性）。
-        risk_on_confirmed: 风险资产代理同步走强（仍需结合执行/成功率）。
+        risk_on_confirmed: 风险偏好代理确认偏强（仍需结合执行/成功率）。
     evidence:
       include_details_keys:
       - benchmark_symbol
@@ -44,6 +44,8 @@ factors:
         NEUTRAL: pressure_medium
         HIGH: pressure_high
       default: pressure_medium
+      na_if_data_status:
+      - DATA_NOT_CONNECTED
       normalize: true
       alias_map:
         low: pressure_low
@@ -55,6 +57,7 @@ factors:
         pressurehigh: pressure_high
     meaning:
       by_state:
+        na: 北向代理数据未接通（NA），仅保留为只读提示，不作为进攻放行依据。
         pressure_low: 北向代理压力不显著（未见明显撤退压力）。
         pressure_medium: 北向代理压力中性，需要结合其他结构指标判断。
         pressure_high: 北向代理压力显著，需提高谨慎等级。
@@ -134,6 +137,9 @@ factors:
       normalize: true
       alias_map:
         stable: stable
+        rising: watch
+        unstable: elevated_risk
+        data_missing: watch
         watch: watch
         elevated_risk: elevated_risk
         elevatedrisk: elevated_risk
@@ -204,23 +210,36 @@ factors:
       - momentum
       - provider
       - asof
-  etf_index_sync_daily:
+  crowding_concentration:
     meaning:
       by_state:
-        sync_good: ETF–指数同步性良好（参与结构一致性较高）。
-        sync_ok: ETF–指数同步性一般（结构尚可，需结合广度/成功率）。
-        sync_bad: ETF–指数同步性转差（分化/拥挤上升，追价与轮动胜率偏低）。
+        #low: ETF–指数拥挤/集中度良好（参与结构一致性较高）。
+        #medium: ETF–指数拥挤/集中度一般（结构尚可，需结合广度/成功率）。
+        #high: ETF–指数拥挤/集中度转差（分化/拥挤上升，追价与轮动胜率偏低）。
+        
+        low: 拥挤度/集中度较低（成交分散，轮动压力小，执行摩擦较低）。
+        medium: 拥挤度/集中度中等（轮动偏快，进攻需依赖 Gate/Execution，避免追价）。
+        high: 拥挤度/集中度偏高（窄领涨/轮动快，追价与频繁进攻性调仓胜率偏低）。
+    #
+
     state:
-      default: sync_ok
+      details_keys:
+      - state
+      default: medium
       normalize: true
       level_map:
-        LOW: sync_good
-        NEUTRAL: sync_ok
-        HIGH: sync_bad
+        # NOTE: crowding_concentration 因子 score = 100 - friction
+        # 低分=高摩擦=高拥挤/集中度，因此这里做反向映射以避免“state=low 但 top20 很高”的语义矛盾。
+        LOW: high
+        NEUTRAL: medium
+        HIGH: low
       alias_map:
-        low: sync_good
-        neutral: sync_ok
-        high: sync_bad
+        low: low
+        neutral: medium
+        medium: medium
+        high: high
+
+
     evidence:
       include_details_keys:
       - adv_ratio

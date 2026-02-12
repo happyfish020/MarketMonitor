@@ -1,0 +1,41 @@
+rotation_enable:
+  version: "ROT-ENABLE-V1"
+
+  # Governance veto has the highest priority.
+  # If vetoed => mode=OFF with explicit reason.
+  governance_veto:
+    gate_disallow: ["CAUTION", "RISK", "PANIC"]
+    execution_disallow: ["D1", "D2"]
+    drs_disallow: ["ORANGE", "RED"]
+
+  # Thresholds use percent for *_pct fields (0~100),
+  # and ratio in [0,1] for explicit *_ratio fields.
+  thresholds:
+    breadth:
+      adv_ratio_pct_on: 55.0
+      adv_ratio_pct_off: 50.0
+    payoff:
+      # 炸板率上限（越低越好）；缺失时会降级为 PARTIAL/OFF
+      broken_limit_rate_max_pct: 35.0
+      # 跌停数量过多视为风险扩散受限（可按你的口径调整）
+      limit_down_max: 40
+    liquidity:
+      # 成交/换手相对 MA20（<1 表示偏缩量）
+      turnover_ratio_vs_ma20_min: 0.85
+    concentration:
+      # 全市场 Top20 成交集中度（严格语义：Top20 amount / total amount）
+      top20_turnover_ratio_max_pct: 65.0
+
+  feasibility:
+    # 当轮动速度过快时，降级到 PARTIAL（只允许确认段/低频）
+    fast_rotation_if:
+      broken_limit_rate_min_pct: 40.0
+      top20_turnover_ratio_min_pct: 70.0
+      adv_ratio_pct_max: 55.0
+    mode_when_fast: "PARTIAL"
+
+  constraints:
+    # 适配你的执行约束（整手 + 不高频）
+    min_hold_days: 3
+    max_switch_per_week: 2
+    allow_chase: false

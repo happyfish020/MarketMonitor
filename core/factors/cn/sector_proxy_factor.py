@@ -129,14 +129,22 @@ class SectorProxyFactor(FactorBase):
         level = self._level_from_quality(quality)
         risk_score = 100.0 - quality
 
+        # clarify semantics:
+        # - score (quality): validation strength (higher is better)
+        # - level: risk level (LOW is safer; HIGH is riskier)
+        validation_level = self._validation_level_from_quality(quality)
+        risk_level = level
+
         details = {
             "data_status": raw.get("meta", {}).get("data_status", "OK"),
-            "score_semantics": "QUALITY_HIGH_IS_STRONG_VALIDATION",
+            "score_semantics": "VALIDATION_SCORE_HIGH_IS_STRONG_VALIDATION",
 
             # evidence: 报告/校验的关键字段（冻结：只增不改）
             "evidence": {
                 "validation_score": round(float(quality), 2),
                 "risk_score": round(float(risk_score), 2),
+                "validation_level": validation_level,
+                "risk_level": risk_level,
                 "leaders_ratio_10d": round(float(leaders_ratio), 4),
                 "leaders": int(leaders),
                 "laggards": int(laggards),
@@ -144,6 +152,10 @@ class SectorProxyFactor(FactorBase):
                 "avg_rs_10d": round(float(avg_rs10), 6),
                 "stdev_rs_10d": round(float(stdev_rs10), 6),
                 "span_rs_10d": round(float(span_rs10), 6),
+                # aliases (append-only) for report readability
+                "avg_rs10": round(float(avg_rs10), 6),
+                "stdev_rs10": round(float(stdev_rs10), 6),
+                "span_rs10": round(float(span_rs10), 6),
                 "bench_ret_10d": bench_m.get("ret_10d"),
                 "bench_ret_20d": bench_m.get("ret_20d"),
             },
@@ -383,6 +395,21 @@ class SectorProxyFactor(FactorBase):
         return dd
 
     # ---------------------------------------------------------
+
+    @staticmethod
+    def _validation_level_from_quality(q: float) -> str:
+        """Validation strength label derived from quality score.
+    
+        - STRONG: strong confirmation / validation
+        - OK: acceptable / mixed
+        - WEAK: weak confirmation (more dispersion / less breadth confirmation)
+        """
+        if q >= 70:
+            return "STRONG"
+        if q >= 55:
+            return "OK"
+        return "WEAK"
+        # ---------------------------------------------------------
     @staticmethod
     def _level_from_quality(q: float) -> str:
         # q 越高越好，level 越低越安全
@@ -399,8 +426,13 @@ class SectorProxyFactor(FactorBase):
             level="NEUTRAL",
             details={
                 "data_status": reason,
-                "score_semantics": "QUALITY_HIGH_IS_STRONG_VALIDATION",
-                "evidence": {"validation_score": 50.0, "risk_score": 50.0},
+                "score_semantics": "VALIDATION_SCORE_HIGH_IS_STRONG_VALIDATION",
+                "evidence": {
+                    "validation_score": 50.0,
+                    "risk_score": 50.0,
+                    "validation_level": "OK",
+                    "risk_level": "NEUTRAL",
+                },
                 "reasons": [reason],
             },
         )

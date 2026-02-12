@@ -4,6 +4,8 @@
 from __future__ import annotations
 import pandas as pd
 import traceback
+import time
+import random
 import yfinance as yf
 
 from core.adapters.providers.provider_base import ProviderBase
@@ -43,13 +45,17 @@ class YFProvider(ProviderBase):
 
         try:
             # 路由到子方法，如 _fetch_index_method()
-            method_name = f"_fetch_{method}_method"
-            if hasattr(self, method_name):
+            method_name = f"_fetch_{method}_method" if method else "default"
+
+            if method_name == "default":
+                return self._fetch_default_method(symbol, window)
+            elif hasattr(self, method_name):   
                 LOG.info(f"[YFProvider] Using YF submethod: {method_name} for symbol={symbol}")
                 return getattr(self, method_name)(symbol, window)
 
             # fallback
             LOG.warning(f"[YFProvider] No such method={method}, using default")
+            #raise Exception(f"No such method={method},{symbol}") #debug
             return self._fetch_default_method(symbol, window)
 
         except Exception as e:
@@ -80,14 +86,9 @@ class YFProvider(ProviderBase):
     # =====================================================================
     def _fetch_yf_raw(self, symbol: str, window: int) -> pd.DataFrame:
         LOG.info(f"[YFProvider] _fetch_yf_raw: {symbol}, window={window}")
-
+       
         try:
-            df = yf.download(
-                symbol,
-                period=f"{window}d",
-                auto_adjust=False,
-                progress=False
-            )
+            df = self._download_with_retry(symbol=symbol, window=window)
 
             if df is None or df.empty:
                 LOG.warning(f"[YFProvider] Empty df for symbol={symbol}")
@@ -115,3 +116,62 @@ class YFProvider(ProviderBase):
             LOG.error(f"[YFProvider] _fetch_yf_raw fatal for symbol={symbol}: {e}")
             traceback.print_exc()
             return None
+
+    # =====================================================================
+    # Retry wrapper for yfinance download
+    # =====================================================================
+    def _download_with_retry(
+        self,
+        symbol: str,
+        window: int,
+        max_attempts: int = 4,
+        base_sleep_sec: float = 0.8,
+        max_sleep_sec: float = 12.0,
+    ) -> pd.DataFrame | None:
+        """Download with retries.
+
+        Why:
+        - yfinance occasionally fails with transient network errors (curl:56, connection reset, etc.)
+        - sometimes yfinance prints error and returns empty df without raising
+
+        Strategy:
+        - exponential backoff + jitter
+        - retry on exception OR empty df
+        """
+        last_exc: Exception | None = None
+
+        # Avoid yfinance multi-thread download to reduce connection resets
+        for attempt in range(1, max_attempts + 1):
+            try:
+                df = yf.download(
+                    symbol,
+                    period=f"{window}d",
+                    auto_adjust=False,
+                    progress=False,
+                    threads=False,
+                )
+
+                if df is not None and not df.empty:
+                    if attempt > 1:
+                        LOG.info(f"[YFProvider] Download recovered after retry: symbol={symbol} attempt={attempt}")
+                    return df
+
+                # Empty df: treat as retryable (common when yfinance prints 'Failed download')
+                LOG.warning(f"[YFProvider] Empty df (retryable) symbol={symbol} attempt={attempt}/{max_attempts}")
+
+            except Exception as e:
+                last_exc = e
+                LOG.warning(
+                    f"[YFProvider] Download error (retryable) symbol={symbol} attempt={attempt}/{max_attempts}: {e}"
+                )
+
+            if attempt < max_attempts:
+                sleep = min(max_sleep_sec, base_sleep_sec * (2 ** (attempt - 1)))
+                sleep += random.random() * 0.5
+                time.sleep(sleep)
+
+        if last_exc is not None:
+            LOG.error(f"[YFProvider] Download failed after retries: symbol={symbol} err={last_exc}")
+        return None
+
+    

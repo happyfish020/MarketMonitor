@@ -13,7 +13,10 @@ import sqlite3
 from datetime import date
 from typing import List, Dict
 
-DB_PATH = "./unifiedrisk_test.db"
+from core.persistence.sqlite.sqlite_schema import ensure_schema_l2
+from core.persistence.sqlite.sqlite_schema_l1 import ensure_schema_l1
+
+DB_PATH = r"data\persistent\unifiedrisk.db"
 
 def get_trade_date() -> str:
     """Return today's trade date (ISO format)."""
@@ -36,7 +39,7 @@ def ensure_ext_schema(conn: sqlite3.Connection):
         amount_ma20     REAL,
         up_ratio        REAL,
         north_net       REAL,
-        created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+        created_at      TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
         PRIMARY KEY (trade_date, symbol)
     );
 
@@ -44,13 +47,15 @@ def ensure_ext_schema(conn: sqlite3.Connection):
         claim_id    TEXT PRIMARY KEY,
         claim_type  TEXT NOT NULL,
         description TEXT,
-        active      INTEGER NOT NULL DEFAULT 1
+        active      INTEGER NOT NULL DEFAULT 1,
+        created_at      TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
     );
 
     CREATE TABLE IF NOT EXISTS ext_claim_verdict (
         trade_date TEXT NOT NULL,
         claim_id   TEXT NOT NULL,
         verdict    TEXT NOT NULL,
+        created_at      TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
         PRIMARY KEY (trade_date, claim_id)
     );
 
@@ -59,6 +64,7 @@ def ensure_ext_schema(conn: sqlite3.Connection):
         claim_id   TEXT NOT NULL,
         horizon    INTEGER NOT NULL,
         ret_cum    REAL,
+        created_at      TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
         PRIMARY KEY (trade_date, claim_id, horizon)
     );
 
@@ -73,6 +79,7 @@ def ensure_ext_schema(conn: sqlite3.Connection):
         supported_rate   REAL,
         avg_ret_all      REAL,
         avg_ret_supported REAL,
+        created_at      TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
         PRIMARY KEY (asof_date, lookback_days, horizon)
     );
     """
@@ -164,14 +171,16 @@ def aggregate_summary(conn: sqlite3.Connection, asof_date: str, lookback_days: i
         rate = sup / total if total else None
 
         conn.execute(
-            "INSERT OR REPLACE INTO ext_validation_summary VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT OR REPLACE INTO ext_validation_summary (asof_date,lookback_days,horizon,total_cnt,supported_cnt,weakened_cnt,unverifiable_cnt,avg_ret_supported,supported_rate,avg_ret_all) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (asof_date, lookback_days, h, total, sup, weak, unv, rate, avg_all, avg_sup),
         )
 
 def main():
     conn = connect(DB_PATH)
     ensure_ext_schema(conn)
-
+    ensure_schema_l1(conn)
+    ensure_schema_l2(conn)
+    
     trade_date = get_trade_date()
     verdict = "SUPPORTED"  # TEMP: replace with L2-based verdict in PRD
 

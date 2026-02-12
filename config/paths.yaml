@@ -4,3 +4,6 @@ log_dir: "logs/"
 output_dir: "data/output/"
 cn_report_dir: "reports/cn/daily/"
 cn_history_dir: "data/cn/history/"
+
+# Gate rules spec path (used by governance.gate report block)
+gate_rules_path: "config/gate_rules.yaml"

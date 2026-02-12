@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, time
 import importlib
 import inspect
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import baostock as bs
 import pandas as pd
@@ -12,7 +12,56 @@ import pytz
 import os, json 
 import sqlite3
 
+# --- UnifiedRisk persistence helpers (SRP/OOP-friendly) ---
+from core.persistence.sqlite.sqlite_connection import connect_sqlite as ur_connect_sqlite
+from core.persistence.sqlite.sqlite_schema_l1 import ensure_schema_l1
+from core.persistence.sqlite.sqlite_schema import ensure_schema_l2
+
+
+def _ur_open_persist_conn(db_path):
+    """Open SQLite connection for UnifiedRisk persistence and ensure schemas exist."""
+    conn = ur_connect_sqlite(str(db_path))
+    ensure_schema_l1(conn)
+    ensure_schema_l2(conn)
+    return conn
+
+
+def _ur_purge_l2_for_rerun(conn, trade_date: str, report_kind: str):
+    """Best-effort purge L2 artifacts for same (trade_date, report_kind) to allow reruns."""
+    try:
+        with conn:
+            conn.execute(
+                "DELETE FROM ur_report_des_link WHERE trade_date=? AND report_kind=?",
+                (trade_date, report_kind),
+            )
+            conn.execute(
+                "DELETE FROM ur_decision_evidence_snapshot WHERE trade_date=? AND report_kind=?",
+                (trade_date, report_kind),
+            )
+            conn.execute(
+                "DELETE FROM ur_report_artifact WHERE trade_date=? AND report_kind=?",
+                (trade_date, report_kind),
+            )
+    except Exception:
+        # Best-effort only.
+        pass
+
+
+def _ur_publish_l2(publisher, trade_date: str, report_kind: str, report_text: str, des_payload: dict, engine_version: str, run_id: str):
+    """Publish report + decision evidence into L2 tables."""
+    publisher.publish(
+        trade_date=trade_date,
+        report_kind=report_kind,
+        report_text=report_text,
+        des_payload=des_payload,
+        engine_version=engine_version,
+        meta={"run_id": run_id},
+    )
+from core.persistence.contracts.errors import PersistenceError
 from core.persistence.sqlite.sqlite_l2_publisher import SqliteL2Publisher
+from core.persistence.regime_shift_auditor import RegimeShiftAuditor
+from core.services.regime_history_service import RegimeHistoryService
+from core.utils.data_freshness import compute_data_freshness, inject_asof_fields
 from core.utils.logger import get_logger
 from core.adapters.fetchers.cn.ashare_fetcher import AshareDataFetcher
 
@@ -28,7 +77,7 @@ from core.factors.cn.amount_factor import AmountFactor
 from core.factors.cn.margin_factor import MarginFactor
 from core.factors.cn.index_tech_factor import IndexTechFactor
 from core.factors.cn.breadth_factor import BreadthFactor
-from core.factors.cn.etf_index_sync_factor import ETFIndexSyncFactor
+#from core.factors.cn.etf_index_sync_factor import CrowdingConcentrationFactor
 from core.factors.cn.etf_index_sync_daily_factor import ETFIndexSyncDailyFactor
 from core.factors.cn.trend_in_force_factor import TrendInForceFactor
 from core.factors.cn.frf_factor import FRFFactor
@@ -42,7 +91,9 @@ from core.regime.observation.structure.structure_facts_builder import StructureF
 from core.regime.observation.watchlist.watchlist_state_builder import WatchlistStateBuilder
 from core.regime.observation.drs.drs_observation import DRSObservation
 from core.regime.observation.drs_continuity import DRSContinuity
+from core.regime.observation.rew.rew_observation import REWObservation
 from core.governance.execution_summary_builder import ExecutionSummaryBuilder
+from core.governance.rotation_switch_builder import build_rotation_switch
 
 # ===== Report =====
 from core.reporters.report_context import ReportContext
@@ -50,6 +101,7 @@ from core.reporters.report_engine import ReportEngine
 from core.reporters.renderers.markdown_renderer import MarkdownRenderer
 from core.reporters.report_writer import ReportWriter
 from core.actions.actionhint_service import ActionHintService
+from core.rules.attack_window_rule import AttackWindowEvaluator
 
 from core.predictors.prediction_engine import PredictionEngine
 from core.regime.observation.watchlist.watchlist_ob_builder import WatchlistObservationBuilder
@@ -79,11 +131,11 @@ def _wrap_factor(fr: Any) -> Dict[str, Any]:
 
 class AShareDailyEngine:
     """
-    UnifiedRisk V12 · CN A-Share Daily Engine（严格 OOP 封装版）
+    UnifiedRisk V12 · CN A-Share Daily Engine（严�?OOP 封装版）
 
-    设计铁律：
-    - 制度信号只在 Engine 内生成
-    - Builder / Block / Case 不允许推断制度
+    设计铁律�?
+    - 制度信号只在 Engine 内生�?
+    - Builder / Block / Case 不允许推断制�?
     """
 
     def __init__(self, refresh_mode: str = "none") -> None:
@@ -92,16 +144,15 @@ class AShareDailyEngine:
         self.factors = None
         self.gate = None
 
-        # === 核心制度状态（只在 Engine 内部存在）===
+        # === 核心制度状态（只在 Engine 内部存在�?==
         self._distribution_risk_active: bool = False
         
-        #self._resolve_trade_time()
+        self._resolve_trade_time()
         #test 
-        self.trade_date="2025-12-31"
-        self.report_kind ="EOD"
+        #self.trade_date="2026-02-11"
         self.is_intraday = False
          
-
+        self.report_kind ="EOD"
 
 
 
@@ -112,7 +163,7 @@ class AShareDailyEngine:
         Returns:
             (is_intraday: bool, last_trade_date: str)
                 - is_intraday: True 表示当前是交易日且在 9:30~15:00 之间
-                - last_trade_date: 最近的交易日（'YYYY-MM-DD'）
+                - last_trade_date: 最近的交易日（'YYYY-MM-DD'�?
         """
         tz = pytz.timezone('Asia/Shanghai')
         now = datetime.now(tz)
@@ -134,7 +185,7 @@ class AShareDailyEngine:
             return (not is_weekend and in_session, fallback_last_date.strftime('%Y-%m-%d'))
     
         try:
-            # 3. 查询最近60天的交易日历（足够覆盖节假日）
+            # 3. 查询最�?0天的交易日历（足够覆盖节假日�?
             start_date = (reference_date - timedelta(days=60)).strftime('%Y-%m-%d')
             end_date = reference_date.strftime('%Y-%m-%d')
     
@@ -150,17 +201,17 @@ class AShareDailyEngine:
             trade_df['calendar_date'] = pd.to_datetime(trade_df['calendar_date'])
             trade_df['is_trading_day'] = trade_df['is_trading_day'].astype(int)
     
-            # 提取所有交易日并降序排列
+            # 提取所有交易日并降序排�?
             trading_days = trade_df[trade_df['is_trading_day'] == 1]['calendar_date'].dt.date.values
     
             if len(trading_days) == 0:
                 raise Exception("No trading days found in the past 60 days")
     
-            # 4. 找到最近的交易日（从 reference_date 往前找）
+            # 4. 找到最近的交易日（�?reference_date 往前找�?
             last_trade_date_obj = max(d for d in trading_days if d <= reference_date)
             last_trade_date_str = last_trade_date_obj.strftime('%Y-%m-%d')
     
-            # 5. 判断是否为盘中时间
+            # 5. 判断是否为盘中时�?
             # 只有当今天就是交易日，且当前时间在开盘后收盘前，才算盘中
             is_today_trading_day = last_trade_date_obj == now.date()
             in_trading_hours = A_SHARE_OPEN <= now.time() < A_SHARE_CLOSE
@@ -254,54 +305,90 @@ class AShareDailyEngine:
         LOG.info("[AShareDailyEngine] run finished: %s", self.trade_date)
 
     # ==================================================
-    # Core Pipeline（唯一入口）
+    # Core Pipeline（唯一入口�?
     # ==================================================
     def _execute_pipeline(self) -> None:
         # weights.yaml is the single source of truth for pipeline config
-        self.weights_cfg = self._load_weights_cfg()
-        fp = self.weights_cfg.get("factor_pipeline", {}) if isinstance(self.weights_cfg, dict) else {}
-        structure_keys = fp.get("structure_factors", []) if isinstance(fp, dict) else []
-        if not isinstance(structure_keys, list):
-            structure_keys = []
 
-        
-        
-        self.snapshot = self._fetch_snapshot()
-        
-        
-        self.factors = self._compute_factors(self.snapshot)
+        run_persist, engine_version = self._init_persistence()
+        run_id = None
+        stage = "START"
 
-        # policy slot binder 已弃用：Phase-2/Report 统一从 YAML 读取结构与语义；此处不再做额外绑定
-        factors_bound: Dict[str, Any] = {}
-        factors_bound = self._build_phase2( factors_bound)
+        try:
 
-        # ===== Phase-3 / 制度状态（封装）=====
-        self._distribution_risk_active = self._compute_distribution_risk(
-            structure=factors_bound["structure"],
+            # 1) start_run 先落�?
+            run_id = run_persist.start_run(
+                trade_date=self.trade_date,
+                report_kind=self.report_kind,
+                engine_version=engine_version,
+            )
+          
+            self.weights_cfg = self._load_weights_cfg()
+            fp = self.weights_cfg.get("factor_pipeline", {}) if isinstance(self.weights_cfg, dict) else {}
+            structure_keys = fp.get("structure_factors", []) if isinstance(fp, dict) else []
+            if not isinstance(structure_keys, list):
+                structure_keys = []
+    
+              
             
-        )
-
-        # ===== Structure（消费制度状态）=====
-        factors_bound["structure"] = StructureFactsBuilder(spec=self._load_structure_facts_cfg()).build(
-            factors = self.factors,
-            structure_keys=structure_keys,
-            distribution_risk_active=self._distribution_risk_active,
-            drs_signal=self._extract_drs_signal(factors_bound),
-        )
-
-        factors_bound["execution_summary"] = self._build_execution_summary(
+            self.snapshot = self._fetch_snapshot()
             
-            structure=factors_bound["structure"],
-            observations=factors_bound.get("observations", {}),
-        )
+            
+            self.factors = self._compute_factors(self.snapshot)
+    
+            # policy slot binder 已弃用：Phase-2/Report 统一�?YAML 读取结构与语义；此处不再做额外绑�?
+            factors_bound: Dict[str, Any] = {}
+            factors_bound = self._build_phase2( factors_bound)
+    
+            # ===== Phase-3 / 制度状态（封装�?====
+            self._distribution_risk_active = self._compute_distribution_risk(
+                structure=factors_bound["structure"],
+                
+            )
+    
+            # ===== Structure（消费制度状态）=====
+            factors_bound["structure"] = StructureFactsBuilder(spec=self._load_structure_facts_cfg()).build(
+                factors = self.factors,
+                structure_keys=structure_keys,
+                distribution_risk_active=self._distribution_risk_active,
+                drs_signal=self._extract_drs_signal(factors_bound),
+            )
+    
+            factors_bound["execution_summary"] = self._build_execution_summary(
+                
+                structure=factors_bound["structure"],
+                observations=factors_bound.get("observations", {}),
+            )
+    
+            self.gate = self._make_gate_decision(factors_bound)
 
-        self.gate = self._make_gate_decision(factors_bound)
-        self._generate_prediction(factors_bound)
-        report_text , des_payload = self._generate_report( factors_bound)
-     
-        ########## presiste  ###########
-        #self.presiste_data(report_text=report_text, des_payload= des_payload)
+            self._generate_prediction(factors_bound)
+            report_text , des_payload = self._generate_report( factors_bound)
+         
+            ########## presiste  ###########
+            
+            with open(r"c:\temp\des_payload.json", "w", encoding="utf-8") as f:
+                json.dump(des_payload, f, ensure_ascii=False, indent=2)
 
+
+            self.presiste_data(report_text=report_text, des_payload= des_payload)
+        except Exception as e:
+        # 失败态也必须落库
+            if run_id:
+                run_persist.finish_run(
+                    run_id,
+                    status="FAILED",
+                    error_type=type(e).__name__,
+                    error_message=f"{stage} :: {str(e)}"[:1000],
+                )
+            raise
+        finally:
+            try:
+                if getattr(self, "_conn", None):
+                    self._conn.close()
+            except Exception:
+                pass 
+    
     def presiste_data(self, report_text: str, des_payload:dict):
 
         from core.persistence.sqlite.sqlite_run_persistence import SqliteRunPersistence
@@ -311,46 +398,67 @@ class AShareDailyEngine:
         #if db_path.exists():
         #   db_path.unlink()
 
-        conn = connect_sqlite(str(db_path))
+        self._conn = _ur_open_persist_conn(db_path)
 
-        run_persist= SqliteRunPersistence(conn)
-        publisher = SqliteL2Publisher(conn)         
+        run_persist= SqliteRunPersistence(self._conn)
+        publisher = SqliteL2Publisher(self._conn)
+        _ur_purge_l2_for_rerun(self._conn, self.trade_date, self.report_kind)
         
         now = datetime.now()
         engine_version = "V_"+ now.strftime("%Y-%m-%d_%H:%M:%S")
          
         format_string = "%Y-%m-%d"
-
-        run_id = run_persist.start_run(
+        try:
+            run_id = run_persist.start_run(
+                    trade_date=self.trade_date,
+                    report_kind = self.report_kind,
+                    engine_version=engine_version,
+                )
+            
+            run_persist.record_snapshot(run_id, "internal_snapshot", self.snapshot)
+            
+            gate = des_payload["governance"]["gate"]
+            drs = des_payload["governance"]["drs"]
+            frf = des_payload["governance"]["frf"]
+    
+            run_persist.record_gate(run_id = run_id,
+                                    gate=gate, 
+                                    drs=drs,
+                                    frf = frf, 
+                                    action_hint=None, 
+                                    rule_hits=None
+                                    )
+    
+            for factor_name, fr in self.factors.items():
+                run_persist.record_factor(
+                    run_id,
+                    factor_name,
+                    fr.to_dict(),
+                    factor_version="" # factor_result.get("version"),
+                )
+      
+    
+            _ur_publish_l2(
+                publisher,
                 trade_date=self.trade_date,
-                report_kind = self.report_kind,
+                report_kind=self.report_kind,
+                report_text=report_text,
+                des_payload=des_payload,
                 engine_version=engine_version,
-            )
-        
-        run_persist.record_snapshot(run_id, "internal_snapshot", self.snapshot)
-        
-        run_persist.record_gate(run_id = run_id,payload = des_payload)
-
-        for factor_name, fr in self.factors.items():
-            run_persist.record_factor(
+                run_id=run_id,
+                )
+            run_persist.finish_run(run_id, status="COMPLETED")
+            #run_persist.finish_run(run_id, status="COMPLETED")     
+            #run_persist.record_factor(run_id, "breadth", breadth_result)
+            #run_persist.record_factor(run_id, "new_top50_lows", ntl_result)
+        except Exception as e:
+            run_persist.finish_run(
                 run_id,
-                factor_name,
-                fr.to_dict(),
-                factor_version="" # factor_result.get("version"),
+                status="FAILED",
+                error_type=type(e).__name__,
+                error_message=str(e)[:1000],
             )
-
-
-        publisher.publish(
-            trade_date=self.trade_date,
-            report_kind = self.report_kind,
-            report_text = report_text, des_payload=des_payload,
-            engine_version=engine_version,
-            meta={"run_id": run_id},
-        )
-
-        
-        #run_persist.record_factor(run_id, "breadth", breadth_result)
-        #run_persist.record_factor(run_id, "new_top50_lows", ntl_result)
+            raise
     # end def 
 
  
@@ -360,7 +468,7 @@ class AShareDailyEngine:
 
 
     ###################################################### 
-        ################# 对账 ， 
+        ################# 对账 �?
         #self._dump_factors(factors)
         #from core.recon.reconciliation_engine import ReconciliationEngine
         #import os , json
@@ -401,7 +509,7 @@ class AShareDailyEngine:
 #      
 
     # ==================================================
-    # Institution Logic（不外溢）
+    # Institution Logic（不外溢�?
     # ==================================================
     def _compute_distribution_risk(
         self,
@@ -410,8 +518,8 @@ class AShareDailyEngine:
         
     ) -> bool:
         """
-        冻结制度定义：
-        - 连续结构恶化（由 continuity 模块维护）
+        冻结制度定义�?
+        - 连续结构恶化（由 continuity 模块维护�?
         """
         dist = StructureDistributionContinuity.apply(
             factors=self.factors,
@@ -489,7 +597,7 @@ class AShareDailyEngine:
         # explicit exceptions (only for legacy compatibility)
         special = {
             "failure_rate": "core.factors.cn.frf_factor:FRFFactor",
-            "etf_index_sync": "core.factors.cn.etf_index_sync_factor:ETFIndexSyncFactor",
+            "etf_index_sync": "core.factors.cn.etf_index_sync_factor:CrowdingConcentrationFactor",
             "etf_index_sync_daily": "core.factors.cn.etf_index_sync_daily_factor:ETFIndexSyncDailyFactor",
         }
         if name in special:
@@ -614,7 +722,7 @@ class AShareDailyEngine:
             watchlist = WatchlistObservationBuilder().build(slots=bound, asof=str(asof))
             bound["watchlist"] = watchlist
         except FileNotFoundError:
-            # coverage 缺失属于配置错误：明确失败
+            # coverage 缺失属于配置错误：明确失�?
             raise
         return bound
 
@@ -629,14 +737,27 @@ class AShareDailyEngine:
         #bound["watchlist"] = WatchlistStateBuilder().build(
         #    factors=self.factors, structure=structure, watchlist_config=bound.get("watchlist")
         #)
-        drs = DRSObservation().build(inputs=structure, asof=self.trade_date)
+        drs_obs = DRSObservation().build(inputs=structure, asof=self.trade_date)
+        drs = DRSContinuity.apply(
+            drs_obs=drs_obs,
+            asof=self.trade_date,
+            fallback_state_path="state/drs_persistence.json",
+        )
+
+        # REW: Regime Early Warning (observation-only)
+        # - best-effort, never throws
+        # - MUST NOT affect Gate/DRS/scoring
+        rew = REWObservation().build(
+            inputs={"structure": structure, "factors": self.factors or {}},
+            asof=self.trade_date,
+        )
+
         bound["observations"] = {
-                                    "drs": DRSContinuity.apply(
-                                        drs_obs=drs,
-                                        asof=self.trade_date,
-                                        fallback_state_path="state/drs_persistence.json",
-                                    )
-                                }
+            "drs": drs,
+            "rew": rew,
+            # alias for compatibility
+            "regime_early_warning": rew,
+        }
         return bound
 
 
@@ -657,35 +778,88 @@ class AShareDailyEngine:
 
     
     def _generate_report(self, bound: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
-        # --- governance extract (你已有) ---
+        # --- governance extract (你已�? ---
         drs = self._extract_drs_signal(bound)
     
         frf_obj = bound.get("failure_rate")
         frf = getattr(frf_obj, "level", "") if frf_obj is not None else ""
+
+        # Regime Early Warning (REW) summary (observation-only)
+        rew_summary: Dict[str, Any] = {}
+        try:
+            _obs = bound.get("observations", {}) if isinstance(bound.get("observations"), dict) else {}
+            rew_node = _obs.get("rew") or _obs.get("regime_early_warning")
+            if isinstance(rew_node, dict):
+                ob = rew_node.get("observation") if isinstance(rew_node.get("observation"), dict) else {}
+                lvl = ob.get("level")
+                scp = ob.get("scope")
+                rs = ob.get("reasons") if isinstance(ob.get("reasons"), list) else []
+                if isinstance(lvl, str) and lvl.strip():
+                    rew_summary = {
+                        "level": lvl.strip().upper(),
+                        "scope": (scp or "LOCAL"),
+                        "reasons": rs,
+                    }
+                    if isinstance(rew_node.get("warnings"), list):
+                        rew_summary["warnings"] = rew_node.get("warnings")
+                    if isinstance(rew_node.get("evidence"), dict):
+                        rew_summary["evidence"] = rew_node.get("evidence")
+        except Exception:
+            rew_summary = {}
     
-        # --- slots（事实层）---
+        # --- slots（事实层�?--
         slots: Dict[str, Any] = {
             #"gate": self.gate.level,
             # V12 preferred
             "governance": {
-                "gate": {"raw_gate": self.gate.level, "final_gate": self.gate.level},
+                "gate": {
+                    "raw_gate": self.gate.level,
+                    "final_gate": self.gate.level,
+                    "reasons": getattr(self.gate, "reasons", []) if hasattr(self.gate, "reasons") else [],
+                    "hits": [
+                        {
+                            "rule_id": f"AUTO:{r}",
+                            "title": str(r),
+                            "severity": "INFO",
+                        }
+                        for r in (getattr(self.gate, "reasons", []) if hasattr(self.gate, "reasons") else [])
+                    ],
+                    "gate_rules_path": "config/gate_rules.yaml",
+                },
                 "drs": {"signal": drs},
+                "rew": rew_summary,
             },
 
             "drs": {"signal": drs},
+            "rew": rew_summary,
             "structure": bound.get("structure") or {},
             "observations": bound.get("observations") or {},
             "execution_summary": bound.get("execution_summary"),
-            # 供 market.overview block 使用（存在什么就透传什么，不在此处“编造事实”）
+            # �?market.overview block 使用（存在什么就透传什么，不在此处“编造事实”）
             "market_overview": (
                 bound.get("market_overview")
                 or bound.get("market_close_facts")
                 or bound.get("close_facts")
                 or {}
             ),
-            # 供 etf_spot_sync.explain block 使用（允许 intraday_overlay 作为备用）
+            # �?etf_spot_sync.explain block 使用（允�?intraday_overlay 作为备用�?
             "intraday_overlay": bound.get("intraday_overlay") or {},
         }
+
+        # -----------------------------------------------------------
+        # Rotation Snapshot (Sector Rotation)
+        # - Source: Fetcher snapshot["rotation_snapshot_raw"]
+        # - Frozen: report layer must only read DB snapshot tables (already done in DS)
+        # -----------------------------------------------------------
+        try:
+            _rs = None
+            if isinstance(getattr(self, "snapshot", None), dict):
+                _rs = self.snapshot.get("rotation_snapshot_raw")
+            if isinstance(_rs, dict) and _rs:
+                slots["rotation_snapshot"] = _rs
+        except Exception:
+            # fail-open: rotation snapshot is an additive report block
+            pass
         # -----------------------------------------------------------
         # Expose FactorResults to report blocks (read-only)
         # - SectorProxyBlock expects slots["factors"]["sector_proxy"]
@@ -713,21 +887,217 @@ class AShareDailyEngine:
         
         slots["factors"] = factors_slot
 
+        # -----------------------------------------------------------
+        # -----------------------------------------------------------
+        # Attack Window (Offense Permission Layer) - canonical input slots
+        #
+        # Problem fixed (2026-02-05 audit):
+        # - Do NOT assume factors named breadth/trend_in_force/failure_rate exist.
+        # - Prefer structure facts + watchlist_lead lead_panels when available.
+        # - Emit canonical top-level slots expected by AttackWindowEvaluator:
+        #   breadth / trend_in_force / failure_rate / north_proxy_pressure / leverage_constraints / options_risk
+        # - Each carries meta.asof for Data Freshness checks.
+        #
+        # Read-only: does NOT affect Gate/DRS/Execution.
+        # -----------------------------------------------------------
+        def _details_from_factor(name: str) -> Dict[str, Any]:
+            frw = factors_slot.get(name)
+            if isinstance(frw, dict):
+                det = frw.get("details")
+                if isinstance(det, dict) and det:
+                    return det
+                # fallback: pack level/score if details missing
+                return {"level": frw.get("level"), "score": frw.get("score"), "meta": {"asof": self.trade_date}}
+            return {"meta": {"asof": self.trade_date}}
+
+        # Prefer explicit watchlist_lead slot; fallback to factor.details if present.
+        if "watchlist_lead" not in slots:
+            _wl = _details_from_factor("watchlist_lead")
+            if isinstance(_wl, dict) and _wl:
+                slots["watchlist_lead"] = _wl
+
+        def _pick_structure_fact(key: str) -> Dict[str, Any]:
+            sf = slots.get("structure") if isinstance(slots.get("structure"), dict) else {}
+            obj = sf.get(key)
+            return obj if isinstance(obj, dict) else {}
+
+        def _pick_lead_panel(panel_key: str) -> Dict[str, Any]:
+            wl = slots.get("watchlist_lead") if isinstance(slots.get("watchlist_lead"), dict) else {}
+            lead_panels = wl.get("lead_panels") if isinstance(wl.get("lead_panels"), dict) else {}
+            p = lead_panels.get(panel_key)
+            return p if isinstance(p, dict) else {}
+
+        # trend_in_force: prefer structure facts (stable schema: {"state": ...})
+        if "trend_in_force" not in slots or not isinstance(slots.get("trend_in_force"), dict) or not slots.get("trend_in_force"):
+            _tif = _pick_structure_fact("trend_in_force")
+            if _tif:
+                # normalize minimal contract
+                slots["trend_in_force"] = {
+                    "state": _tif.get("state") or _tif.get("status") or _tif.get("状态") or _tif.get("trend_state"),
+                    "meta": {"asof": self.trade_date},
+                    **{k: v for k, v in _tif.items() if k not in ("meta",)},
+                }
+            else:
+                slots["trend_in_force"] = _details_from_factor("trend_in_force")
+
+        # failure_rate: prefer structure facts; keep original state string for evaluator mapping
+        if "failure_rate" not in slots or not isinstance(slots.get("failure_rate"), dict) or not slots.get("failure_rate"):
+            _fr = _pick_structure_fact("failure_rate") or _pick_structure_fact("frf") or _pick_structure_fact("failure_rate_facts")
+            if _fr:
+                slots["failure_rate"] = {
+                    "state": _fr.get("state") or _fr.get("status") or _fr.get("状态"),
+                    "level": _fr.get("level"),  # if exists
+                    "improve_days": _fr.get("improve_days") or _fr.get("improvement_days"),
+                    "meta": {"asof": self.trade_date},
+                    **{k: v for k, v in _fr.items() if k not in ("meta",)},
+                }
+            else:
+                slots["failure_rate"] = _details_from_factor("failure_rate")
+
+        # north_proxy_pressure: prefer structure facts (usually carries pressure_score/level)
+        if "north_proxy_pressure" not in slots or not isinstance(slots.get("north_proxy_pressure"), dict) or not slots.get("north_proxy_pressure"):
+            _np = _pick_structure_fact("north_proxy_pressure") or _pick_structure_fact("north_proxy")
+            if _np:
+                slots["north_proxy_pressure"] = {
+                    "level": _np.get("level") or _np.get("pressure_level") or _np.get("状态"),
+                    "score": _np.get("score") or _np.get("pressure_score"),
+                    "meta": {"asof": self.trade_date},
+                    **{k: v for k, v in _np.items() if k not in ("meta",)},
+                }
+            else:
+                slots["north_proxy_pressure"] = _details_from_factor("north_proxy_pressure")
+
+        # breadth: prefer watchlist_lead breadth_plus panel key_metrics; fallback to factor
+        if "breadth" not in slots or not isinstance(slots.get("breadth"), dict) or not slots.get("breadth"):
+            bp = _pick_lead_panel("breadth_plus")
+            km = bp.get("key_metrics") if isinstance(bp.get("key_metrics"), dict) else {}
+            slots["breadth"] = {
+                "adv_ratio": None,  # filled below if available
+                "pct_above_ma20": km.get("pct_above_ma20"),
+                "pct_above_ma50": km.get("pct_above_ma50"),
+                "new_low_ratio_pct": km.get("new_low_ratio_pct"),
+                "new_high_low_ratio": km.get("new_high_low_ratio"),
+                "ad_slope_10d": km.get("ad_slope_10d"),
+                "meta": {"asof": self.trade_date},
+            }
+
+        # Fill adv_ratio from watchlist_lead market_sentiment panel if available
+        ms = _pick_lead_panel("market_sentiment")
+        ms_km = ms.get("key_metrics") if isinstance(ms.get("key_metrics"), dict) else {}
+        if isinstance(slots.get("breadth"), dict):
+            if slots["breadth"].get("adv_ratio") is None:
+                adv_pct = ms_km.get("adv_ratio_pct")
+                if isinstance(adv_pct, (int, float)):
+                    slots["breadth"]["adv_ratio"] = float(adv_pct) / 100.0
+
+        # leverage_constraints/options_risk: prefer watchlist_lead panels levels (G/E) for governance hints
+        if "leverage_constraints" not in slots or not isinstance(slots.get("leverage_constraints"), dict) or not slots.get("leverage_constraints"):
+            mi = _pick_lead_panel("margin_intensity")
+            slots["leverage_constraints"] = {"level": mi.get("level"), "meta": {"asof": self.trade_date}}
+
+        if "options_risk" not in slots or not isinstance(slots.get("options_risk"), dict) or not slots.get("options_risk"):
+            op = _pick_lead_panel("options_risk")
+            slots["options_risk"] = {"level": op.get("level"), "meta": {"asof": self.trade_date}}
+        # NOTE (Frozen): do NOT write back partial fields into slots['market_overview'].
+        # MarketOverviewBlock relies on empty/nonexistent market_overview to trigger its fallback assembly.
+        # Attack Window reads required evidence directly from structure facts / lead panels.
+# Provide a canonical gate_decision slot for rule layers expecting it.
+        if "gate_decision" not in slots:
+            slots["gate_decision"] = {"gate": getattr(self.gate, "level", None), "meta": {"asof": self.trade_date}}
+
+
 
     
-        # 将 etf_index_sync / etf_spot_sync factor 统一挂到 slots["etf_spot_sync"]
-        #（你的 explain block 优先读 slots["etf_spot_sync"]）
-        for k in ("etf_spot_sync", "etf_index_sync", "etf_index_sync_daily", "etf_spot_sync_raw"):
+        # �?etf_index_sync / etf_spot_sync factor 统一挂到 slots["etf_spot_sync"]
+        #（你�?explain block 优先�?slots["etf_spot_sync"]�?
+        for k in ("etf_spot_sync", "etf_index_sync", "crowding_concentration", "etf_spot_sync_raw"):
             fr = self.factors.get(k) if isinstance(getattr(self, "factors", None), dict) else None
             if fr is not None:
                 slots["etf_spot_sync"] = _wrap_factor(fr)  # 内含 details
                 break
     
+        
+        # -----------------------------------------------------------
+        # Data Freshness (asof vs trade_date)
+        # - Collect any embedded 'asof' fields across slots and render a compact summary.
+        # - Enforcement is handled elsewhere; here we expose facts for report/audit.
+        # -----------------------------------------------------------
+        try:
+            slots["data_freshness_inject"] = inject_asof_fields(trade_date=self.trade_date, slots=slots)
+            slots["data_freshness"] = compute_data_freshness(trade_date=self.trade_date, slots=slots)
+        except Exception as _e:
+            slots["data_freshness"] = {
+                "meta": {"trade_date": self.trade_date, "stale_count": None},
+                "stale": [],
+                "hard_required_missing_paths": [],
+                "render_lines": [f"> ⚠️ exception:data_freshness_compute: {_e}"],
+            }
+
+        # -----------------------------------------------------------
+        # Rotation Switch (板块轮动开关)
+        # - Read-only governance helper: ON / OFF / PARTIAL + reasons
+        # - Uses config/rotation_enable.yaml as single source of truth.
+        # -----------------------------------------------------------
+        try:
+            rot_cfg_all = self._load_yaml_file("config/rotation_enable.yaml")
+            rot_cfg = rot_cfg_all.get("rotation_enable") if isinstance(rot_cfg_all, dict) else {}
+            if not isinstance(rot_cfg, dict):
+                rot_cfg = {}
+            slots["rotation_switch"] = build_rotation_switch(slots=slots, cfg=rot_cfg, trade_date=self.trade_date)
+        except Exception as _e:
+            # Never fail report because of this helper block
+            slots["rotation_switch"] = {
+                "asof": self.trade_date,
+                "mode": "OFF",
+                "confidence": 0.0,
+                "verdict": "不适合板块轮动（异常降级）",
+                "reasons": [{"code": "ROT_EXCEPTION", "level": "WARN", "msg": f"exception:{_e}"}],
+                "data_status": {"coverage": "PARTIAL", "missing": []},
+            }
+        
+
+        # -----------------------------------------------------------
+        # Attack Window (Offense Permission Layer) - evaluate and attach
+        # - Must run after gate_decision is available, before report build.
+        # - Fail-closed: on any exception, state=OFF, permission=FORBID.
+        # -----------------------------------------------------------
+        try:
+            if not hasattr(self, "_attack_window_evaluator") or self._attack_window_evaluator is None:
+                self._attack_window_evaluator = AttackWindowEvaluator("config/rules/attack_window.yaml")
+            slots["attack_window"] = self._attack_window_evaluator.evaluate(slots)
+            # ---- FINAL: normalize AttackWindow asof for reporter compatibility ----
+            try:
+                _aw = slots.get("attack_window")
+                if isinstance(_aw, dict):
+                    _aw.setdefault("asof", self.trade_date)
+                    _aw.setdefault("trade_date", self.trade_date)
+                    _m = _aw.get("meta")
+                    if not isinstance(_m, dict):
+                        _m = {}
+                    _m.setdefault("asof", self.trade_date)
+                    _m.setdefault("trade_date", self.trade_date)
+                    _aw["meta"] = _m
+            except Exception:
+                pass
+
+        except Exception as _e:
+            slots["attack_window"] = {
+                "asof": self.trade_date,
+                "trade_date": self.trade_date,
+                "meta": {"asof": self.trade_date, "schema": "AW_V1"},
+                "state": "OFF",
+                "gate": getattr(self.gate, "level", "UNKNOWN"),
+                "offense_permission": "FORBID",
+                "reasons_yes": [],
+                "reasons_no": [f"exception:attack_window:{_e}"],
+                "evidence": {},
+                "data_freshness": {"asof_ok": False, "notes": ["exception"]},
+            }
         context = ReportContext(
-            kind=self.report_kind,
-            trade_date=self.trade_date,
-            slots=slots,
-        )
+                    kind=self.report_kind,
+                    trade_date=self.trade_date,
+                    slots=slots,
+                )
     
         # --- persistence payload（你已有，保持兼容）---
         des_payload = {
@@ -745,9 +1115,34 @@ class AShareDailyEngine:
                 "gate": self.gate.level,
                 "drs": drs,
                 "frf": frf,
+                "rew": rew_summary,
             },
             "rule_trace": "",  # init
         }
+        # --- Attack Window snapshot (read-only) ---
+        des_payload["attack_window"] = slots.get("attack_window")
+        # -----------------------------------------------------------
+        # Attack Window Case Log (制度案例日志) - fail-safe append-only
+        # - Always writes a DAY snapshot (even OFF) so activation is visible.
+        # - Writes a CASE snapshot when state in {VERIFY_ONLY, LIGHT_ON, ON}.
+        # - Does NOT affect any decision logic.
+        # -----------------------------------------------------------
+        try:
+            from core.audit.attack_window_case_logger import maybe_log_attack_window_case
+
+            maybe_log_attack_window_case(
+                trade_date=self.trade_date,
+                slots=slots,
+                report_kind=getattr(self, "report_kind", "EOD"),
+                des_payload=des_payload,
+                logger=LOG,
+            )
+        except Exception as _e:
+            # Never break daily run because of audit log.
+            LOG.warning("attack_window case log failed: %s", _e)
+
+
+
     
 
         # --- report blocks config (single source of truth: YAML) ---
@@ -777,6 +1172,8 @@ class AShareDailyEngine:
             block_specs_path=report_blocks_path,
         )
     
+        RegimeHistoryService.inject(context, conn=self._conn, report_kind=self.report_kind, n=10)
+    
         doc = engine.build_report(context)
 
         path = os.path.join(r"run\reports", f"doc_{self.trade_date}.json")
@@ -803,3 +1200,61 @@ class AShareDailyEngine:
         cfg = self._load_yaml_file(path)
         return cfg if isinstance(cfg, dict) else {}
 
+
+
+    def finish_run(
+        self,
+        run_id: str,
+        status: str,
+        error_type: Optional[str] = None,
+        error_message: Optional[str] = None,
+    ) -> None:
+        try:
+            now = datetime.utcnow().isoformat(timespec="seconds")
+    
+            cols = {
+                row[1] for row in self._conn.execute("PRAGMA table_info(ur_run_meta)").fetchall()
+            }
+    
+            sets = ["status = ?"]
+            vals = [status]
+    
+            if "error_type" in cols:
+                sets.append("error_type = ?")
+                vals.append(error_type)
+            if "error_message" in cols:
+                sets.append("error_message = ?")
+                vals.append(error_message)
+    
+            # 支持 finished_at / finished_at_utc 二选一（或两者都有）
+            if "finished_at_utc" in cols:
+                sets.append("finished_at_utc = ?")
+                vals.append(now)
+            elif "finished_at" in cols:
+                sets.append("finished_at = ?")
+                vals.append(now)
+    
+            sql = f"UPDATE ur_run_meta SET {', '.join(sets)} WHERE run_id = ?"
+            vals.append(run_id)
+    
+            with self._conn:
+                self._conn.execute(sql, tuple(vals))
+        except Exception as e:
+            raise e
+            #raise PersistenceError("Failed to finish_run ") from e
+
+    def _init_persistence(self):
+        from core.persistence.sqlite.sqlite_run_persistence import SqliteRunPersistence
+        from pathlib import Path
+    
+        UNIFIEDRISK_DB_PATH = r"./data/persistent/unifiedrisk.db"
+        db_path = Path(UNIFIEDRISK_DB_PATH)
+        self._conn = connect_sqlite(str(db_path))
+    
+        run_persist = SqliteRunPersistence(self._conn)
+    
+        now = datetime.now()
+        engine_version = "V_" + now.strftime("%Y-%m-%d_%H:%M:%S")
+        return run_persist, engine_version
+    
+##### end class

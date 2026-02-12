@@ -27,13 +27,13 @@ from core.datasources.datasource_base import (
 from core.utils.spot_store import get_spot_daily
 from core.utils.ds_refresh import apply_refresh_cleanup
 
-LOG = get_logger("DS.ETFSpotSync")
+LOG = get_logger("DS.ETFSpotSyncIntraday")
 
 
-class ETFSpotSyncDataSource(DataSourceBase):
+class ETFSpotSyncIntradayDataSource(DataSourceBase):
     """
     ETF × 市场横截面同步性 DataSource（事实层）
-
+    这个是intt
     输出事实（不解释）：
     - 上涨 / 下跌比例
     - 成交额集中度（Top 20%）

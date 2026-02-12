@@ -50,98 +50,121 @@ class SectorProxyBlock(ReportBlockRendererBase):
 
         evidence = details.get("evidence") if isinstance(details.get("evidence"), dict) else {}
 
+        # risk_score should be available for header rendering (avoid UnboundLocalError)
+
+        r_score = self._get_num((evidence or {}).get("risk_score"))
+
         lines: List[str] = []
         lines.append("（只读解释）Sector Proxy 用一组板块/主题代理，衡量“指数走势是否被板块参与所确认”。")
         lines.append("注意：该区块仅用于结构验证展示，不构成进攻/调仓依据；最终以 Gate / Execution / DRS 为准。")
+        lines.append("⚠️ 重要：Validation（如 STRONG）仅表示结构未被证伪，不等于“允许进攻/加仓”。进攻许可请以 Attack Window + Gate 为准。")
 
-        if isinstance(level, str) and level:
-            lines.append(f"(Factor) level: {level}    score: {score if score is not None else 'NA'}")
-        else:
-            lines.append(f"(Factor) score: {score if score is not None else 'NA'}")
-
-        v_score = self._get_num(evidence.get("validation_score"))
-        r_score = self._get_num(evidence.get("risk_score"))
-        leaders_ratio = self._get_num(evidence.get("leaders_ratio_10d"))
-        sector_cnt = self._get_num(evidence.get("sector_count"))
-        avg_rs10 = self._get_num(evidence.get("avg_rs_10d"))
-        stdev_rs10 = self._get_num(evidence.get("stdev_rs_10d"))
-        span_rs10 = self._get_num(evidence.get("span_rs_10d"))
-        dd10_bad = evidence.get("dd10_bad")
-
-        parts: List[str] = []
-        if v_score is not None:
-            parts.append(f"validation_score={v_score:.2f}")
-        if r_score is not None:
-            parts.append(f"risk_score={r_score:.2f}")
-        if leaders_ratio is not None:
-            parts.append(f"leaders_ratio_10d={leaders_ratio:.4f}")
-        if sector_cnt is not None:
-            parts.append(f"sector_count={int(sector_cnt)}")
-        if avg_rs10 is not None:
-            parts.append(f"avg_rs10={avg_rs10:.4f}")
-        if stdev_rs10 is not None:
-            parts.append(f"stdev_rs10={stdev_rs10:.4f}")
-        if span_rs10 is not None:
-            parts.append(f"span_rs10={span_rs10:.4f}")
-        if isinstance(dd10_bad, (int, float)):
-            parts.append(f"dd10_bad={int(dd10_bad)}")
-        if parts:
-            lines.append("关键证据：" + " ; ".join(parts))
-
-        bench = details.get("benchmark")
-        if isinstance(bench, dict):
-            bsym = bench.get("symbol")
-            b10 = self._get_num(bench.get("ret_10d"))
-            b20 = self._get_num(bench.get("ret_20d"))
-            bps: List[str] = []
-            if isinstance(bsym, str) and bsym:
-                bps.append(f"symbol={bsym}")
-            if b10 is not None:
-                bps.append(f"ret_10d={b10:.4%}")
-            if b20 is not None:
-                bps.append(f"ret_20d={b20:.4%}")
-            if bps:
-                lines.append("基准：" + " ; ".join(bps))
-
-        sectors = details.get("sectors")
-        rows: List[str] = []
-        rs_pairs: List[Tuple[str, float]] = []
-        if isinstance(sectors, dict) and sectors:
-            rows, rs_pairs = self._build_rows(sectors)
-            if rows:
-                lines.append("")
-                lines.append("板块相对强弱（RS_10d vs 基准，降序）：")
-                show = rows[:8]
-                for r in show:
-                    lines.append(f"- {r}")
-                if len(rows) > len(show):
-                    lines.append(f"(其余 {len(rows)-len(show)} 个略)")
-        else:
-            warnings.append("missing:sector_proxy_sectors")
-
-        reasons = details.get("reasons")
-        if isinstance(reasons, list) and reasons:
-            rr = [str(x) for x in reasons[:10] if str(x)]
-            if rr:
-                lines.append("")
-                lines.append("模型理由（截断）：")
-                for x in rr:
-                    lines.append(f"- {x}")
-
-        ds = details.get("data_status")
-        if isinstance(ds, str) and ds:
-            lines.append("")
-            lines.append(f"data_status: {ds}")
-
-        lines.extend(self._interpretation_lines(
-            validation_score=v_score,
-            risk_score=r_score,
-            leaders_ratio_10d=leaders_ratio,
-            span_rs10=span_rs10,
-            stdev_rs10=stdev_rs10,
-            dd10_bad=dd10_bad,
-            rs_pairs=rs_pairs,
-        ))
+        
+        v_level = (evidence or {}).get("validation_level")
+        # 表述层优化：显性化“STRONG ≠ 进攻许可”
+        v_level_disp = v_level
+        if isinstance(v_level, str):
+            if v_level.upper() == "STRONG":
+                v_level_disp = "STRONG（结构有效，但不构成进攻许可）"
+            elif v_level.upper() in ("MED", "MEDIUM"):
+                v_level_disp = "MED（结构尚可，不构成进攻许可）"
+            elif v_level.upper() in ("WEAK", "SOFT"):
+                v_level_disp = "WEAK（结构偏弱）"
+                r_level = (evidence or {}).get("risk_level")
+                if v_level or r_level:
+                    lines.append(
+                        f"(Factor) validation_level: {v_level_disp or 'NA'}    validation_score: {score if score is not None else 'NA'}"
+                        f"    risk_level: {r_level or (level if isinstance(level, str) else 'NA')}    risk_score: {r_score if r_score is not None else 'NA'}"
+                    )
+                elif isinstance(level, str) and level:
+                    lines.append(f"(Factor) level: {level}    score: {score if score is not None else 'NA'}")
+                else:
+                    lines.append(f"(Factor) score: {score if score is not None else 'NA'}")
+        
+        
+                v_score = self._get_num(evidence.get("validation_score"))
+                r_score = self._get_num(evidence.get("risk_score"))
+                leaders_ratio = self._get_num(evidence.get("leaders_ratio_10d"))
+                sector_cnt = self._get_num(evidence.get("sector_count"))
+                avg_rs10 = self._get_num(evidence.get("avg_rs_10d"))
+                stdev_rs10 = self._get_num(evidence.get("stdev_rs_10d"))
+                span_rs10 = self._get_num(evidence.get("span_rs_10d"))
+                dd10_bad = evidence.get("dd10_bad")
+        
+                parts: List[str] = []
+                if v_score is not None:
+                    parts.append(f"validation_score={v_score:.2f}")
+                if r_score is not None:
+                    parts.append(f"risk_score={r_score:.2f}")
+                if leaders_ratio is not None:
+                    parts.append(f"leaders_ratio_10d={leaders_ratio:.4f}")
+                if sector_cnt is not None:
+                    parts.append(f"sector_count={int(sector_cnt)}")
+                if avg_rs10 is not None:
+                    parts.append(f"avg_rs10={avg_rs10:.4f}")
+                if stdev_rs10 is not None:
+                    parts.append(f"stdev_rs10={stdev_rs10:.4f}")
+                if span_rs10 is not None:
+                    parts.append(f"span_rs10={span_rs10:.4f}")
+                if isinstance(dd10_bad, (int, float)):
+                    parts.append(f"dd10_bad={int(dd10_bad)}")
+                if parts:
+                    lines.append("关键证据：" + " ; ".join(parts))
+        
+                bench = details.get("benchmark")
+                if isinstance(bench, dict):
+                    bsym = bench.get("symbol")
+                    b10 = self._get_num(bench.get("ret_10d"))
+                    b20 = self._get_num(bench.get("ret_20d"))
+                    bps: List[str] = []
+                    if isinstance(bsym, str) and bsym:
+                        bps.append(f"symbol={bsym}")
+                    if b10 is not None:
+                        bps.append(f"ret_10d={b10:.4%}")
+                    if b20 is not None:
+                        bps.append(f"ret_20d={b20:.4%}")
+                    if bps:
+                        lines.append("基准：" + " ; ".join(bps))
+        
+                sectors = details.get("sectors")
+                rows: List[str] = []
+                rs_pairs: List[Tuple[str, float]] = []
+                if isinstance(sectors, dict) and sectors:
+                    rows, rs_pairs = self._build_rows(sectors)
+                    if rows:
+                        lines.append("")
+                        lines.append("板块相对强弱（RS_10d vs 基准，降序）：")
+                        show = rows[:8]
+                        for r in show:
+                            lines.append(f"- {r}")
+                        if len(rows) > len(show):
+                            lines.append(f"(其余 {len(rows)-len(show)} 个略)")
+                else:
+                    warnings.append("missing:sector_proxy_sectors")
+        
+                reasons = details.get("reasons")
+                if isinstance(reasons, list) and reasons:
+                    rr = [str(x) for x in reasons[:10] if str(x)]
+                    if rr:
+                        lines.append("")
+                        lines.append("模型理由（截断）：")
+                        for x in rr:
+                            lines.append(f"- {x}")
+        
+                ds = details.get("data_status")
+                if isinstance(ds, str) and ds:
+                    lines.append("")
+                    lines.append(f"data_status: {ds}")
+        
+                lines.extend(self._interpretation_lines(
+                    validation_score=v_score,
+                    risk_score=r_score,
+                    leaders_ratio_10d=leaders_ratio,
+                    span_rs10=span_rs10,
+                    stdev_rs10=stdev_rs10,
+                    dd10_bad=dd10_bad,
+                    rs_pairs=rs_pairs,
+                ))
 
         return ReportBlock(
             block_alias=self.block_alias,

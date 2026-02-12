@@ -71,7 +71,7 @@ def main_p1():
 
     conn = connect_sqlite(str(db_path))
     ensure_schema_l2(conn)
-    #ensure_schema_l1(conn)
+    ensure_schema_l1(conn)
 
     # --- L2 publish happy path ---
     publisher = SqliteL2Publisher(conn)

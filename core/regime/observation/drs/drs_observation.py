@@ -22,7 +22,7 @@ class DRSObservation(ObservationBase):
 
     输入（冻结最小集）：
     - structure.trend_in_force
-    - structure.frf
+    - structure.frf（legacy）/ structure.failure_rate（canonical）
     """
 
     # -----------------------------
@@ -38,6 +38,7 @@ class DRSObservation(ObservationBase):
             inputs=[
                 "structure.trend_in_force",
                 "structure.frf",
+                "structure.failure_rate",
             ],
             note="日度制度风险信号，仅用于风险环境提示，不构成交易或仓位指令。",
         )
@@ -53,7 +54,10 @@ class DRSObservation(ObservationBase):
         structure = inputs if isinstance(inputs, dict) else {}
 
         trend_state = structure.get("trend_in_force", {}).get("state")
-        frf_state = structure.get("frf", {}).get("state")
+        # Backward/forward compatible: some builds output `failure_rate`, others use legacy key `frf`.
+        frf_state = (structure.get("frf", {}) or {}).get("state")
+        if frf_state is None:
+            frf_state = (structure.get("failure_rate", {}) or {}).get("state")
 
         signal = "GREEN"
         meaning = "趋势结构稳定，制度风险环境相对可控。"

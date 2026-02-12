@@ -1,0 +1,22 @@
+# rotation_targets.yaml
+# UnifiedRisk V12 · Rotation Target Mapping (ETF V1)
+#
+# Frozen intent:
+# - Map rotation Top1 sector -> tradable ETF symbol
+# - Report/GX MUST fail-closed when mapping missing (require_etf_mapping=true)
+#
+# Notes:
+# - Use 6-digit ETF codes as values (e.g., 512710, 159638).
+# - System will auto-prefix exchange:
+#   - code starts with '5' => 'sh.<code>'
+#   - otherwise => 'sz.<code>'
+# - You can map by sector_id OR sector_name (recommended: sector_id if stable).
+
+rotation_targets:
+  require_etf_mapping: true
+
+  # Map by sector_id (preferred)
+  by_sector_id: {}
+
+  # Map by sector_name (fallback)
+  by_sector_name: {}

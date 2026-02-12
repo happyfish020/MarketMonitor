@@ -1,0 +1,65 @@
+# GR-WATCHLIST-HEAT-OVERLAY-V1
+#
+# Purpose
+# - Observation-only governance overlay for WatchlistLead buckets.
+# - Fix “cognitive gap”: when market-level Leading-Structure is RED(HEAT), buckets may still be GREEN
+#   (because bucket shock is not yet realized). This rule caps bucket actions to avoid “加仓/追涨” misread.
+#
+# NOTE
+# - This rule is not part of GateDecision / DRS (Frozen Engineering). It is applied inside WatchlistLeadFactor
+#   and rendered by watchlist_lead_blk.py.
+#
+# Trigger (derived)
+# - tplus2_lead.overall_level == RED
+# - tplus2_lead.overall_tag == HEAT
+#   (overall_tag is derived from market_sentiment panel where:
+#    - limit_up_ratio_pct is high AND/OR broken_limit_rate_std is high)
+#
+# Targets
+# - High-beta watchlist buckets:
+#   - BUCKET_AI
+#   - BUCKET_NE
+#   - BUCKET_HARDTECH
+#
+# Effect
+# - Buckets keep their original shock color (e.g., GREEN) but MUST display:
+#     GREEN (CAPPED_BY_HEAT_RED)
+# - Bucket action permissions are capped to:
+#     Allowed: HOLD, TRIM_ON_STRENGTH
+#     Forbidden: ADD_RISK, CHASE_UP
+# - Report MUST explicitly remind:
+#     “未来 1–2 天任意拥挤赛道可能被砸，不要等点名。”
+
+schema_version: GR_RULESPEC_V1
+rule_id: GR-WATCHLIST-HEAT-OVERLAY-V1
+scope: observation_only
+owner: watchlist_lead
+
+trigger:
+  all:
+    - path: watchlist_lead.tplus2_lead.overall_level
+      op: eq
+      value: RED
+    - path: watchlist_lead.tplus2_lead.overall_tag
+      op: eq
+      value: HEAT
+
+targets:
+  buckets:
+    - BUCKET_AI
+    - BUCKET_NE
+    - BUCKET_HARDTECH
+
+cap:
+  cap_code: CAPPED_BY_HEAT_RED
+  action_allowed:
+    - HOLD
+    - TRIM_ON_STRENGTH
+  action_forbidden:
+    - ADD_RISK
+    - CHASE_UP
+
+report:
+  required_bucket_level_suffix: "(CAPPED_BY_HEAT_RED)"
+  reminder_lines:
+    - "未来 1–2 天任意拥挤赛道可能被砸，不要等点名。"

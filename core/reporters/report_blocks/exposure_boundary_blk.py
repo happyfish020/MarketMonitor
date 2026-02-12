@@ -83,7 +83,7 @@ class ExposureBoundaryBlock:
                         ),
                     },
                 ],
-                "note": "Gate=NORMAL 表示制度层未对风险敞口变更设置额外限制。",
+                #"note": "Gate=NORMAL 表示制度层未对风险敞口变更设置额外限制。",
             }
 
         if gate == "CAUTION":
@@ -118,10 +118,10 @@ class ExposureBoundaryBlock:
                         ),
                     },
                 ],
-                "note": (
-                    "Gate=CAUTION 表示当前结构尚未支持风险扩张，"
-                    "制度优先防守与等待。"
-                ),
+                #"note": (
+                #    "Gate=CAUTION 表示当前结构尚未支持风险扩张，"
+                #    "制度优先防守与等待。"
+                #),
             }
 
         if gate == "FREEZE":
@@ -156,10 +156,10 @@ class ExposureBoundaryBlock:
                         ),
                     },
                 ],
-                "note": (
-                    "Gate=FREEZE 表示制度进入风险防御阶段，"
-                    "仅允许风险回收行为。"
-                ),
+                #"note": (
+                #    "Gate=FREEZE 表示制度进入风险防御阶段，"
+                #    "仅允许风险回收行为。"
+                #),
             }
 
         return self._build_empty_payload(
@@ -171,7 +171,7 @@ class ExposureBoundaryBlock:
             "intro": "T+1 风险敞口行为边界不可用。",
             "dominant": "",
             "behaviors": [],
-            "note": note,
+            #"note": note,
         }
 
     def _build_block(

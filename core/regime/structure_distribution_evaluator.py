@@ -19,7 +19,7 @@ class StructureDistributionEvaluator:
         each item must include:
           - date
           - factors:
-              - etf_index_sync_daily.level
+              - crowding_concentration.level
               - participation.level
         """
 
@@ -32,7 +32,7 @@ class StructureDistributionEvaluator:
 
         for day in recent:
             factors = day.get("factors", {})
-            sync = factors.get("etf_index_sync_daily")
+            sync = factors.get("crowding_concentration")
             part = factors.get("participation")
 
             is_bad = False
@@ -76,7 +76,7 @@ class StructureDistributionEvaluator:
 
         for day in recent:
             factors = day.get("factors", {})
-            sync = factors.get("etf_index_sync_daily")
+            sync = factors.get("crowding_concentration")
             part = factors.get("participation")
 
             is_bad = False

@@ -17,14 +17,12 @@ def get_db_provider() -> Any:
     """
 
     cfg = load_config().get("db", {}) or {}
-    db_type = str(cfg.get("type", "oracle")).lower().strip()
+    db_type = str(cfg.get("type", "mysql")).lower().strip()
 
-    if db_type == "oracle":
-        from core.adapters.providers.db_provider_oracle import DBOracleProvider
+    if db_type in ("mysql", "oracle"):
+        from core.adapters.providers.db_provider_mysql_market import DBMySQLMarketProvider
 
-        return DBOracleProvider()
-
-    if db_type == "mysql":
-        raise NotImplementedError("MySQL provider not implemented yet (db.type=mysql)")
+        return DBMySQLMarketProvider()
 
     raise ValueError(f"Unsupported db.type={db_type}")
+

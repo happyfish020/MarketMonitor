@@ -1,0 +1,63 @@
+# CN Entry Pool Rotation - Frozen Config
+version: 1
+entry_mode: T1_CONFIRM_ONLY
+
+# State machine parameters
+params:
+  trigger:
+    breakout_window_days: 60
+    volume_ratio_min: 1.5
+  confirm:
+    above_breakout_days: 2
+    below_breakout_days: 2
+  cooling:
+    cooldown_days: 5
+
+# Frozen entry pool (2026)
+entry_pool:
+  - symbol: "002463.SZ"
+    name: "沪电股份"
+    group_code: "AI_HARDWARE"
+    max_lots_2026: 2
+    is_active: true
+  - symbol: "300476.SZ"
+    name: "胜宏科技"
+    group_code: "AI_HARDWARE"
+    max_lots_2026: 2
+    is_active: true
+  - symbol: "300308.SZ"
+    name: "中际旭创"
+    group_code: "AI_HARDWARE"
+    max_lots_2026: 1
+    is_active: true
+
+  - symbol: "603986.SH"
+    name: "兆易创新"
+    group_code: "SEMI_SUBSTITUTION"
+    max_lots_2026: 2
+    is_active: true
+  - symbol: "300054.SZ"
+    name: "鼎龙股份"
+    group_code: "SEMI_SUBSTITUTION"
+    max_lots_2026: 2
+    is_active: true
+  - symbol: "300223.SZ"
+    name: "北京君正"
+    group_code: "SEMI_SUBSTITUTION"
+    max_lots_2026: 2
+    is_active: true
+
+# Data sources
+oracle:
+  dsn: "oracle+oracledb://secopr:secopr@localhost:1521/xe"
+  schema: "SECOPR"
+  price_table: "CN_STOCK_DAILY_PRICE"
+  cols:
+    symbol: "SYMBOL"
+    trade_date: "TRADE_DATE"
+    close: "CLOSE"
+    volume: "VOLUME"
+    high: "HIGH"
+
+sqlite:
+  db_path: "data/cn_entry_pool_rotation.db"

@@ -3,15 +3,15 @@
 """
 BreadthPlusDataSource (Leading-Structure DataPack v1 / Panel B)
 
-目标（冻结）：
-- 输出广度增强 raw block（不做业务解释/打分）
-- 数据缺失/覆盖不足：必须以 MISSING/PARTIAL + warnings 体现；禁止 silent exception
-- 默认仅支持 EOD；INTRADAY 返回占位 MISSING（append-only 后再扩展）
+鐩爣锛堝喕缁擄級锛?
+- 杈撳嚭骞垮害澧炲己 raw block锛堜笉鍋氫笟鍔¤В閲?鎵撳垎锛?
+- 鏁版嵁缂哄け/瑕嗙洊涓嶈冻锛氬繀椤讳互 MISSING/PARTIAL + warnings 浣撶幇锛涚姝?silent exception
+- 榛樿浠呮敮鎸?EOD锛汭NTRADAY 杩斿洖鍗犱綅 MISSING锛坅ppend-only 鍚庡啀鎵╁睍锛?
 
-本版本增强（v1 schema append-only）：
-- 补齐 %>MA20 / %>MA50（解决 coverage=0 / missing:pct_above_ma20/ma50）
-- 补齐 New High / New Low（20D/50D）与 new_high_low_ratio（默认 50D）
-- 补齐 A/D line（净上涨家数累计的 5D/20D delta 等）
+鏈増鏈寮猴紙v1 schema append-only锛夛細
+- 琛ラ綈 %>MA20 / %>MA50锛堣В鍐?coverage=0 / missing:pct_above_ma20/ma50锛?
+- 琛ラ綈 New High / New Low锛?0D/50D锛変笌 new_high_low_ratio锛堥粯璁?50D锛?
+- 琛ラ綈 A/D line锛堝噣涓婃定瀹舵暟绱鐨?5D/20D delta 绛夛級
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ import pandas as pd
 from core.utils.logger import get_logger
 from core.datasources.datasource_base import DataSourceBase, DataSourceConfig
 from core.utils.ds_refresh import apply_refresh_cleanup
-from core.adapters.providers.db_provider_oracle import DBOracleProvider
+from core.adapters.providers.db_provider_mysql_market import DBOracleProvider
 
 LOG = get_logger("DS.BreadthPlus")
 
@@ -291,9 +291,9 @@ class BreadthPlusDataSource(DataSourceBase):
                 "total_stocks": int(total),
                 "total": int(total),
                 "count": int(total),
-                # factor兼容：coverage 字段用于“总样本数”而不是 dict
+                # factor鍏煎锛歝overage 瀛楁鐢ㄤ簬鈥滄€绘牱鏈暟鈥濊€屼笉鏄?dict
                 "coverage": int(total),
-                # 详细覆盖信息（append-only）
+                # 璇︾粏瑕嗙洊淇℃伅锛坅ppend-only锛?
                 "coverage_detail": {
                     "total": int(total),
                     "valid_ma20": int(valid_ma20),
@@ -402,3 +402,4 @@ class BreadthPlusDataSource(DataSourceBase):
             "error_message": None,
             "evidence": {},
         }
+

@@ -2,12 +2,12 @@
 """
 UnifiedRisk V12 - BreadthDataSource (CN A-Share)
 
-职责（事实层）：
-- 从本地 DB 读取全市场股票 close
-- 计算：50 日新低比例（new_low_ratio）
-- 不做状态判断，不做预测
+鑱岃矗锛堜簨瀹炲眰锛夛細
+- 浠庢湰鍦?DB 璇诲彇鍏ㄥ競鍦鸿偂绁?close
+- 璁＄畻锛?0 鏃ユ柊浣庢瘮渚嬶紙new_low_ratio锛?
+- 涓嶅仛鐘舵€佸垽鏂紝涓嶅仛棰勬祴
 
-输出（当日）：
+杈撳嚭锛堝綋鏃ワ級锛?
 {
   "trade_date": "YYYY-MM-DD",
   "window": 50,
@@ -25,7 +25,7 @@ import pandas as pd
 
 from core.utils.logger import get_logger
 from core.datasources.datasource_base import DataSourceBase, DataSourceConfig
-from core.adapters.providers.db_provider_oracle import DBOracleProvider
+from core.adapters.providers.db_provider_mysql_market import DBOracleProvider
 
 LOG = get_logger("DS.Breadth")
 
@@ -35,7 +35,7 @@ class BreadthDataSource(DataSourceBase):
         super().__init__(cfg)
         self.config = cfg
         
-        self.window = int(window)   # ← ★ 必须有这一行
+        self.window = int(window)   # 鈫?鈽?蹇呴』鏈夎繖涓€琛?
         
         self.db = DBOracleProvider()
 
@@ -44,20 +44,20 @@ class BreadthDataSource(DataSourceBase):
         start = (td - timedelta(days=self.window * 2)).strftime("%Y-%m-%d")
         end = td.strftime("%Y-%m-%d")
 
-        # 读取窗口内 close（允许停牌缺失）
+        # 璇诲彇绐楀彛鍐?close锛堝厑璁稿仠鐗岀己澶憋級
         df = self.db.query_stock_closes(window_start=start, trade_date=end)
  
  
 
 
-        # === 🔴 关键修复：DB 返回的是 list[tuple] ===
+        # === 馃敶 鍏抽敭淇锛欴B 杩斿洖鐨勬槸 list[tuple] ===
         if df is None or len(df) == 0:
             LOG.warning("[DS.Breadth] empty data (raw)")
             raise Exception("[DS.Breadth] empty data (raw)")
             return {}
         
-        # tuple 结构必须与你 SQL 一致
-        # 你截图里是：(symbol, ?, trade_date, close)
+        # tuple 缁撴瀯蹇呴』涓庝綘 SQL 涓€鑷?
+        # 浣犳埅鍥鹃噷鏄細(symbol, ?, trade_date, close)
         df = pd.DataFrame(
             df,
             columns=["symbol", "_unused", "trade_date", "close_price"],
@@ -75,13 +75,13 @@ class BreadthDataSource(DataSourceBase):
         df["trade_date"] = pd.to_datetime(df["trade_date"])
         df = df.sort_values(["symbol", "trade_date"])
 
-        # 取当日价格
+        # 鍙栧綋鏃ヤ环鏍?
         today = df[df["trade_date"] == td][["symbol", "close_price"]]
         if today.empty:
             LOG.warning("[DS.Breadth] no today prices")
             return {}
 
-        # 计算 50 日最低
+        # 璁＄畻 50 鏃ユ渶浣?
         lows = (
             df.groupby("symbol", sort=False)
               .tail(self.window)
@@ -106,3 +106,4 @@ class BreadthDataSource(DataSourceBase):
         }
 
         return block
+

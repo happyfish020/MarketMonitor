@@ -33,7 +33,7 @@ from core.datasources.datasource_base import DataSourceConfig, DataSourceBase
 from core.utils.ds_refresh import apply_refresh_cleanup
 from core.utils.spot_store import get_spot_daily
 
-from core.adapters.providers.db_provider_oracle import DBOracleProvider
+from core.adapters.providers.db_provider_mysql_market import DBOracleProvider
 
 LOG = get_logger("DS.Sentiment")
 
@@ -1051,3 +1051,4 @@ class MarketSentimentDataSource(DataSourceBase):
             return float(x)
         except Exception:
             return None
+

@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
 """
 UnifiedRisk V12 FULL
-ETF × Spot Synchronization Daily DataSource (T-1 Confirmed)
+ETF 脳 Spot Synchronization Daily DataSource (T-1 Confirmed)
 
-设计铁律：
-- Phase-1 DataSource（事实层）
-- 只读取 oracle DB（T-1 已收盘全行情）
-- snapshot_type 永远为 EOD
-- 可回放、可审计
-- 专供 Gate / Phase-3 使用
+璁捐閾佸緥锛?
+- Phase-1 DataSource锛堜簨瀹炲眰锛?
+- 鍙鍙?oracle DB锛圱-1 宸叉敹鐩樺叏琛屾儏锛?
+- snapshot_type 姘歌繙涓?EOD
+- 鍙洖鏀俱€佸彲瀹¤
+- 涓撲緵 Gate / Phase-3 浣跨敤
 """
 
 import os
@@ -16,7 +16,7 @@ import json
 from typing import Dict, Any
 from datetime import datetime
 import pandas as pd
-from core.adapters.providers.db_provider_oracle import DBOracleProvider
+from core.adapters.providers.db_provider_mysql_market import DBOracleProvider
 
 from core.utils.logger import get_logger
 from core.datasources.datasource_base import (
@@ -29,12 +29,12 @@ LOG = get_logger("DS.ETFSpotSyncDaily")
 
 class ETFSpotSyncDailyDataSource(DataSourceBase):
     """
-    ETF × 市场横截面同步性 DataSource（T-1 确认态）
+    ETF 脳 甯傚満妯埅闈㈠悓姝ユ€?DataSource锛圱-1 纭鎬侊級
 
-    输出事实（不解释）：
-    - 上涨 / 下跌比例
-    - 成交额集中度（Top 20%）
-    - 涨跌幅分化程度（dispersion）
+    杈撳嚭浜嬪疄锛堜笉瑙ｉ噴锛夛細
+    - 涓婃定 / 涓嬭穼姣斾緥
+    - 鎴愪氦棰濋泦涓害锛圱op 20%锛?
+    - 娑ㄨ穼骞呭垎鍖栫▼搴︼紙dispersion锛?
     """
 
     def __init__(self, config: DataSourceConfig):
@@ -58,14 +58,14 @@ class ETFSpotSyncDailyDataSource(DataSourceBase):
     # ------------------------------------------------------------------
     def build_block(self, trade_date: str, refresh_mode: str = "none") -> Dict[str, Any]:
         """
-        trade_date: T-1（确认态）
+        trade_date: T-1锛堢‘璁ゆ€侊級
         """
 
         cache_file = os.path.join(
             self.cache_root, f"etf_spot_sync_daily_{trade_date}.json"
         )
 
-        # 命中 cache（daily 永远允许）
+        # 鍛戒腑 cache锛坉aily 姘歌繙鍏佽锛?
         if refresh_mode in ("none", "readonly") and os.path.exists(cache_file):
             try:
                 with open(cache_file, "r", encoding="utf-8") as f:
@@ -74,7 +74,7 @@ class ETFSpotSyncDailyDataSource(DataSourceBase):
                 LOG.error("[DS.ETFSpotSyncDaily] load cache error: %s", e)
 
         # ------------------------------------------------------------
-        # 1️⃣ 从 oracle 读取 T-1 全行情（已收盘）
+        # 1锔忊儯 浠?oracle 璇诲彇 T-1 鍏ㄨ鎯咃紙宸叉敹鐩橈級
         # ------------------------------------------------------------
         
         #last_td = self.oracle.query_last_trade_date(trade_date)  # trade_date is T (as-of)
@@ -87,7 +87,7 @@ class ETFSpotSyncDailyDataSource(DataSourceBase):
             LOG.error("[DS.ETFSpotSyncDaily] empty market snapshot")
             return self._neutral_block(trade_date)
 
-        # 转为 DataFrame（统一计算口径）
+        # 杞负 DataFrame锛堢粺涓€璁＄畻鍙ｅ緞锛?
         df = pd.DataFrame.from_dict(market, orient="index")
         
         NUMERIC_COLS = ["chg_pct", "amount", "close", "prev_close"]
@@ -102,8 +102,8 @@ class ETFSpotSyncDailyDataSource(DataSourceBase):
             return self._neutral_block(trade_date)
          
         # ------------------------------------------------------------
-        # 2️⃣ 计算涨跌幅（T-1 只能用 close / prev_close）
-        # 这里假设 oracle 表中已有 prev_close
+        # 2锔忊儯 璁＄畻娑ㄨ穼骞咃紙T-1 鍙兘鐢?close / prev_close锛?
+        # 杩欓噷鍋囪 oracle 琛ㄤ腑宸叉湁 prev_close
         # ------------------------------------------------------------
         if "pre_close" not in df.columns:
             LOG.error("[DS.ETFSpotSyncDaily] prev_close missing")
@@ -124,7 +124,7 @@ class ETFSpotSyncDailyDataSource(DataSourceBase):
         dec_ratio = round(dec / total, 4)
 
         # ------------------------------------------------------------
-        # 3️⃣ 成交额集中度（Top 20%）
+        # 3锔忊儯 鎴愪氦棰濋泦涓害锛圱op 20%锛?
         # ------------------------------------------------------------
         if "amount" in df.columns:
             df_turn = df[df["amount"] > 0]
@@ -146,14 +146,14 @@ class ETFSpotSyncDailyDataSource(DataSourceBase):
             total_amount = 0.0
 
         # ------------------------------------------------------------
-        # 4️⃣ 分化程度
+        # 4锔忊儯 鍒嗗寲绋嬪害
         # ------------------------------------------------------------
         dispersion = round(float(df["chg_pct"].std(ddof=0)), 4)
 
         block: Dict[str, Any] = {
             "trade_date": trade_date,
-            "snapshot_type": "EOD",          # 强制确认态
-            "amount_stage": "FULL",        # daily 固定 FULL
+            "snapshot_type": "EOD",          # 寮哄埗纭鎬?
+            "amount_stage": "FULL",        # daily 鍥哄畾 FULL
 
             "total_stocks": total,
             "adv_count": adv,
@@ -172,7 +172,7 @@ class ETFSpotSyncDailyDataSource(DataSourceBase):
             },
         }
 
-        # 写 cache
+        # 鍐?cache
         try:
             with open(cache_file, "w", encoding="utf-8") as f:
                 json.dump(block, f, ensure_ascii=False, indent=2)

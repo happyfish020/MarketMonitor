@@ -2,28 +2,28 @@
 """
 UnifiedRisk V12 - Options Risk DataSource (E Block)
 
-设计目的：
-    聚合 ETF 期权日行情数据，计算加权涨跌额、总涨跌额、加权收盘价以及其变化趋势。
-    此数据源为期权风险分析提供基础原始数据，用于后续因子打分和报告展示。
+璁捐鐩殑锛?
+    鑱氬悎 ETF 鏈熸潈鏃ヨ鎯呮暟鎹紝璁＄畻鍔犳潈娑ㄨ穼棰濄€佹€绘定璺岄銆佸姞鏉冩敹鐩樹环浠ュ強鍏跺彉鍖栬秼鍔裤€?
+    姝ゆ暟鎹簮涓烘湡鏉冮闄╁垎鏋愭彁渚涘熀纭€鍘熷鏁版嵁锛岀敤浜庡悗缁洜瀛愭墦鍒嗗拰鎶ュ憡灞曠ず銆?
 
-约束：
-    - 仅依赖 DBOracleProvider，不访问外部 API。
-    - 仅聚合一组固定的 ETF 期权标的（九只ETF），根据配置可调整。
-    - 按日构建时间序列，默认回溯 60 日。
+绾︽潫锛?
+    - 浠呬緷璧?DBOracleProvider锛屼笉璁块棶澶栭儴 API銆?
+    - 浠呰仛鍚堜竴缁勫浐瀹氱殑 ETF 鏈熸潈鏍囩殑锛堜節鍙狤TF锛夛紝鏍规嵁閰嶇疆鍙皟鏁淬€?
+    - 鎸夋棩鏋勫缓鏃堕棿搴忓垪锛岄粯璁ゅ洖婧?60 鏃ャ€?
 
-输出字段：
-    trade_date: 最新交易日期（字符串）
-    weighted_change: 按成交量加权的涨跌额均值
-    total_change:    所有合约涨跌额求和
-    total_volume:    总成交量
-    weighted_close:  按成交量加权的收盘价
-    change_ratio:    weighted_change / weighted_close（若收盘价为 0，则为 0 或 None）
-    trend_10d:       近 10 日 weighted_change 变化
-    acc_3d:         近 3 日 weighted_change 变化
-    series: 历史序列列表，每项包含 trade_date, weighted_change, total_change, total_volume,
+杈撳嚭瀛楁锛?
+    trade_date: 鏈€鏂颁氦鏄撴棩鏈燂紙瀛楃涓诧級
+    weighted_change: 鎸夋垚浜ら噺鍔犳潈鐨勬定璺岄鍧囧€?
+    total_change:    鎵€鏈夊悎绾︽定璺岄姹傚拰
+    total_volume:    鎬绘垚浜ら噺
+    weighted_close:  鎸夋垚浜ら噺鍔犳潈鐨勬敹鐩樹环
+    change_ratio:    weighted_change / weighted_close锛堣嫢鏀剁洏浠蜂负 0锛屽垯涓?0 鎴?None锛?
+    trend_10d:       杩?10 鏃?weighted_change 鍙樺寲
+    acc_3d:         杩?3 鏃?weighted_change 鍙樺寲
+    series: 鍘嗗彶搴忓垪鍒楄〃锛屾瘡椤瑰寘鍚?trade_date, weighted_change, total_change, total_volume,
             weighted_close, change_ratio
 
-当数据缺失或异常时，返回 neutral_block。
+褰撴暟鎹己澶辨垨寮傚父鏃讹紝杩斿洖 neutral_block銆?
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ import pandas as pd
 from core.datasources.datasource_base import DataSourceConfig, DataSourceBase
 from core.utils.ds_refresh import apply_refresh_cleanup
 from core.utils.logger import get_logger
-from core.adapters.providers.db_provider_oracle import DBOracleProvider
+from core.adapters.providers.db_provider_mysql_market import DBOracleProvider
 
 LOG = get_logger("DS.OptionsRisk")
 
@@ -46,23 +46,23 @@ class OptionsRiskDataSource(DataSourceBase):
     """
     Options Risk DataSource
 
-    聚合 ETF 期权日行情数据，计算加权涨跌额及其趋势/加速度。
+    鑱氬悎 ETF 鏈熸潈鏃ヨ鎯呮暟鎹紝璁＄畻鍔犳潈娑ㄨ穼棰濆強鍏惰秼鍔?鍔犻€熷害銆?
     """
 
     def __init__(self, config: DataSourceConfig, window: int = 60) -> None:
-        # 固定名称，便于日志识别
+        # 鍥哄畾鍚嶇О锛屼究浜庢棩蹇楄瘑鍒?
         super().__init__(name="DS.OptionsRisk")
         self.config = config
         self.window = int(window) if window and window > 0 else 60
         self.db = DBOracleProvider()
 
-        # 缓存和历史路径
+        # 缂撳瓨鍜屽巻鍙茶矾寰?
         self.cache_root = config.cache_root
         self.history_root = config.history_root
         os.makedirs(self.cache_root, exist_ok=True)
         os.makedirs(self.history_root, exist_ok=True)
 
-        # 单日 cache 文件名
+        # 鍗曟棩 cache 鏂囦欢鍚?
         self.cache_file = os.path.join(self.cache_root, "options_risk_today.json")
         self.history_file = os.path.join(self.history_root, "options_risk_series.json")
 
@@ -78,13 +78,13 @@ class OptionsRiskDataSource(DataSourceBase):
     # ------------------------------------------------------------------
     def build_block(self, trade_date: str, refresh_mode: str = "none") -> Dict[str, Any]:
         """
-        构建期权风险原始数据块。
+        鏋勫缓鏈熸潈椋庨櫓鍘熷鏁版嵁鍧椼€?
 
-        参数：
-            trade_date: 字符串，评估日期（通常为 T 或 T-1）
-            refresh_mode: 刷新策略，支持 none/readonly/full
+        鍙傛暟锛?
+            trade_date: 瀛楃涓诧紝璇勪及鏃ユ湡锛堥€氬父涓?T 鎴?T-1锛?
+            refresh_mode: 鍒锋柊绛栫暐锛屾敮鎸?none/readonly/full
         """
-        # 清理缓存依据 refresh_mode
+        # 娓呯悊缂撳瓨渚濇嵁 refresh_mode
         apply_refresh_cleanup(
             refresh_mode=refresh_mode,
             cache_path=self.cache_file,
@@ -92,7 +92,7 @@ class OptionsRiskDataSource(DataSourceBase):
             spot_path=None,
         )
 
-        # 命中缓存直接返回
+        # 鍛戒腑缂撳瓨鐩存帴杩斿洖
         if refresh_mode in ("none", "readonly") and os.path.exists(self.cache_file):
             try:
                 with open(self.cache_file, "r", encoding="utf-8") as f:
@@ -100,7 +100,7 @@ class OptionsRiskDataSource(DataSourceBase):
             except Exception as exc:
                 LOG.error("[DS.OptionsRisk] load cache error: %s", exc)
 
-        # 调用 DB provider 聚合数据
+        # 璋冪敤 DB provider 鑱氬悎鏁版嵁
         try:
             df: pd.DataFrame = self.db.fetch_options_risk_series(
                 start_date=trade_date,
@@ -172,13 +172,13 @@ class OptionsRiskDataSource(DataSourceBase):
             "trend_10d": trend_10d,
             "acc_3d": acc_3d,
             "series": merged_series,
-            # 标记数据状态为 OK，表明数据来源正常
+            # 鏍囪鏁版嵁鐘舵€佷负 OK锛岃〃鏄庢暟鎹潵婧愭甯?
             "data_status": "OK",
-            # 默认无 warnings；若上层需要可覆盖
+            # 榛樿鏃?warnings锛涜嫢涓婂眰闇€瑕佸彲瑕嗙洊
             "warnings": [],
         }
 
-        # 保存历史和缓存
+        # 淇濆瓨鍘嗗彶鍜岀紦瀛?
         try:
             self._save(self.history_file, merged_series)
             with open(self.cache_file, "w", encoding="utf-8") as f:
@@ -191,7 +191,7 @@ class OptionsRiskDataSource(DataSourceBase):
     # ------------------------------------------------------------------
     def _merge_history(self, recent: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
-        合并历史与当前窗口，保证长度固定为 window。
+        鍚堝苟鍘嗗彶涓庡綋鍓嶇獥鍙ｏ紝淇濊瘉闀垮害鍥哄畾涓?window銆?
         """
         old: List[Dict[str, Any]] = []
         if os.path.exists(self.history_file):
@@ -208,7 +208,7 @@ class OptionsRiskDataSource(DataSourceBase):
     # ------------------------------------------------------------------
     def _calc_trend(self, series: List[Dict[str, Any]]) -> tuple[float, float]:
         """
-        计算 10 日趋势和 3 日加速度（基于 weighted_change）。
+        璁＄畻 10 鏃ヨ秼鍔垮拰 3 鏃ュ姞閫熷害锛堝熀浜?weighted_change锛夈€?
         """
         if len(series) < 2:
             return 0.0, 0.0
@@ -238,11 +238,11 @@ class OptionsRiskDataSource(DataSourceBase):
     @staticmethod
     def _neutral_block(trade_date: str) -> Dict[str, Any]:
         """
-        返回空/中性块，所有指标为 0.0，series 为空。
+        杩斿洖绌?涓€у潡锛屾墍鏈夋寚鏍囦负 0.0锛宻eries 涓虹┖銆?
 
-        注意：当数据缺失或无法加载时，需明确标注 data_status 为 "MISSING"。如果省略此字段，
-        上层因子和报告会默认认为数据正常（"OK"），从而给出不准确的提示。此处我们明确
-        设置 data_status 为 "MISSING" 以便 WatchlistLeadFactor 能正确识别数据缺失情况。
+        娉ㄦ剰锛氬綋鏁版嵁缂哄け鎴栨棤娉曞姞杞芥椂锛岄渶鏄庣‘鏍囨敞 data_status 涓?"MISSING"銆傚鏋滅渷鐣ユ瀛楁锛?
+        涓婂眰鍥犲瓙鍜屾姤鍛婁細榛樿璁や负鏁版嵁姝ｅ父锛?OK"锛夛紝浠庤€岀粰鍑轰笉鍑嗙‘鐨勬彁绀恒€傛澶勬垜浠槑纭?
+        璁剧疆 data_status 涓?"MISSING" 浠ヤ究 WatchlistLeadFactor 鑳芥纭瘑鍒暟鎹己澶辨儏鍐点€?
         """
         return {
             "trade_date": trade_date,
@@ -255,6 +255,6 @@ class OptionsRiskDataSource(DataSourceBase):
             "acc_3d": 0.0,
             "series": [],
             "data_status": "MISSING",
-            # 提供一个 warnings 字段以便上层面板记录缺失原因
+            # 鎻愪緵涓€涓?warnings 瀛楁浠ヤ究涓婂眰闈㈡澘璁板綍缂哄け鍘熷洜
             "warnings": ["missing:options_risk_series"],
         }

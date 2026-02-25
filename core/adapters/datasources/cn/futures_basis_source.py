@@ -2,26 +2,26 @@
 """
 UnifiedRisk V12 - Futures Basis DataSource (D Block)
 
-设计目的：
-    从本地 Oracle 数据库的股指期货日行情表（CN_FUT_INDEX_HIS）和指数日行情表（CN_INDEX_DAILY_PRICE）
-    聚合计算股指期货基差（期货结算价 - 指数收盘价）及其走势，用于风险监测。返回原始时间序列、
-    基差均值、趋势和加速度。
+璁捐鐩殑锛?
+    浠庢湰鍦?Oracle 鏁版嵁搴撶殑鑲℃寚鏈熻揣鏃ヨ鎯呰〃锛圕N_FUT_INDEX_HIS锛夊拰鎸囨暟鏃ヨ鎯呰〃锛圕N_INDEX_DAILY_PRICE锛?
+    鑱氬悎璁＄畻鑲℃寚鏈熻揣鍩哄樊锛堟湡璐х粨绠椾环 - 鎸囨暟鏀剁洏浠凤級鍙婂叾璧板娍锛岀敤浜庨闄╃洃娴嬨€傝繑鍥炲師濮嬫椂闂村簭鍒椼€?
+    鍩哄樊鍧囧€笺€佽秼鍔垮拰鍔犻€熷害銆?
 
-约束：
-    - 仅依赖 DBOracleProvider，不访问外部 API。
-    - 不定义新的 provider 接口，直接调用 provider 层提供的聚合方法 fetch_futures_basis_series。
-    - 按日构建时间序列，window 默认 60 天。
+绾︽潫锛?
+    - 浠呬緷璧?DBOracleProvider锛屼笉璁块棶澶栭儴 API銆?
+    - 涓嶅畾涔夋柊鐨?provider 鎺ュ彛锛岀洿鎺ヨ皟鐢?provider 灞傛彁渚涚殑鑱氬悎鏂规硶 fetch_futures_basis_series銆?
+    - 鎸夋棩鏋勫缓鏃堕棿搴忓垪锛寃indow 榛樿 60 澶┿€?
 
-输出字段：
-    trade_date: 交易日期（最新一个交易日字符串）
-    avg_basis:  按成交量加权的基差均值（期货 - 指数），正值为升水，负值为贴水
-    total_basis: 按合约简单求和的基差（辅助）
-    basis_ratio: 基差相对于加权指数收盘价的比值
-    trend_10d:   近 10 日基差变化（基差均值差）
-    acc_3d:     近 3 日基差变化（基差均值差）
-    series: 历史序列列表，每项包含 trade_date、avg_basis、total_basis、basis_ratio、weighted_future_price、weighted_index_price、total_volume
+杈撳嚭瀛楁锛?
+    trade_date: 浜ゆ槗鏃ユ湡锛堟渶鏂颁竴涓氦鏄撴棩瀛楃涓诧級
+    avg_basis:  鎸夋垚浜ら噺鍔犳潈鐨勫熀宸潎鍊硷紙鏈熻揣 - 鎸囨暟锛夛紝姝ｅ€间负鍗囨按锛岃礋鍊间负璐存按
+    total_basis: 鎸夊悎绾︾畝鍗曟眰鍜岀殑鍩哄樊锛堣緟鍔╋級
+    basis_ratio: 鍩哄樊鐩稿浜庡姞鏉冩寚鏁版敹鐩樹环鐨勬瘮鍊?
+    trend_10d:   杩?10 鏃ュ熀宸彉鍖栵紙鍩哄樊鍧囧€煎樊锛?
+    acc_3d:     杩?3 鏃ュ熀宸彉鍖栵紙鍩哄樊鍧囧€煎樊锛?
+    series: 鍘嗗彶搴忓垪鍒楄〃锛屾瘡椤瑰寘鍚?trade_date銆乤vg_basis銆乼otal_basis銆乥asis_ratio銆亀eighted_future_price銆亀eighted_index_price銆乼otal_volume
 
-当数据缺失或异常时，返回 neutral_block。
+褰撴暟鎹己澶辨垨寮傚父鏃讹紝杩斿洖 neutral_block銆?
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ import pandas as pd
 from core.datasources.datasource_base import DataSourceConfig, DataSourceBase
 from core.utils.ds_refresh import apply_refresh_cleanup
 from core.utils.logger import get_logger
-from core.adapters.providers.db_provider_oracle import DBOracleProvider
+from core.adapters.providers.db_provider_mysql_market import DBOracleProvider
 
 LOG = get_logger("DS.FuturesBasis")
 
@@ -44,23 +44,23 @@ class FuturesBasisDataSource(DataSourceBase):
     """
     Futures Basis DataSource
 
-    聚合股指期货和指数日行情表的数据，计算加权基差序列及其趋势/加速度。
+    鑱氬悎鑲℃寚鏈熻揣鍜屾寚鏁版棩琛屾儏琛ㄧ殑鏁版嵁锛岃绠楀姞鏉冨熀宸簭鍒楀強鍏惰秼鍔?鍔犻€熷害銆?
     """
 
     def __init__(self, config: DataSourceConfig, window: int = 60):
-        # 固定名称，便于日志识别
+        # 鍥哄畾鍚嶇О锛屼究浜庢棩蹇楄瘑鍒?
         super().__init__(name="DS.FuturesBasis")
         self.config = config
         self.window = int(window) if window and window > 0 else 60
         self.db = DBOracleProvider()
 
-        # 缓存和历史路径
+        # 缂撳瓨鍜屽巻鍙茶矾寰?
         self.cache_root = config.cache_root
         self.history_root = config.history_root
         os.makedirs(self.cache_root, exist_ok=True)
         os.makedirs(self.history_root, exist_ok=True)
 
-        # 单日 cache 文件名
+        # 鍗曟棩 cache 鏂囦欢鍚?
         self.cache_file = os.path.join(self.cache_root, "futures_basis_today.json")
         self.history_file = os.path.join(self.history_root, "futures_basis_series.json")
 
@@ -76,13 +76,13 @@ class FuturesBasisDataSource(DataSourceBase):
     # ------------------------------------------------------------------
     def build_block(self, trade_date: str, refresh_mode: str = "none") -> Dict[str, Any]:
         """
-        构建期指基差原始数据块。
+        鏋勫缓鏈熸寚鍩哄樊鍘熷鏁版嵁鍧椼€?
 
-        参数：
-            trade_date: 字符串，评估日期（通常为 T 或 T-1）
-            refresh_mode: 刷新策略，支持 none/readonly/full
+        鍙傛暟锛?
+            trade_date: 瀛楃涓诧紝璇勪及鏃ユ湡锛堥€氬父涓?T 鎴?T-1锛?
+            refresh_mode: 鍒锋柊绛栫暐锛屾敮鎸?none/readonly/full
         """
-        # 清理缓存依据 refresh_mode
+        # 娓呯悊缂撳瓨渚濇嵁 refresh_mode
         apply_refresh_cleanup(
             refresh_mode=refresh_mode,
             cache_path=self.cache_file,
@@ -90,7 +90,7 @@ class FuturesBasisDataSource(DataSourceBase):
             spot_path=None,
         )
 
-        # 命中缓存直接返回
+        # 鍛戒腑缂撳瓨鐩存帴杩斿洖
         if refresh_mode in ("none", "readonly") and os.path.exists(self.cache_file):
             try:
                 with open(self.cache_file, "r", encoding="utf-8") as f:
@@ -98,7 +98,7 @@ class FuturesBasisDataSource(DataSourceBase):
             except Exception as exc:
                 LOG.error("[DS.FuturesBasis] load cache error: %s", exc)
 
-        # 读取聚合数据
+        # 璇诲彇鑱氬悎鏁版嵁
         try:
             df: pd.DataFrame = self.db.fetch_futures_basis_series(
                 start_date=trade_date,
@@ -173,7 +173,7 @@ class FuturesBasisDataSource(DataSourceBase):
             "series": merged_series,
         }
 
-        # 保存历史和缓存
+        # 淇濆瓨鍘嗗彶鍜岀紦瀛?
         try:
             self._save(self.history_file, merged_series)
             with open(self.cache_file, "w", encoding="utf-8") as f:
@@ -186,7 +186,7 @@ class FuturesBasisDataSource(DataSourceBase):
     # ------------------------------------------------------------------
     def _merge_history(self, recent: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
-        合并历史与当前窗口，保证长度固定为 window。
+        鍚堝苟鍘嗗彶涓庡綋鍓嶇獥鍙ｏ紝淇濊瘉闀垮害鍥哄畾涓?window銆?
         """
         old: List[Dict[str, Any]] = []
         if os.path.exists(self.history_file):
@@ -203,7 +203,7 @@ class FuturesBasisDataSource(DataSourceBase):
     # ------------------------------------------------------------------
     def _calc_trend(self, series: List[Dict[str, Any]]) -> tuple[float, float]:
         """
-        计算 10 日趋势和 3 日加速度（基差均值差）。
+        璁＄畻 10 鏃ヨ秼鍔垮拰 3 鏃ュ姞閫熷害锛堝熀宸潎鍊煎樊锛夈€?
         """
         if len(series) < 2:
             return 0.0, 0.0
@@ -233,7 +233,7 @@ class FuturesBasisDataSource(DataSourceBase):
     @staticmethod
     def _neutral_block(trade_date: str) -> Dict[str, Any]:
         """
-        返回空/中性块，所有指标为 0.0，series 为空。
+        杩斿洖绌?涓€у潡锛屾墍鏈夋寚鏍囦负 0.0锛宻eries 涓虹┖銆?
         """
         return {
             "trade_date": trade_date,

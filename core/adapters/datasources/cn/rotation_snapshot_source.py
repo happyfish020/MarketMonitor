@@ -92,13 +92,13 @@ class RotationSnapshotDataSource(DataSourceBase):
         """
         db = get_db_provider()
 
-        # Best-effort query; keep it simple and Oracle-friendly.
+        # Best-effort query; keep it simple and MySQL-friendly.
         sql = """
         SELECT run_id
-          FROM SECOPR.CN_BASELINE_REGISTRY_T
+          FROM CN_BASELINE_REGISTRY_T
          WHERE baseline_key = 'DEFAULT_BASELINE'
            AND is_active = 1
-           AND ROWNUM = 1
+         LIMIT 1
         """
         try:
             rows = db.execute(sql)
@@ -140,10 +140,10 @@ class RotationSnapshotDataSource(DataSourceBase):
             TRANSITION,
             SOURCE_JSON,
             CREATED_AT
-        FROM SECOPR.CN_ROTATION_ENTRY_SNAP_T
+        FROM CN_ROTATION_ENTRY_SNAP_T
         WHERE RUN_ID = :run_id
-          AND TRADE_DATE = TO_DATE(:trade_date, 'YYYY-MM-DD')
-        ORDER BY ENTRY_RANK NULLS LAST
+          AND DATE(TRADE_DATE) = :trade_date
+        ORDER BY (ENTRY_RANK IS NULL) ASC, ENTRY_RANK ASC
         """
         rows = db.execute(sql, {"run_id": run_id, "trade_date": trade_date})
         return self._rows_to_dicts(rows)
@@ -167,9 +167,9 @@ class RotationSnapshotDataSource(DataSourceBase):
             NEXT_EXIT_ELIGIBLE_DATE,
             SOURCE_JSON,
             CREATED_AT
-        FROM SECOPR.CN_ROTATION_HOLDING_SNAP_T
+        FROM CN_ROTATION_HOLDING_SNAP_T
         WHERE RUN_ID = :run_id
-          AND TRADE_DATE = TO_DATE(:trade_date, 'YYYY-MM-DD')
+          AND DATE(TRADE_DATE) = :trade_date
         ORDER BY SECTOR_NAME
         """
         rows = db.execute(sql, {"run_id": run_id, "trade_date": trade_date})
@@ -196,9 +196,9 @@ class RotationSnapshotDataSource(DataSourceBase):
             EXIT_EXEC_STATUS,
             SOURCE_JSON,
             CREATED_AT
-        FROM SECOPR.CN_ROTATION_EXIT_SNAP_T
+        FROM CN_ROTATION_EXIT_SNAP_T
         WHERE RUN_ID = :run_id
-          AND TRADE_DATE = TO_DATE(:trade_date, 'YYYY-MM-DD')
+          AND DATE(TRADE_DATE) = :trade_date
         ORDER BY SECTOR_NAME
         """
         rows = db.execute(sql, {"run_id": run_id, "trade_date": trade_date})

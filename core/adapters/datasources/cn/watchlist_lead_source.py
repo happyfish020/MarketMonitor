@@ -127,33 +127,15 @@ class WatchlistLeadDataSource(DataSourceBase):
                     warnings.append(f"cache_read_error:{key}")
                     LOG.error("[DS.WatchlistLead] CacheReadError %s: %s", symbol, exc)
 
-            # Step2: fetch series from store (db-first, yf-fallback)
+            # Step2: fetch series from store (respect configured provider)
             try:
-                if provider in ("yf", "db"):
-                    try:
-                        df = self.store.get_series(
-                            symbol=symbol,
-                            window=self.window,
-                            refresh_mode=mode,
-                            method=method,
-                            provider="db",
-                        )
-                    except Exception:
-                        df = self.store.get_series(
-                            symbol=symbol,
-                            window=self.window,
-                            refresh_mode=mode,
-                            method=method,
-                            provider="yf",
-                        )
-                else:
-                    df = self.store.get_series(
-                        symbol=symbol,
-                        window=self.window,
-                        refresh_mode=mode,
-                        method=method,
-                        provider=provider,
-                    )
+                df = self.store.get_series(
+                    symbol=symbol,
+                    window=self.window,
+                    refresh_mode=mode,
+                    method=method,
+                    provider=provider,
+                )
             except SystemExit:
                 raise
             except Exception as exc:

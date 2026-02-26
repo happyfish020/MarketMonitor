@@ -116,9 +116,6 @@ class DBMySQLMarketProvider:
             LOG.warning("[DBMySQLMarketProvider] mysql source init failed: %s", e)
         
          
-    def _ensure_oracle_engine(self):
-        raise RuntimeError("Oracle engine is not supported in DBMySQLMarketProvider")
-
     # ==================================================
     # low-level executor
     # ==================================================
@@ -160,9 +157,6 @@ class DBMySQLMarketProvider:
                 f"MySQL is required for table {table_name}, but mysql engine is not available"
             )
 
-    def _can_fallback_oracle_stock(self) -> bool:
-        return False
-
     # ==================================================
     # stock daily prices (CLOSE -> CLOSE)
     # ==================================================
@@ -173,33 +167,13 @@ class DBMySQLMarketProvider:
     ) -> List[Tuple[str, str, Any, float]]:
         table = self.tables.get("stock_daily")
         if not table:
-            raise RuntimeError("db.oracle.tables.stock_daily not configured")
+            raise RuntimeError("db.mysql.tables.stock_daily not configured")
 
         params = {
             "window_start": _to_date(window_start),
             "trade_date": _to_date(trade_date),
         }
-        if self._use_mysql_stock():
-            sql = f"""  # nosec B608
-            SELECT
-                SYMBOL      AS symbol,
-                EXCHANGE    AS exchange,
-                TRADE_DATE  AS trade_date,
-                PRE_CLOSE   AS pre_close,
-                CHG_PCT     AS chg_pct,
-                CLOSE       AS close,
-                AMOUNT      AS amount
-            FROM {self._stock_table_ref(use_mysql=True)}
-            WHERE TRADE_DATE >= :window_start
-              AND TRADE_DATE <= :trade_date
-            """
-            return self.execute_mysql(sql, params)
-        if not self._can_fallback_oracle_stock():
-            raise RuntimeError(
-                "MySQL stock source is unavailable and Oracle stock fallback is disabled "
-                "(set MYSQL_STOCK_ORACLE_FALLBACK=1 to re-enable)"
-            )
-
+        self._require_mysql(table)
         sql = f"""  # nosec B608
         SELECT
             SYMBOL        AS symbol,
@@ -209,11 +183,11 @@ class DBMySQLMarketProvider:
             CHG_PCT       AS chg_pct,
             CLOSE         AS close,
             AMOUNT        AS amount
-        FROM {self.schema}.{table}
+        FROM {self._stock_table_ref(use_mysql=True)}
         WHERE TRADE_DATE >= :window_start
           AND TRADE_DATE <= :trade_date
         """
-        return self.execute(sql, params)
+        return self.execute_mysql(sql, params)
 
     # ==================================================
     # index daily prices (CLOSE -> CLOSE)
@@ -240,14 +214,7 @@ class DBMySQLMarketProvider:
           AND TRADE_DATE <= :trade_date
         """
         self._require_mysql("CN_INDEX_DAILY_PRICE")
-        rows = []
-        try:
-            rows = self.execute_mysql(mysql_sql, params)
-        except Exception as e:
-            LOG.error(f"query_index_closes({index_code}, {window_start}, {trade_date}) failed: {e}")
-        
-        
-        return rows
+        return self.execute_mysql(mysql_sql, params)
 
     def query_index_close_with_prev(
         self,
@@ -324,13 +291,8 @@ class DBMySQLMarketProvider:
         WHERE x.rn = 1
         ORDER BY x.DATA_DATE
         """
-        rows = []
-        try:        
-           self._require_mysql("CN_FUND_ETF_HIST_EM")
-           rows = self.execute_mysql(mysql_sql, params)
-        except Exception as e:
-            LOG.error(f"query_etf_prices({code}, {window_start}, {trade_date}) failed: {e}")
-        return rows
+        self._require_mysql("CN_FUND_ETF_HIST_EM")
+        return self.execute_mysql(mysql_sql, params)
 
     # ==================================================
     # universe symbols (industry mapping)
@@ -344,12 +306,7 @@ class DBMySQLMarketProvider:
         FROM {self._universe_table_ref(use_mysql=True)}
         """
         self._require_mysql("CN_UNIVERSE_SYMBOLS")
-        rows = []
-        try:
-            rows = self.execute_mysql(sql)
-        except Exception as e:
-            LOG.error(f"query_universe_symbols() failed: {e}")
-        return rows 
+        return self.execute_mysql(sql)
 
 
     def fetch_daily_amount_series(
@@ -358,48 +315,31 @@ class DBMySQLMarketProvider:
         look_back_days: int = 60,
     ) -> pd.DataFrame:
         """
-        闁兼儳鍢茶ぐ鍥箰閸パ呮毎闁哄啨鍎插﹢锟犲礌濞差亝锛熼柛鎰噹閸欏繒鏁崒姘皻婵絽绻戝Λ鈺呭箣閹邦亝鍞夊Λ鐗堢箰缁辨瑦绂嶉崹顔煎笚闁挎稑顦板鍌炴⒒閺夋垹纰嶉柛?        閺夆晜鏌ㄥú?columns:
+        闂佸吋鍎抽崲鑼躲亹閸ヮ剙绠伴柛銉戝懏姣庨梺鍝勫暔閸庢彃锕㈤敓鐘茬婵炲樊浜濋敍鐔兼煕閹邦剚鍣归柛娆忕箳閺侇噣宕掑顓犵毣濠殿噯绲界换鎴澪涢埡鍛闁归偊浜濋崬澶娢涢悧鍫㈢缂佽鲸鐟︾粋宥夊垂椤旂厧绗氶梺鎸庣☉椤︽澘顪冮崒鐐粹拻闁哄鍨圭喊宥夋煕?        闁哄鏅滈弻銊ッ?columns:
             trade_date (datetime)
-            total_amount (float)  # 闁告娲戠紞鍛存晬濮橆偄娈犻柛蹇撳枦缁辨繂顔忛弻銉︾彑 1e8
+            total_amount (float)  # 闂佸憡顨嗗ú鎴犵礊閸涘瓨鏅慨姗嗗亜濞堢娀鏌涜箛鎾虫灕缂佽鲸绻傞蹇涘蓟閵夛妇褰?1e8
         """
         table = self.tables.get("stock_daily")
         if not table:
-            raise RuntimeError("db.oracle.tables.stock_daily not configured")
+            raise RuntimeError("db.mysql.tables.stock_daily not configured")
 
         params = {
             "start_date": _to_date(start_date),
             "look_back_days": look_back_days,
         }
 
-        if self._use_mysql_stock():
-            sql = f"""  # nosec B608
-            SELECT
-                TRADE_DATE,
-                SUM(AMOUNT) AS total_amount
-            FROM {self._stock_table_ref(use_mysql=True)}
-            WHERE TRADE_DATE >= DATE_SUB(:start_date, INTERVAL :look_back_days DAY)
-              AND TRADE_DATE <= :start_date
-            GROUP BY TRADE_DATE
-            ORDER BY TRADE_DATE
-            """
-            raw = self.execute_mysql(sql, params)
-        else:
-            if not self._can_fallback_oracle_stock():
-                raise RuntimeError(
-                    "MySQL stock source is unavailable and Oracle stock fallback is disabled "
-                    "(set MYSQL_STOCK_ORACLE_FALLBACK=1 to re-enable)"
-                )
-            sql = f"""  # nosec B608
-            SELECT
-                TRADE_DATE,
-                SUM(AMOUNT) AS total_amount
-            FROM {self.schema}.{table}
-            WHERE TRADE_DATE >= :start_date - :look_back_days
-                  AND TRADE_DATE <= :start_date
-            GROUP BY TRADE_DATE
-            ORDER BY TRADE_DATE
-            """
-            raw = self.execute(sql, params)
+        self._require_mysql(table)
+        sql = f"""  # nosec B608
+        SELECT
+            TRADE_DATE,
+            SUM(AMOUNT) AS total_amount
+        FROM {self._stock_table_ref(use_mysql=True)}
+        WHERE TRADE_DATE >= DATE_SUB(:start_date, INTERVAL :look_back_days DAY)
+          AND TRADE_DATE <= :start_date
+        GROUP BY TRADE_DATE
+        ORDER BY TRADE_DATE
+        """
+        raw = self.execute_mysql(sql, params)
 
         if not raw:
             return pd.DataFrame(columns=["trade_date", "total_amount"])
@@ -410,8 +350,7 @@ class DBMySQLMarketProvider:
         df = df[["trade_date", "total_amount"]].set_index("trade_date")
 
         return df    
-# #core/adapters/providers/db_provider_oracle.py
-# 闂佸搫鍊瑰姗€路閸愨晝顩烽柕澶堝€楅悷鎾绘煛閸屾繍娼愮痪顓炵埣閺佸秹宕奸悢鍛婃緬闂侀潻璐熼崝搴ｆ偖椤愶箑绀冮柛娑欐綑閸斻儵鏌涘顒傚ⅵ闁逞屽墮閸婇绱為崨顖滅＞妞ゆ洖妫涚粈?
+# 闂備礁鎼崐鐟邦熆濮椻偓璺柛鎰ㄦ櫇椤╃兘鏌曟径鍫濃偓妤呮偡閹剧粯鐓涢柛灞剧箥濞兼劗鐥鐐靛煟闁轰礁绉瑰畷濂告偄閸涘﹥绶梻渚€娼荤拹鐔煎礉鎼达絾鍋栨い鎰剁畱缁€鍐煕濞戞瑦缍戦柛鏂诲劦閺屾稑顫濋鍌氣叺闂侀€炲苯澧柛濠囶棑缁辩偤宕ㄩ婊咃紴濡炪倖娲栧Λ娑氱矆?
 
     def fetch_stock_daily_chg_pct_raw(
         self,
@@ -419,10 +358,10 @@ class DBMySQLMarketProvider:
         look_back_days: int = 60,
     ) -> pd.DataFrame:
         """
-        闁兼儳鍢茶ぐ鍥箰閸パ呮毎濞存嚎鍊栧Σ妤呭籍閵夈儳绐旈柛?look_back_days 濠㈠灈鏅涢崬鎾儍閸曨剛妲ㄩ柡鍐﹀劚缁斿爼宕烽悜妯哄壈缂備緡浜ｆ禒娑㈠触閸喐娈堕柟璇″枔閳?        """
+        闂佸吋鍎抽崲鑼躲亹閸ヮ剙绠伴柛銉戝懏姣庢繛瀛樺殠閸婃牕危濡ゅ懎绫嶉柕澶堝劤缁愭棃鏌?look_back_days 婵犮垹鐏堥弲娑㈠船閹绢喗鍎嶉柛鏇ㄥ墰濡层劑鏌￠崘锕€鍔氱紒鏂跨埣瀹曠兘鎮滃Ο鍝勫缂傚倷绶℃禍锝嗙濞戙垹瑙﹂柛顐ゅ枑濞堝爼鏌熺拠鈥虫灁闁?        """
         table = self.tables.get("stock_daily")
         if not table:
-            raise RuntimeError("db.oracle.tables.CN_STOCK_DAILY_PRICE not configured")
+            raise RuntimeError("db.mysql.tables.CN_STOCK_DAILY_PRICE not configured")
 
         params = {
             "start_date": _to_date(start_date),
@@ -430,105 +369,53 @@ class DBMySQLMarketProvider:
             "eps": 0.0001,
         }
 
-        if self._use_mysql_stock():
-            sql = f"""  # nosec B608
-            WITH base AS (
-                SELECT
-                    TRADE_DATE,
-                    SYMBOL,
-                    PRE_CLOSE,
-                    CLOSE,
-                    NAME
-                FROM {self._stock_table_ref(use_mysql=True)}
-                WHERE TRADE_DATE >= DATE_SUB(:start_date, INTERVAL :look_back_days DAY)
-                  AND TRADE_DATE <= :start_date
-                  AND CLOSE IS NOT NULL
-                  AND PRE_CLOSE IS NOT NULL
-                  AND PRE_CLOSE > 0
-            ),
-            calc AS (
-                SELECT
-                    TRADE_DATE,
-                    PRE_CLOSE,
-                    CLOSE,
-                    CASE
-                        WHEN SUBSTR(SYMBOL, 1, 3) IN ('300','301','688','689') THEN 0.20
-                        WHEN SUBSTR(SYMBOL, 1, 1) = '8'
-                          OR SUBSTR(SYMBOL, 1, 2) IN ('43','83','87') THEN 0.30
-                        WHEN NAME IS NOT NULL AND (
-                            UPPER(TRIM(NAME)) LIKE '*ST%' OR UPPER(TRIM(NAME)) LIKE 'ST%'
-                        ) THEN 0.05
-                        ELSE 0.10
-                    END AS limit_frac
-                FROM base
-            )
+        self._require_mysql(table)
+        sql = f"""  # nosec B608
+        WITH base AS (
             SELECT
                 TRADE_DATE,
-                COUNT(*) AS total_stocks,
-                SUM(CASE WHEN CLOSE > PRE_CLOSE THEN 1 ELSE 0 END) AS adv,
-                SUM(CASE WHEN CLOSE < PRE_CLOSE THEN 1 ELSE 0 END) AS dec_cnt,
-                SUM(CASE WHEN CLOSE = PRE_CLOSE THEN 1 ELSE 0 END) AS flat,
-                SUM(CASE WHEN CLOSE >= ROUND(PRE_CLOSE * (1 + limit_frac), 2) - :eps THEN 1 ELSE 0 END) AS limit_up,
-                SUM(CASE WHEN CLOSE <= ROUND(PRE_CLOSE * (1 - limit_frac), 2) + :eps THEN 1 ELSE 0 END) AS limit_down,
-                ROUND(SUM(CASE WHEN CLOSE > PRE_CLOSE THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 2) AS adv_ratio
-            FROM calc
-            GROUP BY TRADE_DATE
-            ORDER BY TRADE_DATE DESC
-            LIMIT 30
-            """
-            raw = self.execute_mysql(sql, params)
-        else:
-            if not self._can_fallback_oracle_stock():
-                raise RuntimeError(
-                    "MySQL stock source is unavailable and Oracle stock fallback is disabled "
-                    "(set MYSQL_STOCK_ORACLE_FALLBACK=1 to re-enable)"
-                )
-            sql = f"""  # nosec B608
-            WITH base AS (
-                SELECT
-                    TRADE_DATE,
-                    SYMBOL,
-                    PRE_CLOSE,
-                    CLOSE,
-                    NAME
-                FROM {self.schema}.{table}
-                WHERE TRADE_DATE >= TRUNC(:start_date) - :look_back_days
-                  AND TRADE_DATE <= TRUNC(:start_date)
-                  AND CLOSE IS NOT NULL
-                  AND PRE_CLOSE IS NOT NULL
-                  AND PRE_CLOSE > 0
-            ),
-            calc AS (
-                SELECT
-                    TRADE_DATE,
-                    PRE_CLOSE,
-                    CLOSE,
-                    CASE
-                        WHEN SUBSTR(SYMBOL, 1, 3) IN ('300','301','688','689') THEN 0.20
-                        WHEN SUBSTR(SYMBOL, 1, 1) = '8'
-                          OR SUBSTR(SYMBOL, 1, 2) IN ('43','83','87') THEN 0.30
-                        WHEN NAME IS NOT NULL AND (
-                            UPPER(TRIM(NAME)) LIKE '*ST%' OR UPPER(TRIM(NAME)) LIKE 'ST%'
-                        ) THEN 0.05
-                        ELSE 0.10
-                    END AS limit_frac
-                FROM base
-            )
+                SYMBOL,
+                PRE_CLOSE,
+                CLOSE,
+                NAME
+            FROM {self._stock_table_ref(use_mysql=True)}
+            WHERE TRADE_DATE >= DATE_SUB(:start_date, INTERVAL :look_back_days DAY)
+              AND TRADE_DATE <= :start_date
+              AND CLOSE IS NOT NULL
+              AND PRE_CLOSE IS NOT NULL
+              AND PRE_CLOSE > 0
+        ),
+        calc AS (
             SELECT
                 TRADE_DATE,
-                COUNT(*) AS total_stocks,
-                SUM(CASE WHEN CLOSE > PRE_CLOSE THEN 1 ELSE 0 END) AS adv,
-                SUM(CASE WHEN CLOSE < PRE_CLOSE THEN 1 ELSE 0 END) AS dec,
-                SUM(CASE WHEN CLOSE = PRE_CLOSE THEN 1 ELSE 0 END) AS flat,
-                SUM(CASE WHEN CLOSE >= ROUND(PRE_CLOSE * (1 + limit_frac), 2) - :eps THEN 1 ELSE 0 END) AS limit_up,
-                SUM(CASE WHEN CLOSE <= ROUND(PRE_CLOSE * (1 - limit_frac), 2) + :eps THEN 1 ELSE 0 END) AS limit_down,
-                ROUND(SUM(CASE WHEN CLOSE > PRE_CLOSE THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 2) AS adv_ratio
-            FROM calc
-            GROUP BY TRADE_DATE
-            ORDER BY TRADE_DATE DESC
-            FETCH FIRST 30 ROWS ONLY
-            """
-            raw = self.execute(sql, params)
+                PRE_CLOSE,
+                CLOSE,
+                CASE
+                    WHEN SUBSTR(SYMBOL, 1, 3) IN ('300','301','688','689') THEN 0.20
+                    WHEN SUBSTR(SYMBOL, 1, 1) = '8'
+                      OR SUBSTR(SYMBOL, 1, 2) IN ('43','83','87') THEN 0.30
+                    WHEN NAME IS NOT NULL AND (
+                        UPPER(TRIM(NAME)) LIKE '*ST%' OR UPPER(TRIM(NAME)) LIKE 'ST%'
+                    ) THEN 0.05
+                    ELSE 0.10
+                END AS limit_frac
+            FROM base
+        )
+        SELECT
+            TRADE_DATE,
+            COUNT(*) AS total_stocks,
+            SUM(CASE WHEN CLOSE > PRE_CLOSE THEN 1 ELSE 0 END) AS adv,
+            SUM(CASE WHEN CLOSE < PRE_CLOSE THEN 1 ELSE 0 END) AS dec_cnt,
+            SUM(CASE WHEN CLOSE = PRE_CLOSE THEN 1 ELSE 0 END) AS flat,
+            SUM(CASE WHEN CLOSE >= ROUND(PRE_CLOSE * (1 + limit_frac), 2) - :eps THEN 1 ELSE 0 END) AS limit_up,
+            SUM(CASE WHEN CLOSE <= ROUND(PRE_CLOSE * (1 - limit_frac), 2) + :eps THEN 1 ELSE 0 END) AS limit_down,
+            ROUND(SUM(CASE WHEN CLOSE > PRE_CLOSE THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 2) AS adv_ratio
+        FROM calc
+        GROUP BY TRADE_DATE
+        ORDER BY TRADE_DATE DESC
+        LIMIT 30
+        """
+        raw = self.execute_mysql(sql, params)
 
         if not raw:
             LOG.warning("[DBProvider] fetch_stock_daily_sentiment_stats returned no data for %s", start_date)
@@ -561,97 +448,54 @@ class DBMySQLMarketProvider:
         look_back_days: int = 150,
     ) -> pd.DataFrame:
         """
-        闁兼儳鍢茶ぐ鍥箰閸パ呮毎濞存嚎鍊栧Σ妤呭籍閵夈儱顤?look_back_days 闁告劕鎳愬▓鎴﹀灳?0闁哄啨鍎查弻濠冩媴鎼存ǚ鍋撳┑鍡欑暛閹艰揪濡囩划铏规媼鎺抽埀?        """
+        闂佸吋鍎抽崲鑼躲亹閸ヮ剙绠伴柛銉戝懏姣庢繛瀛樺殠閸婃牕危濡ゅ懎绫嶉柕澶堝劚椤?look_back_days 闂佸憡鍔曢幊鎰枔閹达箑鐏?0闂佸搫鍟ㄩ崕鏌ュ蓟婵犲啯濯撮幖瀛樓氶崑鎾斥攽閸℃瑧鏆涢柟鑹版彧婵″洨鍒掗搹瑙勫閹烘娊鍩€?        """
         table = self.tables.get("stock_daily")
         if not table:
-            raise RuntimeError("db.oracle.tables.CN_STOCK_DAILY_PRICE not configured")
+            raise RuntimeError("db.mysql.tables.CN_STOCK_DAILY_PRICE not configured")
 
         params = {
             "trade_date": _to_date(trade_date),
             "look_back_days": look_back_days,
         }
 
-        if self._use_mysql_stock():
-            sql = f"""  # nosec B608
-            WITH daily_data AS (
-                SELECT
-                    TRADE_DATE,
-                    SYMBOL,
-                    CLOSE
-                FROM {self._stock_table_ref(use_mysql=True)}
-                WHERE TRADE_DATE >= DATE_SUB(:trade_date, INTERVAL :look_back_days DAY)
-                  AND TRADE_DATE <= :trade_date
-                  AND CLOSE IS NOT NULL
-            ),
-            with_50d_low AS (
-                SELECT
-                    TRADE_DATE,
-                    SYMBOL,
-                    CLOSE,
-                    MIN(CLOSE) OVER (
-                        PARTITION BY SYMBOL
-                        ORDER BY TRADE_DATE
-                        ROWS BETWEEN 49 PRECEDING AND CURRENT ROW
-                    ) AS low_50d
-                FROM daily_data
-            )
+        self._require_mysql(table)
+        sql = f"""  # nosec B608
+        WITH daily_data AS (
             SELECT
                 TRADE_DATE,
-                COUNT(*) AS count_total,
-                COUNT(CASE WHEN CLOSE = low_50d THEN 1 END) AS count_new_low_50d,
-                ROUND(
-                    COUNT(CASE WHEN CLOSE = low_50d THEN 1 END) * 100.0 / COUNT(*),
-                    2
-                ) AS new_low_50d_ratio
-            FROM with_50d_low
-            GROUP BY TRADE_DATE
-            ORDER BY TRADE_DATE DESC
-            LIMIT 30
-            """
-            raw = self.execute_mysql(sql, params)
-        else:
-            if not self._can_fallback_oracle_stock():
-                raise RuntimeError(
-                    "MySQL stock source is unavailable and Oracle stock fallback is disabled "
-                    "(set MYSQL_STOCK_ORACLE_FALLBACK=1 to re-enable)"
-                )
-            sql = f"""  # nosec B608
-            WITH daily_data AS (
-                SELECT
-                    TRADE_DATE,
-                    SYMBOL,
-                    CLOSE
-                FROM {self.schema}.{table}
-                WHERE TRADE_DATE >= TRUNC(:trade_date) - :look_back_days
-                  AND TRADE_DATE <= TRUNC(:trade_date)
-                  AND CLOSE IS NOT NULL
-            ),
-            with_50d_low AS (
-                SELECT
-                    TRADE_DATE,
-                    SYMBOL,
-                    CLOSE,
-                    MIN(CLOSE) OVER (
-                        PARTITION BY SYMBOL
-                        ORDER BY TRADE_DATE
-                        ROWS BETWEEN 49 PRECEDING AND CURRENT ROW
-                    ) AS low_50d
-                FROM daily_data
-            )
+                SYMBOL,
+                CLOSE
+            FROM {self._stock_table_ref(use_mysql=True)}
+            WHERE TRADE_DATE >= DATE_SUB(:trade_date, INTERVAL :look_back_days DAY)
+              AND TRADE_DATE <= :trade_date
+              AND CLOSE IS NOT NULL
+        ),
+        with_50d_low AS (
             SELECT
                 TRADE_DATE,
-                COUNT(*) AS count_total,
-                COUNT(CASE WHEN CLOSE = low_50d THEN 1 END) AS count_new_low_50d,
-                ROUND(
-                    COUNT(CASE WHEN CLOSE = low_50d THEN 1 END) * 100.0 / COUNT(*),
-                    2
-                ) AS new_low_50d_ratio
-            FROM with_50d_low
-            GROUP BY TRADE_DATE
-            ORDER BY TRADE_DATE DESC
-            FETCH FIRST 30 ROWS ONLY
-            """
-            raw = self.execute(sql, params)
+                SYMBOL,
+                CLOSE,
+                MIN(CLOSE) OVER (
+                    PARTITION BY SYMBOL
+                    ORDER BY TRADE_DATE
+                    ROWS BETWEEN 49 PRECEDING AND CURRENT ROW
+                ) AS low_50d
+            FROM daily_data
+        )
+        SELECT
+            TRADE_DATE,
+            COUNT(*) AS count_total,
+            COUNT(CASE WHEN CLOSE = low_50d THEN 1 END) AS count_new_low_50d,
+            ROUND(
+                COUNT(CASE WHEN CLOSE = low_50d THEN 1 END) * 100.0 / COUNT(*),
+                2
+            ) AS new_low_50d_ratio
+        FROM with_50d_low
+        GROUP BY TRADE_DATE
+        ORDER BY TRADE_DATE DESC
+        LIMIT 30
+        """
+        raw = self.execute_mysql(sql, params)
 
         if not raw:
             LOG.warning("[DBProvider] fetch_daily_new_low_stats returned no data for %s", trade_date)
@@ -676,11 +520,11 @@ class DBMySQLMarketProvider:
         trade_date,
     ) -> Dict[str, Any]:
         """
-        Load confirmed full-market EOD snapshot (T-1) from oracle DB.
+        Load confirmed full-market EOD snapshot (T-1) from MySQL.
     
         Contract (frozen):
         - trade_date: confirmed trading day (T-1)
-        - source: oracle DB only (no network)
+        - source: MySQL only (no network)
         - snapshot_type: EOD
         - full-market coverage
         - replayable / deterministic
@@ -712,7 +556,7 @@ class DBMySQLMarketProvider:
             "snapshot_type": "EOD",
             "market": market,
             "_meta": {
-                "source": "mysql" if self._use_mysql_stock() else "oracle",
+                "source": "mysql",
                 "confirmed": True,
                 "record_count": len(market),
             },
@@ -721,27 +565,15 @@ class DBMySQLMarketProvider:
     def query_last_trade_date(self, as_of_date) -> str:
         table = self.tables.get("stock_daily")
         if not table:
-            raise RuntimeError("db.oracle.tables.stock_daily not configured")
+            raise RuntimeError("db.mysql.tables.stock_daily not configured")
         params = {"as_of_date": _to_date(as_of_date)}
-        if self._use_mysql_stock():
-            sql = f"""  # nosec B608
-            SELECT MAX(TRADE_DATE) AS last_trade_date
-            FROM {self._stock_table_ref(use_mysql=True)}
-            WHERE TRADE_DATE <= :as_of_date
-            """
-            rows = self.execute_mysql(sql, params)
-        else:
-            if not self._can_fallback_oracle_stock():
-                raise RuntimeError(
-                    "MySQL stock source is unavailable and Oracle stock fallback is disabled "
-                    "(set MYSQL_STOCK_ORACLE_FALLBACK=1 to re-enable)"
-                )
-            sql = f"""  # nosec B608
-            SELECT MAX(TRADE_DATE) AS last_trade_date
-            FROM {self.schema}.{table}
-            WHERE TRADE_DATE <= :as_of_date
-            """
-            rows = self.execute(sql, params)
+        self._require_mysql(table)
+        sql = f"""  # nosec B608
+        SELECT MAX(TRADE_DATE) AS last_trade_date
+        FROM {self._stock_table_ref(use_mysql=True)}
+        WHERE TRADE_DATE <= :as_of_date
+        """
+        rows = self.execute_mysql(sql, params)
         if not rows or rows[0][0] is None:
             raise RuntimeError(f"no trade_date found <= {as_of_date}")
         return rows[0][0]    
@@ -764,7 +596,7 @@ class DBMySQLMarketProvider:
     
         snapshot = self.load_full_market_eod_snapshot(last_trade_date)
     
-        # 闂佸搫瀚ù鐑藉灳濮椻偓瀵粙宕堕妸锔芥畼 as_of 闁荤姴娴傞崢铏圭不閻斿吋鏅柛顐犲劜婵粓鎮介娑欏€愰柛锝呮憸閹茬増绗熸繝鍕槷婵炴挻鑹鹃妵妯艰姳椤掑倵鍋撶€涖們鍊ら崥鈧?/ 闂佹悶鍎抽崑鐐哄棘娓氣偓閺?        snapshot["_meta"] = snapshot.get("_meta", {})
+        # 闂備礁鎼€氼剙霉閻戣棄鐏虫慨妞诲亾鐎殿喕绮欏畷鍫曞Ω閿旇姤鐣?as_of 闂佽崵濮村ù鍌炲储閾忓湱涓嶉柣鏂垮悑閺咁剟鏌涢鐘插姕濠殿喗绮撻幃浠嬵敍濞戞瑥鈧劙鏌涢敐鍛喐闁硅尙澧楃粭鐔哥節閸曨収妲峰┑鐐存尰閼归箖濡靛Ο鑹板С妞ゆ帒鍊甸崑鎾垛偓娑栧€戦崐銈夊触閳?/ 闂備焦鎮堕崕鎶藉磻閻愬搫妫樺〒姘ｅ亾闁?        snapshot["_meta"] = snapshot.get("_meta", {})
         snapshot["_meta"].update(
             {
                 "as_of_date": _to_date(as_of_date),
@@ -775,18 +607,18 @@ class DBMySQLMarketProvider:
         return snapshot
 
     # ==================================================
-    # ETF 闂佸搫鍟ㄩ崕鎾€侀幋锕€绠氶柛娑㈩暒缁敻鏌涘顒傚婵＄偛鍊垮濠氬级閹寸姷顣查梺鍛婂笚椤ㄦ劗妲愬?Block闂?    # ==================================================
+    # ETF 闂備礁鎼崯銊╁磿閹绢喓鈧線骞嬮敃鈧粻姘舵煕濞戙埄鏆掔紒顔炬暬閺屾稑顫濋鍌氼杸濠碉紕鍋涢崐鍨潖婵犳艾绾ч柟瀵稿Х椤ｆ煡姊洪崨濠傜瑲妞ゃ劍鍔楀Σ鎰潨?Block闂?    # ==================================================
     def fetch_etf_hist_series(
         self,
         start_date: str,
         look_back_days: int = 60,
     ) -> pd.DataFrame:
         """
-        婵炲濮存鎼佹偄閳ь剟姊?ETF 闂佸搫鍟ㄩ崕鎾€侀幋锕€绠氶柛娑滃焽閳ь剙鍟撮獮鎾诲箛椤掆偓缁插潡鏌熺粙鎸庢悙闁伙絽澧界划锝呂旈埀顒冦亹濞戙垹绀冮柛娑卞灡閻ｉ亶鏌ゆ潏銊ㄥ闁诡喖瀛╅幆鏃囩疀閹惧磭浠氶梺?
-        闁哄鐗婇幐鎼佸吹?DataFrame index=trade_date闂佹寧绋戝鎭唗etime闂佹寧绋戦¨鈧紒杈ㄧ箘閳ь剚绋掗〃鍡涱敊瀹€鍕櫖?            total_change_amount: 閻熸粎澧楅幐璇参涢埡鍌滎浄闂佸灝顑囨竟鎰箾閹存瑥濮€缂佸苯鍚嬮敍鎰攽閸涱垼鍚呴梺?            total_volume: 閻熸粎澧楅幐璇参涢埡鍛闁归偊浜濋崬澶愭⒑閹绘帞绠ｇ紒鐙呯秮瀹?            total_amount: 閻熸粎澧楅幐璇参涢埡鍛闁归偊浜濋崬澶娢涢悧鍫㈢畱缂佺媴缍佸畷?
-        闂佸憡鐟ラ崐褰掑汲閻旂儤瀚氶悗娑櫳戦～鏍煥?            start_date: 缂傚倷鐒﹂幐璇差焽椤愶箑绫嶉柕澶涢檮閸╁倿鏌ㄥ☉妯煎閻庡灚锕㈤獮蹇涱敆閸愭儳娈欓梺鍝勫暔閸庤崵妲?            look_back_days: 闂佹悶鍎抽崑鐐哄礄閼恒儱绶為柍鍝勫€瑰▓鍫曟煥濞戞澧曢柟?start_date 闂侀潻璐熼崝宀勫船閹绢喗鏅?
-        濠电偛顦崝宥夊礈娴煎瓨鏅?        - 闂佸搫鍊介～澶屾兜閸洘鐒奸梻鍫熺⊕閸?DBMySQLMarketProvider 缂備焦鎷濈粻鎴︽偩妤ｅ啯鏅悘鐐跺亹閻熸繂霉閿濆牊纭堕柡?TO_DATE
-        - 闁荤偞绋忛崝宀勫箖閺囥垺鍋?config.yaml 婵?db.oracle.tables.fund_etf_hist 闂備焦婢樼粔鍫曟偪?          闂佸吋鐪归崕鎻掞耿椤撱垺鐓€鐎广儱娲ㄩ弸鍌炴煥濞戞瀚伴柛顭戝灡椤偓婵☆垱顑欓崥鍥р槈?"CN_FUND_ETF_HIST_EM"
+        濠电偛顕慨瀛橆殽閹间焦鍋勯柍褜鍓熷?ETF 闂備礁鎼崯銊╁磿閹绢喓鈧線骞嬮敃鈧粻姘舵煕濞戞粌鐒介柍褜鍓欓崯鎾嵁閹捐绠涙い鎺嗗亾缂佹彃娼￠弻鐔虹矙閹稿孩鎮欓梺浼欑到婢х晫鍒掗敐鍛傛棃鍩€椤掑啨浜规繛鎴欏灩缁€鍐煕濞戝崬鐏￠柣锝変憾閺屻倖娼忛妸銊ヮ棟闂佽鍠栫€涒晠骞嗛弮鍥╃杸闁规儳纾禒姘舵⒑?
+        闂佸搫顦悧濠囧箰閹间礁鍚?DataFrame index=trade_date闂備焦瀵х粙鎴濐焽閹敆etime闂備焦瀵х粙鎴βㄩ埀顒傜磼鏉堛劎绠橀柍褜鍓氱粙鎺椼€冮崱娑辨晩鐎光偓閸曨剚娅?            total_change_amount: 闁荤喐绮庢晶妤呭箰鐠囧弬娑㈠煛閸屾粠娴勯梻浣哥仢椤戝洦绔熼幇顓犵闁瑰瓨鐟ユ慨鈧紓浣歌嫰閸氬鏁嶉幇顑芥斀闁告侗鍨奸崥鍛存⒑?            total_volume: 闁荤喐绮庢晶妤呭箰鐠囧弬娑㈠煛閸涱厾顓洪梺褰掑亰娴滄繈宕径鎰拺闁圭粯甯炵粻锝囩磼閻欏懐绉€?            total_amount: 闁荤喐绮庢晶妤呭箰鐠囧弬娑㈠煛閸涱厾顓洪梺褰掑亰娴滄繈宕径濞㈡盯鎮ч崼銏㈢暠缂備胶濯寸紞浣哥暦?
+        闂備礁鎲￠悷銉╁磹瑜版帒姹查柣鏃傚劋鐎氭岸鎮楀☉娅虫垿锝為弽顓熺叆?            start_date: 缂傚倸鍊烽悞锕傚箰鐠囧樊鐒芥い鎰剁畱缁秹鏌曟径娑㈡闁糕晛鍊块弻銊モ槈濡厧顣洪柣搴＄仛閿曘垽鐛箛娑辨晢闁告劖鍎冲▓娆撴⒑閸濆嫬鏆旈柛搴ゅ吹濡?            look_back_days: 闂備焦鎮堕崕鎶藉磻閻愬搫绀勯柤鎭掑劚缁剁偤鏌嶉崫鍕偓鐟扳枔閸洘鐓ユ繛鎴烆焽婢ф洟鏌?start_date 闂備線娼荤拹鐔煎礉瀹€鍕埞闁圭虎鍠楅弲?
+        婵犵數鍋涢ˇ顓㈠礉瀹ュ绀堝ù鐓庣摠閺?        - 闂備礁鎼崐浠嬶綖婢跺本鍏滈柛顐ｆ礃閻掑ジ姊婚崼鐔衡姇闁?DBMySQLMarketProvider 缂傚倷鐒﹂幏婵堢不閹达附鍋╁Δ锝呭暞閺咁剟鎮橀悙璺轰汗闁荤喐绻傞湁闁挎繂鐗婄涵鍫曟煛?TO_DATE
+        - 闂佽崵鍋炵粙蹇涘礉瀹€鍕畺闁哄洢鍨洪崑?config.yaml 濠?db.mysql.tables.fund_etf_hist 闂傚倷鐒﹀妯肩矓閸洘鍋?          闂備礁鍚嬮惇褰掑磿閹绘帪鑰挎い鎾卞灪閻撯偓閻庡箍鍎卞ú銊╁几閸岀偞鐓ユ繛鎴烆焾鐎氫即鏌涢…鎴濈仭妞ゎ亖鍋撳┑鈽嗗灡椤戞瑩宕ラ崶褉妲?"CN_FUND_ETF_HIST_EM"
         """
         # Build per-day aggregated price-change/volume/amount series.
         sql = f"""  # nosec B608
@@ -810,7 +642,7 @@ class DBMySQLMarketProvider:
         if not raw:
             return pd.DataFrame(columns=["trade_date", "total_change_amount", "total_volume", "total_amount"])
         df = pd.DataFrame(raw, columns=["trade_date", "total_change_amount", "total_volume", "total_amount"])
-        # 闁哄鍎愰崜姘暦閺屻儱绫嶉柕澶涢檮閸╁倻绱掗銉殭闁?        df["trade_date"] = pd.to_datetime(df["trade_date"])
+        # 闂佸搫顦遍崕鎰板礈濮橆剛鏆﹂柡灞诲劚缁秹鏌曟径娑㈡闁糕晛鍊荤槐鎺楊敃閵夘喖娈梺?        df["trade_date"] = pd.to_datetime(df["trade_date"])
         # Type conversion
         df["total_change_amount"] = df["total_change_amount"].astype(float)
         df["total_volume"] = df["total_volume"].astype(float)
@@ -827,12 +659,12 @@ class DBMySQLMarketProvider:
         look_back_days: int = 60,
     ) -> pd.DataFrame:
         """
-        婵炲濮村锕傚磻閸岀偛绠伴柛銉ｅ妽閸╁倿鎮归幇灞藉閿涘鎮跺☉妯绘拱闁稿骸绻掗幃浼村Ω閵夛箑顏梺鍦焾濞诧箓寮抽悢鐓庣睄闁靛鐓堥弨浠嬫煙椤栨碍鍤€闁靛棗鍟撮獮鎾诲箛椤掆偓缁插潡鏌涢埡浣规儓婵☆垰锕顕€宕奸弴鐕傜吹闁瑰吋娼欑换鎰板垂椤忓牆违?
-        闁哄鐗婇幐鎼佸吹?DataFrame index=trade_date闂佹寧绋戝鎭唗etime闂佹寧绋戦¨鈧紒杈ㄧ箘閳ь剚绋掗〃鍡涱敊瀹€鍕櫖?            avg_basis:   闂佸湱顭堥ˇ浼村垂濮橆厾顩查柕鍫濐槸濞呫倝鏌涢弮鍌毿ｆ繛鐓庣墦閹啴宕熼銈呮暏閻庣懓澹婇崰鏍ь焽鎼淬劌纾圭痪顓㈩棑缁€鍕煛閸垹鏋欓柟浼欑稻缁傛帡鏌ㄧ€ｎ剙顥?- 闂佸湱顭堝ú锕傚汲閻旂厧缁╅柛鎾茬劍绾剧霉閻樻彃娈╃紒?            total_basis: 闂佽鍓濋褔鎮㈤埀顒傗偓鐟板閸ｎ垳妲愬▎鎰枖鐎广儱鎳庨～锝夋煛婢跺﹤鏋︾紒?            basis_ratio: 闂佺硶鏅涢幖顐⑽熸繝鍐枖閹兼番鍨归惁褰掓煛娴ｈ绶插┑顔惧仱瀵爼宕橀埡鍌涙瘑闂佺儵鏅滅湁闁绘粠鍨辩粙濠勨偓锝庡亞濡?
-            total_volume: 闂佽鍓涚划顖炲垂濮橆厾顩查柕鍫濐槸濞呫倝鏌ㄥ☉妯煎ⅱ闁轰降鍊栫粋宥嗘償閳ユ剚娼遍梺鍝勵槸閸犳稓妲?            weighted_future_price: 闂佸湱顭堥ˇ浼村垂濮橆厾顩查柕鍫濐槸濞呫倝鏌涢弮鍌毿ｆ繛鐓庣墦閹啴宕熼浣哥劯闁荤姵鍓崒婊冪畾闂?            weighted_index_price:  闂佸湱顭堥ˇ浼村垂濮橆厾顩查柕鍫濐槸濞呫倝鏌涢弮鍌毿ｆ繛鐓庣墦閹啴宕熼鐐电杸闁荤姵鍓崟顐ゆ▌闂佽桨绶氶。锕傛偝椤栫偛鍐€?
-        闂佸憡鐟ラ崐褰掑汲閻旂儤瀚氶悗娑櫳戦～鏍煥?            start_date: 缂傚倷鐒﹂幐璇差焽椤愶箑绫嶉柕澶涢檮閸╁倿鏌ㄥ☉妯煎閻庡灚锕㈤獮蹇涱敆閸愭儳娈欓梺鍝勫暔閸庤崵妲?            look_back_days: 闂佹悶鍎抽崑鐐哄礄閼恒儱绶為柍鍝勫€瑰▓鍫曟煥濞戞澧曢柟?start_date 闂侀潻璐熼崝宀勫船閹绢喗鏅?
-        濠电偛顦崝宥夊礈娴煎瓨鏅?        - 婵炲濮撮幊鎾寸濞戙垹瑙﹂柛顐ｇ箖閹倻绱?IF/IH/IC/IM闂佹寧绋戦懟顖烆敋椤旇姤鍎熼柡鍐ｅ亾闁告洖鍟彁?00闂侀潧妫斿鎺旂箔閸屾粍瀚?0闂侀潧妫斿鎺楁嚈閹寸姵瀚?00闂侀潧妫斿鎺楁嚈閹寸姵瀚?000闂佸湱顭堝ú锕傚汲閻旂厧违?        - 闂佺硶鏅涢幖顐⑽熸繝鍌ゆ桨闁挎繂鎳夐崑鎾绘嚌閼割兘鍋撻崘顏嗙焼闁绘垶蓱閸╁倿鎮归幇灞藉暙绾捐櫕鎱ㄥΟ鎸庡涧缂佽鲸绻勯幏褰掓偄鐏忎礁浜鹃柤纭呭焽閳ь剙鍟扮划鍫ユ倻濡鐒搁柣鐘冲壃閸℃鐏″┑顔缴戦悾顏堝焵?        """
-        # 闂佸搫顑呯€氫即鍩€椤掑倸校闁绘搫绱曢幏鐘伙綖椤斿墽鐛ラ柣鐘充航閸斿繘濡?join 闂佸湱顭堥ˇ浼村垂濮橆厾顩查柕鍫濐槸濞呫倝鏌涢弮鍌毿ｆ繛鐓庣墢閹峰鏁嶉崟顓熸瘓闂佺硶鏅涢幖顐⑽熸繝鍥фそ閻忕偠鍋愰獮鍡涙煛?        # 婵炶揪缍€濞夋洟寮妶鍥╃＜闁瑰瓨绻勯弳浼存⒑椤掆偓閻忔繈宕?TO_DATE
+        濠电偛顕慨鏉戭潩閿曞倸纾婚柛宀€鍋涚粻浼存煕閵夛絽濡介柛鈺佸€块幃褰掑箛鐏炶棄顏柨娑橆樀閹泛鈽夊Ο缁樻嫳闂佺楠哥换鎺楀箖娴兼潙惟闁靛绠戦顖炴⒑閸︻収鐒炬繛璇х畵瀵娊鎮㈤悡搴ｇ潉闂侀潧顦介悡鍫ュ绩娴犲鐓欐い鏍ㄧ閸も偓闂侀潧妫楅崯鎾嵁閹捐绠涙い鎺嗗亾缂佹彃娼￠弻娑㈠煛娴ｈ鍎撳┑鈽嗗灠閿曨亜顕ｉ鈧畷濂稿即閻曞倻鍚归梺鐟板悑濞兼瑧鎹㈤幇鏉垮瀭妞ゅ繐鐗嗚繚?
+        闂佸搫顦悧濠囧箰閹间礁鍚?DataFrame index=trade_date闂備焦瀵х粙鎴濐焽閹敆etime闂備焦瀵х粙鎴βㄩ埀顒傜磼鏉堛劎绠橀柍褜鍓氱粙鎺椼€冮崱娑辨晩鐎光偓閸曨剚娅?            avg_basis:   闂備礁婀遍…鍫ニ囨导鏉戝瀭婵﹩鍘鹃々鏌ユ煏閸繍妲告繛鍛€濋弻娑㈠籍閸屾锝嗙箾閻撳海澧﹂柟顖氬暣瀹曠喖顢曢妶鍛殢闁诲海鎳撴竟濠囧窗閺嵮岀劷閹兼番鍔岀壕鍦棯椤撱埄妫戠紒鈧崟顖涚厸闁割偁鍨归弸娆撴煙娴兼瑧绋荤紒鍌涘浮閺屻劎鈧綆鍓欓ˉ?- 闂備礁婀遍…鍫澝洪敃鍌氭辈闁绘梻鍘х紒鈺呮煕閹捐尙鍔嶇痪鍓ь焾闇夐柣妯诲絻濞堚晝绱?            total_basis: 闂備浇顕栭崜婵嬵敋瑜旈幃銏ゅ焵椤掑倵鍋撻悷鏉款棌闁革綆鍨冲Σ鎰枎閹邦喒鏋栭悗骞垮劚閹冲酣锝為敐澶嬬厸濠㈣泛锕ら弸锔剧磼?            basis_ratio: 闂備胶纭堕弲娑㈠箹椤愨懡鐔哥節閸愵亖鏋栭柟鍏肩暘閸ㄥ綊鎯佽ぐ鎺撶厸濞达綀顫夌欢鎻掆攽椤旀儳浠辩€殿喖鐖煎畷姗€鍩￠崒娑欑槕闂備胶鍎甸弲婊呮箒闂佺粯绮犻崹杈╃矙婵犲嫧鍋撻敐搴′簽婵?
+            total_volume: 闂備浇顕栭崜娑氬垝椤栫偛鍨傛慨姗嗗幘椤╂煡鏌曢崼婵愭Ц婵炲懌鍊濋弻銊モ槈濡厧鈪遍梺杞伴檷閸婃牜绮嬪鍡樺劅闁炽儲鍓氬閬嶆⒑閸濆嫷妲搁柛鐘崇〒濡?            weighted_future_price: 闂備礁婀遍…鍫ニ囨导鏉戝瀭婵﹩鍘鹃々鏌ユ煏閸繍妲告繛鍛€濋弻娑㈠籍閸屾锝嗙箾閻撳海澧﹂柟顖氬暣瀹曠喖顢楁担鍝ュ姱闂佽崵濮甸崜顒勫磼濠婂啰鐣鹃梻?            weighted_index_price:  闂備礁婀遍…鍫ニ囨导鏉戝瀭婵﹩鍘鹃々鏌ユ煏閸繍妲告繛鍛€濋弻娑㈠籍閸屾锝嗙箾閻撳海澧﹂柟顖氬暣瀹曠喖顢橀悙鐢垫澑闂佽崵濮甸崜顒勫礋椤愩倖鈻岄梻浣芥〃缁舵岸銆傞敃鍌涘仢妞ゆ牜鍋涢崘鈧?
+        闂備礁鎲￠悷銉╁磹瑜版帒姹查柣鏃傚劋鐎氭岸鎮楀☉娅虫垿锝為弽顓熺叆?            start_date: 缂傚倸鍊烽悞锕傚箰鐠囧樊鐒芥い鎰剁畱缁秹鏌曟径娑㈡闁糕晛鍊块弻銊モ槈濡厧顣洪柣搴＄仛閿曘垽鐛箛娑辨晢闁告劖鍎冲▓娆撴⒑閸濆嫬鏆旈柛搴ゅ吹濡?            look_back_days: 闂備焦鎮堕崕鎶藉磻閻愬搫绀勯柤鎭掑劚缁剁偤鏌嶉崫鍕偓鐟扳枔閸洘鐓ユ繛鎴烆焽婢ф洟鏌?start_date 闂備線娼荤拹鐔煎礉瀹€鍕埞闁圭虎鍠楅弲?
+        婵犵數鍋涢ˇ顓㈠礉瀹ュ绀堝ù鐓庣摠閺?        - 濠电偛顕慨鎾箠閹惧顩锋繛鎴欏灩鐟欙箓鏌涢锝囩畺闁诡垰鍊荤槐?IF/IH/IC/IM闂備焦瀵х粙鎴︽嚐椤栫儐鏁嬫い鏃囧Г閸庣喖鏌￠崘锝呬壕闂佸憡娲栭崯顐ュ絹?00闂備線娼уΛ鏂款渻閹烘梻绠旈柛灞剧矋鐎?0闂備線娼уΛ鏂款渻閹烘鍤堥柟瀵稿У鐎?00闂備線娼уΛ鏂款渻閹烘鍤堥柟瀵稿У鐎?000闂備礁婀遍…鍫澝洪敃鍌氭辈闁绘梻鍘ц繚?        - 闂備胶纭堕弲娑㈠箹椤愨懡鐔哥節閸屻倖妗ㄩ梺鎸庣箓閹冲宕戦幘缁樺殞闁煎壊鍏橀崑鎾诲礃椤忓棛鐒奸梺缁樺灦钃遍柛鈺佸€块幃褰掑箛鐏炶棄鏆欑痪鎹愭珪閹便劌螣閹稿骸娑х紓浣介哺缁诲嫰骞忚ぐ鎺撳亜閻忓繋绀佹禍楣冩煠绾懎鐒介柍褜鍓欓崯鎵垝閸儲鍊绘俊顖濐嚙閻掓悂鏌ｉ悩鍐插闁糕剝顨呴悘鈥斥攽椤旂即鎴︽偩椤忓牆鐒?        """
+        # 闂備礁鎼鍛偓姘嵆閸┾偓妞ゆ帒鍊告牎闂佺粯鎼槐鏇㈠箯閻樹紮缍栨い鏂垮⒔閻涖儵鏌ｉ悩鍏呰埅闁告柨绻樻俊?join 闂備礁婀遍…鍫ニ囨导鏉戝瀭婵﹩鍘鹃々鏌ユ煏閸繍妲告繛鍛€濋弻娑㈠籍閸屾锝嗙箾閻撳海澧㈤柟宄邦儔閺佸秹宕熼鐔哥槗闂備胶纭堕弲娑㈠箹椤愨懡鐔哥節閸パ勩仢闁诲繒鍋犻崑鎰扮嵁閸℃稒鐓?        # 濠电偠鎻紞鈧繛澶嬫礋瀵偊濡堕崶鈺冿紲闂佺懓鐡ㄧ换鍕汲娴煎瓨鈷戞い鎺嗗亾闁诲繑绻堝畷?TO_DATE
         mysql_sql = f"""  # nosec B608
         SELECT
             t.TRADE_DATE                AS trade_date,
@@ -883,7 +715,7 @@ class DBMySQLMarketProvider:
             "weighted_future_price",
             "weighted_index_price",
         ])
-        # 闁荤姳绶ょ槐鏇㈡偩?ratio = avg_basis / weighted_index_price
+        # 闂佽崵濮崇欢銈囨閺囥垺鍋?ratio = avg_basis / weighted_index_price
         df["trade_date"] = pd.to_datetime(df["trade_date"])
         df["avg_basis"] = df["avg_basis"].astype(float)
         df["total_basis"] = df["total_basis"].astype(float)
@@ -1009,46 +841,23 @@ class DBMySQLMarketProvider:
         Returns a dict with a stable shape for BreadthPlusDataSource.
         """
         table = self.tables.get("stock_daily") or "CN_STOCK_DAILY_PRICE"
-
-        if self._use_mysql_stock():
-            sql = f"""  # nosec B608
-                SELECT
-                    TRADE_DATE AS trade_date,
-                    COUNT(*) AS total,
-                    SUM(CASE WHEN CLOSE > PRE_CLOSE THEN 1 ELSE 0 END) AS adv,
-                    SUM(CASE WHEN CLOSE < PRE_CLOSE THEN 1 ELSE 0 END) AS dec_cnt,
-                    SUM(CASE WHEN CLOSE = PRE_CLOSE THEN 1 ELSE 0 END) AS flat
-                FROM {self._stock_table_ref(use_mysql=True)}
-                WHERE TRADE_DATE >= DATE_SUB(:asof_date, INTERVAL :look_back_days DAY)
-                  AND TRADE_DATE <= :asof_date
-                  AND CLOSE IS NOT NULL
-                  AND PRE_CLOSE IS NOT NULL
-                GROUP BY TRADE_DATE
-                ORDER BY TRADE_DATE ASC
-            """
-            rows = self.execute_mysql(sql, {"asof_date": asof_date, "look_back_days": int(look_back_days)})
-        else:
-            if not self._can_fallback_oracle_stock():
-                raise RuntimeError(
-                    "MySQL stock source is unavailable and Oracle stock fallback is disabled "
-                    "(set MYSQL_STOCK_ORACLE_FALLBACK=1 to re-enable)"
-                )
-            sql = f"""  # nosec B608
-                SELECT
-                    TRADE_DATE AS trade_date,
-                    COUNT(*) AS total,
-                    SUM(CASE WHEN CLOSE > PRE_CLOSE THEN 1 ELSE 0 END) AS adv,
-                    SUM(CASE WHEN CLOSE < PRE_CLOSE THEN 1 ELSE 0 END) AS dec,
-                    SUM(CASE WHEN CLOSE = PRE_CLOSE THEN 1 ELSE 0 END) AS flat
-                FROM {self.schema}.{table}
-                WHERE TRADE_DATE >= TRUNC(:asof_date) - :look_back_days
-                  AND TRADE_DATE <= TRUNC(:asof_date)
-                  AND CLOSE IS NOT NULL
-                  AND PRE_CLOSE IS NOT NULL
-                GROUP BY TRADE_DATE
-                ORDER BY TRADE_DATE ASC
-            """
-            rows = self.execute(sql, {"asof_date": asof_date, "look_back_days": int(look_back_days)})
+        self._require_mysql(table)
+        sql = f"""  # nosec B608
+            SELECT
+                TRADE_DATE AS trade_date,
+                COUNT(*) AS total,
+                SUM(CASE WHEN CLOSE > PRE_CLOSE THEN 1 ELSE 0 END) AS adv,
+                SUM(CASE WHEN CLOSE < PRE_CLOSE THEN 1 ELSE 0 END) AS dec_cnt,
+                SUM(CASE WHEN CLOSE = PRE_CLOSE THEN 1 ELSE 0 END) AS flat
+            FROM {self._stock_table_ref(use_mysql=True)}
+            WHERE TRADE_DATE >= DATE_SUB(:asof_date, INTERVAL :look_back_days DAY)
+              AND TRADE_DATE <= :asof_date
+              AND CLOSE IS NOT NULL
+              AND PRE_CLOSE IS NOT NULL
+            GROUP BY TRADE_DATE
+            ORDER BY TRADE_DATE ASC
+        """
+        rows = self.execute_mysql(sql, {"asof_date": asof_date, "look_back_days": int(look_back_days)})
         df = pd.DataFrame(rows)
         if df is None or df.empty:
             return {
@@ -1129,48 +938,19 @@ class DBMySQLMarketProvider:
           it pulls the last N calendar days for all symbols (roughly 300k~600k rows).
         """
         table = self.tables.get("stock_daily") or "CN_STOCK_DAILY_PRICE"
-
-        if self._use_mysql_stock():
-            sql = f"""  # nosec B608
-                SELECT
-                    SYMBOL AS symbol,
-                    TRADE_DATE AS trade_date,
-                    CLOSE AS close
-                FROM {self._stock_table_ref(use_mysql=True)}
-                WHERE TRADE_DATE >= DATE_SUB(:asof_date, INTERVAL :look_back_days DAY)
-                  AND TRADE_DATE <= :asof_date
-                  AND CLOSE IS NOT NULL
-                ORDER BY SYMBOL ASC, TRADE_DATE ASC
-            """
-            try:
-                rows = self.execute_mysql(sql, {"asof_date": asof_date, "look_back_days": int(look_back_days)})
-            except Exception as e:
-                
-                LOG.error(f"fetch_breadth_plus_metrics failed: {e}")
-            
-        else:
-            if not self._can_fallback_oracle_stock():
-                raise RuntimeError(
-                    "MySQL stock source is unavailable and Oracle stock fallback is disabled "
-                    "(set MYSQL_STOCK_ORACLE_FALLBACK=1 to re-enable)"
-                )
-            sql = f"""  # nosec B608
-                SELECT
-                    SYMBOL AS symbol,
-                    TRADE_DATE AS trade_date,
-                    CLOSE AS close
-                FROM {self.schema}.{table}
-                WHERE TRADE_DATE >= TRUNC(:asof_date) - :look_back_days
-                  AND TRADE_DATE <= TRUNC(:asof_date)
-                  AND CLOSE IS NOT NULL
-                ORDER BY SYMBOL ASC, TRADE_DATE ASC
-            """
-            
-
-            try:
-                rows = self.execute(sql, {"asof_date": asof_date, "look_back_days": int(look_back_days)})
-            except Exception as e:
-                LOG.error(f"fetch_breadth_plus_metrics failed: {e}")
+        self._require_mysql(table)
+        sql = f"""  # nosec B608
+            SELECT
+                SYMBOL AS symbol,
+                TRADE_DATE AS trade_date,
+                CLOSE AS close
+            FROM {self._stock_table_ref(use_mysql=True)}
+            WHERE TRADE_DATE >= DATE_SUB(:asof_date, INTERVAL :look_back_days DAY)
+              AND TRADE_DATE <= :asof_date
+              AND CLOSE IS NOT NULL
+            ORDER BY SYMBOL ASC, TRADE_DATE ASC
+        """
+        rows = self.execute_mysql(sql, {"asof_date": asof_date, "look_back_days": int(look_back_days)})
         df = pd.DataFrame(rows)
         if df is None or df.empty:
             return {
@@ -1255,7 +1035,7 @@ class DBMySQLMarketProvider:
 
 
 # ==================================================
-# Market-data Provider adapter: DB-first with YF fallback
+# Market-data Provider adapter: DB-only
 # ==================================================
 
 def _normalize_etf_db_code(symbol: str) -> str:
@@ -1305,11 +1085,35 @@ def _normalize_etf_db_code(symbol: str) -> str:
     return sl
 
 
+def _normalize_stock_db_symbol(symbol: str) -> str:
+    """Normalize stock symbol to local DB SYMBOL style (prefer 6-digit code)."""
+    s = (symbol or "").strip()
+    if not s:
+        return s
+    sl = s.lower()
+
+    if sl.endswith(".ss") or sl.endswith(".sz"):
+        core = "".join([c for c in sl[:-3] if c.isdigit()])
+        return core if len(core) == 6 else sl
+
+    if sl.startswith("sh.") or sl.startswith("sz."):
+        core = "".join([c for c in sl[3:] if c.isdigit()])
+        return core if len(core) == 6 else sl
+
+    if sl.startswith("sh") or sl.startswith("sz"):
+        core = "".join([c for c in sl[2:] if c.isdigit()])
+        return core if len(core) == 6 else sl
+
+    digits = "".join([c for c in sl if c.isdigit()])
+    if len(digits) == 6:
+        return digits
+    return sl
+
+
 class DBMarketProvider:
     """ProviderRouter 'db' provider.
 
-    DB-first: query local Oracle tables.
-    Fallback: yfinance (YFProvider).
+    DB-only: query local MySQL tables.
 
     Contract: returns a DataFrame with columns: date/open/high/low/close/volume
     (pct computed by ProviderBase.normalize_df).
@@ -1322,18 +1126,6 @@ class DBMarketProvider:
             def __init__(self):
                 super().__init__(name="db")
                 self._db = DBMySQLMarketProvider()
-                self._yf = None
-                self._yf_unavailable = False
-
-            def _ensure_yf(self):
-                if self._yf is None and not self._yf_unavailable:
-                    try:
-                        from core.adapters.providers.provider_yf import YFProvider
-
-                        self._yf = YFProvider()
-                    except Exception as exc:
-                        self._yf_unavailable = True
-                        LOG.warning("[DBMarketProvider] yfinance fallback unavailable: %s", exc)
 
             @staticmethod
             def _empty_frame_for_method(method: str) -> pd.DataFrame:
@@ -1411,7 +1203,19 @@ class DBMarketProvider:
                         rows,
                         columns=["symbol", "exchange", "trade_date", "pre_close", "chg_pct", "close", "amount"],
                     )
-                    df = df[df["symbol"] == symbol]
+                    symbol_norm = _normalize_stock_db_symbol(symbol)
+                    candidates = [str(symbol), str(symbol_norm)]
+                    if isinstance(symbol_norm, str) and len(symbol_norm) == 6 and symbol_norm.isdigit():
+                        candidates.extend(
+                            [
+                                f"sh{symbol_norm}",
+                                f"sz{symbol_norm}",
+                                f"sh.{symbol_norm}",
+                                f"sz.{symbol_norm}",
+                            ]
+                        )
+                    candidates = list(dict.fromkeys([c for c in candidates if c]))
+                    df = df[df["symbol"].astype(str).isin(candidates)]
                     if df.empty:
                         raise RuntimeError("empty")
                     df["date"] = pd.to_datetime(df["trade_date"]).dt.strftime("%Y-%m-%d")
@@ -1420,28 +1224,14 @@ class DBMarketProvider:
                     return df[["date", "close"]]
 
                 except Exception as e:
-                    # Fallback to yfinance
-                    self._ensure_yf()
-                    if self._yf is not None:
-                        LOG.warning(f"[DBMarketProvider] DB fetch failed for {symbol} method={method}: {e}; fallback=yf")
-                        return self._yf.fetch_series_raw(symbol, window=window, method=method)
-                    LOG.warning(
-                        "[DBMarketProvider] DB fetch failed for %s method=%s: %s; fallback skipped (yf unavailable)",
-                        symbol,
-                        method,
-                        e,
-                    )
-                    return self._empty_frame_for_method(method)
+                    raise RuntimeError(
+                        f"[DBMarketProvider] DB fetch failed for {symbol} method={method}: {e}"
+                    ) from e
 
         self._impl = _Impl()
 
     def fetch(self, symbol: str, window: int = 60, method: str = "default"):
         return self._impl.fetch(symbol=symbol, window=window, method=method)
-
-
-# Backward-compatible alias so existing callsites can migrate module path first.
-DBOracleProvider = DBMySQLMarketProvider
-
 
 
 

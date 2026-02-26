@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """
 UnifiedRisk V12 FULL
 ETF 鑴?Spot Synchronization Daily DataSource (T-1 Confirmed)
@@ -46,7 +46,7 @@ class ETFSpotSyncDailyDataSource(DataSourceBase):
 
         self.db = DBMySQLMarketProvider()
         if self.db is None:
-            raise RuntimeError("oracle provider not configured")
+            raise RuntimeError("mysql provider not configured")
 
         LOG.info(
             "[DS.ETFSpotSyncDaily] Init: market=%s ds=%s cache_root=%s",
@@ -165,7 +165,7 @@ class ETFSpotSyncDailyDataSource(DataSourceBase):
             "dispersion": dispersion,
 
             "_meta": {
-                "source": "oracle",
+                "source": "mysql",
                 "confirmed": True,
                 "total_amount": round(total_amount, 2),
                 "generated_at": datetime.now().isoformat(timespec="seconds"),

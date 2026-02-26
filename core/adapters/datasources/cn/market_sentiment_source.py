@@ -1,4 +1,4 @@
-﻿# core/adapters/datasources/cn/market_sentiment_source.py
+# core/adapters/datasources/cn/market_sentiment_source.py
 # -*- coding: utf-8 -*-
 
 
@@ -40,28 +40,28 @@ LOG = get_logger("DS.Sentiment")
 
 class MarketSentimentDataSource(DataSourceBase):
     """
-    V12 甯傚満鎯呯华锛堝搴︼級鏁版嵁婧愶紙market_sentiment_raw锛夛細
+    V12 闂備焦鐪归崺鍕垂娴兼潙纾圭紒瀣氨閺€锕傛煃瑜滈崜鐔煎蓟閻旂⒈鏁嶆慨姗嗗幖濞呇囨⒑閸涘娈旈梺甯秮瀵偄顓兼径濠囧敹濠电姴鐏氶崝鏇㈠疾椤掑嫭鐓欓柤鍦瑜把囨偣娓氬﹦鎮兼俊鍙夊姇椤繄鎹勯悜妯尖偓顒勬⒑缂佹﹩娈旈柣妤€妫涚划濠囨晜閻ｅ瞼鐦堥悷婊冮叄瀹曟繆顦存俊鍙夊姇椤﹪骞撶涵鍞奺t_sentiment_raw闂傚倷鐒︾€笛呯矙閹次层劑鍩€椤掑倻纾?
 
-    - EOD锛氫粠鏈湴 Oracle锛圕N_STOCK_DAILY_PRICE 鑱氬悎锛夎幏鍙栤€滅‘璁ゆ€佲€濆叏甯傚満妯埅闈㈢粺璁?
-    - INTRADAY锛氫粠 SpotStore 鑾峰彇褰撴棩鍏ㄥ競鍦?spot锛屽啀鍋氭í鎴潰缁熻
-    - 鍙€夊寮猴紙杩戞湡鏁版嵁锛夛細涓滄柟璐㈠瘜娑ㄥ仠/鐐告澘鑲℃睜锛圓kShare锛?
-      * stock_zt_pool_em(date)  -> 娑ㄥ仠鑲℃睜锛坺tgc锛?
-      * stock_zt_pool_zbgc_em(date) -> 鐐告澘鑲℃睜锛坺bgc锛?
+    - EOD闂傚倷鐒︾€笛呯矙閹烘鍎楁い鏃€鍎抽崹婵嬫煟濡鍤欓悗姘槹閵囧嫰骞掗崱妞惧婵犵數濮崑?Oracle闂傚倷鐒︾€笛呯矙閹存繐鑰块柟杈ㄧ煏STOCK_DAILY_PRICE 闂傚倷娴囨竟鍫熴仈閹间焦鍤屽Δ锝呭暙缁犳牠骞栧ǎ顒€濡介柡鍜佸墮椤法鎹勫ú顏嶁偓妤冪磼閻欌偓閸ㄥ爼寮诲☉妯锋瀻闁归偊鍠栭埅鎶芥⒑闁偛鑻晶顖滅磼椤斿ジ鍙勯柛銊﹀劤铻ｉ柛蹇曞帶椤庢盯姊洪棃娑氬婵☆偄鐭傚畷鎴﹀箻鐎涙ê顎撳┑鐐存綑椤戝懏绂嶉悙顒傜瘈闂傚牊绋掗ˉ婊呪偓娈垮枛濞硷繝骞冩禒瀣垫晬婵﹩鍏橀崑鎾剁矙鎼存挻鏁犻梺閫炲苯澧ǎ鍥э躬椤㈡盯鏁愰崟顓炲毈闂備胶纭堕弲娑㈠箠濡綍娑㈠礃椤旂⒈娼婇梺闈涚箞閸ㄥ綊鎮″鑸电厽?
+    - INTRADAY闂傚倷鐒︾€笛呯矙閹烘鍎楁い鏃€鍎抽崹?SpotStore 闂傚倷绀侀崥瀣磿閹惰棄搴婇柤鑹扮堪娴滃綊鏌涢妷顔荤暗濞存粌缍婇弻鐔煎箚瑜忛幗鐘绘煥濞戞﹩妯€闁哄本绋栫粻娑氣偓锝庝簻椤牏绱撴担瑙勭叆闁绘牜鍘ч悾?spot闂傚倷鐒︾€笛呯矙閹达附鍤愭い鏍仜閻ゎ噣鏌嶈閸撶喖寮诲☉姘ｅ亾閿濆骸浜炴い锝嗙叀閺屟囧幢濞戞瑧鍘甸梺鍦拡閸樻椽鏌囬娑氱闁稿繒鍘чˉ瀣磼鏉堛劌娴柟顔哄灩鐓ら悹鍥у级閸?
+    - 闂傚倷绀侀幉锟犳偡椤栫偛鍨傞柛顐ｆ礀閻掑灚銇勯幒鍡椾壕濡炪倧瀵岄崹鎯扮熅闂佸憡鍔﹂悡鍫ュ吹閺囥垺鐓熸慨姗嗗墻閸ょ喓绱掗埀顒勫礋椤栨氨楠囬梺鍐叉惈閸婃悂鎮橀敂鐣岀瘈闁逞屽墴閺佹捇鎮╅崣澶屸偓顒勬⒑缂佹﹩娈旈柣妤€妫涚划濠囨晝閸屾稓鍙嗗┑鐐村灦閿曗晛顬婅缁辨帗娼忛埡渚囨毉缂備礁顑呴ˇ顖炩€﹂妸鈺佺妞ゆ帒鍊搁獮宥夋⒑閼姐倕校闁告梹鍨垮畷纭呫亹閹烘挸鍓ㄥ┑鐘诧工閸熺姴危閸儲鐓忓┑鐐茬仢閸旀瑧绱?闂傚倷鑳剁划顖炲礉閺囥垹绠熼柍銉﹀墯閻斿棙鎱ㄥ璇蹭壕闂佺娅曢悧鐘诲春閸曨垰绀冩い蹇撴噹缂傛捇姊绘担鐟邦嚋缂佸鍨甸敃銏狀嚕閸栫櫠are闂?
+      * stock_zt_pool_em(date)  -> 濠电姷鏁搁崑鐐哄垂椤栫偛绀夐悘鐐插⒔椤╃兘鏌ｅΟ鑲╁笡闁搞倕鍟撮弻宥夊煛娴ｅ憡娈跺┑鐐殿儠閸旀垿寮婚妸銉㈡婵☆垵宕电紙绫篻c闂?
+      * stock_zt_pool_zbgc_em(date) -> 闂傚倷鑳剁划顖炲礉閺囥垹绠熼柍銉﹀墯閻斿棙鎱ㄥ璇蹭壕闂佺娅曢悧鐘诲春閸曨垰绀冩い蹇撴噹缂傛捇姊绘担鐟邦嚋缂佸鍨甸…鍧楀箵缁€绔庨梻?
 
-    鍐荤粨绾︽潫锛堟湰鏂囦欢鍐呴伒瀹堬級锛?
-    - 涓嶅仛涓氬姟鍒ゆ柇锛堜粎 raw 浜嬪疄缁熻锛?
-    - 缂烘暟鎹笉鎶?silent exception锛氳繑鍥?MISSING/ERROR + warnings/error_type/error_message
-    - append-only锛氫繚鐣欏巻鍙插瓧娈碉紙trade_date/adv/dec/flat/limit_up/limit_down/adv_ratio/window锛?
+    闂傚倷绀侀幉锟犲礉濡櫣鏆﹂柣銏ゆ涧閸ㄦ繈鏌曟繛褍鎳忛敍蹇涙⒑閹稿孩顥嗗┑顔哄€楁禍鎼佸幢濞戞瑧鍙嗗┑鐐村灦椤洦鏅跺☉娆戠瘈闁逞屽墯鐎靛ジ寮堕幋鐑嗘闂備焦鎮堕崕濠氭⒔閸曨垼鏁冨ù鐘差儐閻撴洟鏌熼柇锕€澧柛銈呮搐闇夐柛蹇曞帶缁椦囨煃瑜滈崜娑㈠箠閹剧粯鍋嬮柣鎰仛椤洘鎱ㄥΟ鍨厫闁?
+    - 婵犵數鍋為崹鍫曞箰閸濄儳鐭撻悗娑欘焽椤╅攱绻涢幋鐐垫噮闁崇粯姊归幈銊ヮ潨閸℃顫╁銈庡亖閸婃繈寮诲☉銏犵閻庯綆浜栭崑鎾诲冀椤撶偠鎽曢梺鎼炲労閸撴岸寮查鍕厱妞ゆ劧绲块惌宀勬煟?raw 婵犵數鍋涢悺銊у垝瀹€鍕垫晞闁告稑鐡ㄩ崑顏堟煕閺囥劌骞樼痪鎯с偢閺岋綁寮埀顒€顪冮崸妤€瑙﹂柍褜鍓熷?
+    - 缂傚倸鍊搁崐鎼佸磹婵犳艾纾块柕鍫濐槸濮规煡鏌ｉ弮鍌氬付缂佺姴寮堕妵鍕籍閸パ冩優闂佽崵鍠愮换鍫ュ蓟?silent exception闂傚倷鐒︾€笛呯矙閹烘挾鈹嶉柧蹇氼潐瀹曟煡鏌熸潏鍓х暠闁?MISSING/ERROR + warnings/error_type/error_message
+    - append-only闂傚倷鐒︾€笛呯矙閹烘鍎楁い鏃傚亾瀹曞弶鎱ㄥΟ鍨厫闁稿鏅滅换娑㈠幢濡ゅ啰顔囬梺绉嗗喛韬柡灞剧☉閳诲酣骞囬鍌溿偡闂備胶鍎垫慨宥夊礃閿濆棛浜栫紓浣哄亾濠㈡﹢藝鏉堚晝鐭嗛柛鎾虫ade_date/adv/dec/flat/limit_up/limit_down/adv_ratio/window闂?
     """
 
     SCHEMA_VERSION = "market_sentiment_raw.v1"
-    # 杩戞湡鎺ュ彛淇濇姢锛氫笢璐㈡定鍋?鐐告澘鑲℃睜鍙兘鍙栬繎鏈?
+    # 闂備礁鎼ˇ顐﹀疾濠婂牆鍨傞悹铏瑰皑閼板潡鏌ㄩ悢鍝勑㈢紒鐘冲▕閺屾洘寰勯崼婵嗗缂傚倸绉甸幐姝屽絹闂佹悶鍎崝搴ｇ不閺嵮€鏀芥い鏂挎惈閻忔煡鏌℃担鍝バ㈡い顐ｇ箞椤㈡洟濡舵惔鈥茬紦闂備浇宕垫慨鐢稿礉閹达箑鍨傞柧蹇撳帨閸嬫挾鎲撮崟顐㈡懙閻?闂傚倷鑳剁划顖炲礉閺囥垹绠熼柍銉﹀墯閻斿棙鎱ㄥ璇蹭壕闂佺娅曢悧鐘诲春閸曨垰绀冩い蹇撴噹缂傛捇姊绘担鍛婂暈闁荤噥鍨辩粋宥夋晲婢跺﹦顦у┑顔姐仜閸嬫挾鈧娲╃紞浣割嚕娴犲鏁嗛柛灞剧矤閸炴挳姊?
     RECENT_ONLY_DAYS = 120
-    # 鏉垮潡/鐘舵€佹定璺屽仠闃堝€硷紙v2, Frozen / append-only锛夛細
-    # - ST锛圢AME 浠?'*ST' 鎴?'ST' 寮€澶达級: 5%
-    # - 20% 鏉垮潡锛圫YMBOL 鍓嶇紑 300/301/688/689锛? 20%
-    # - 鍖椾氦鎵€鍚彂寮忥紙SYMBOL 鍓嶇紑 8* 鎴?43*/83*/87*锛? 30%
-    # - 鍏跺畠榛樿 10%
+    # 闂傚倷绀侀幖顐λ囬鐐村€舵繝闈涙－閻?闂傚倷鑳剁划顖炩€﹂崼銉ユ槬闁哄稁鍘奸悞鍨亜閹达絾纭堕柛鏂跨Ч閹鎲撮崟顒傛闂佸湱鎳撶€氼喗绂掗敃鍌氱闁圭儤鏌х粭澶愭⒒閸屾艾鈧悂宕锔藉亱闁糕剝绋戦悞鍨亜閹烘垵鈧爼鍩€椤掆偓椤戝洤危閹邦剦鐎?, Frozen / append-only闂傚倷鐒︾€笛呯矙閹次层劑鍩€椤掑倻纾?
+    # - ST闂傚倷鐒︾€笛呯矙閹存繐鑰挎い銉箯E 婵?'*ST' 闂?'ST' 闂佽瀛╅鏍窗閹烘纾婚柟鐐墯閻斿棝鏌熼婊冾暭鐟滄妸鍛＜? 5%
+    # - 20% 闂傚倷绀侀幖顐λ囬鐐村€舵繝闈涙－閻掍粙鏌ㄩ悢鍝勑ｉ柡鍜佸墴閺屾盯鏁傞幆褏鐟㎝BOL 闂傚倷绀侀幉锟犲箰閸濄儳鐭撻柛鎾茬劍椤?300/301/688/689闂? 20%
+    # - 闂傚倷绀侀幉锟犳偋濡ゅ懎桅闁绘劕妯婂鈺呮煥閺囩偛鈧摜绮婚妷鈺傜厓鐟滄粓宕滈悢椋庢殾闁靛鏅╅弫宥嗘叏濮楀棗澧扮€光偓濞戙垺鍊垫繛鍫濈仢閺嬫稑螖閻樿尙绠虫俊鍙夊姇椤粓鎯夐崓澶縊L 闂傚倷绀侀幉锟犲箰閸濄儳鐭撻柛鎾茬劍椤?8* 闂?43*/83*/87*闂? 30%
+    # - 闂傚倷鑳堕…鍫㈡崲濡も偓閳绘柨鈽夐姀鈥充患闂佺粯蓱閸撴艾銆掗懜鍏哥箚妞ゆ牗渚楅崕銉╂煕?10%
     BOARD20_PREFIX = {"300", "301", "688", "689"}
     BOARD30_PREFIX_1 = {"8"}
     BOARD30_PREFIX_2 = {"43", "83", "87"}
@@ -100,7 +100,7 @@ class MarketSentimentDataSource(DataSourceBase):
 
     # ------------------------------------------------------------
     def build_block(self, trade_date: str, refresh_mode: str = "none") -> Dict[str, Any]:
-        """V12 缁熶竴鍏ュ彛锛堟敮鎸?cache锛夈€?""
+        """V12 unified entrypoint with cache support."""
         cache_file = os.path.join(self.cache_root, f"sentiment_{trade_date}.json")
 
         _ = apply_refresh_cleanup(
@@ -117,7 +117,7 @@ class MarketSentimentDataSource(DataSourceBase):
             except Exception as e:
                 LOG.error("[DS.Sentiment] load cache error: %s", e)
 
-        # daily window锛歩ntraday 涔熼渶瑕?window锛屼絾涓嶅繀閲嶅鎷夋定鍋?鐐告澘姹狅紙閬垮厤閲嶅缃戠粶锛?
+        # daily window闂傚倷鐒︾€笛呯矙閹烘鏁嗘い锝嗘晞raday 婵犵數鍋為崹璺侯潖婵犳艾绐楅柡宓讲鍋撻幒妤€绀堝ù锝囨嚀閺?window闂傚倷鐒︾€笛呯矙閹寸偟闄勯柡鍐ㄥ€哥欢銈夋煟閹伴潧澧伴柍缁樻⒒閳ь剙绠嶉崕閬嶅箠閹邦喚涓嶉柟杈鹃檮閳锋垿鏌熺紒妯虹鐎涙繂顪冮妶蹇涙闁绘搫绻濋悰顔跨疀閺傝法绐為柣搴秵娴滅偤寮虫导瀛樷拺?闂傚倷鑳剁划顖炲礉閺囥垹绠熼柍銉﹀墯閻斿棙淇婇婊勭＊鐟滄棃骞冮鍫濆窛妞ゆ牗绮犲Σ閬嶆⒒閸屾瑧璐伴柛鎾寸懇閹ê鈹戠€ｎ亜鍋嶉梺闈涚墕椤︿即鎮￠崒婧惧亾楠炲灝鍔氶柟宄邦儏鍗遍柤濮愬€楃壕浠嬫煕閹般劍娅呴柣蹇婃櫇缁辨帡顢欓懖鈺佺厽闂?
         daily_series_block = self.build_daily_series_block(trade_date, attach_zt_zb_pool=(not self.is_intraday))
 
         if not self.is_intraday:
@@ -136,7 +136,7 @@ class MarketSentimentDataSource(DataSourceBase):
 
     # ------------------------------------------------------------
     def build_daily_series_block(self, trade_date: str, attach_zt_zb_pool: bool = True) -> Dict[str, Any]:
-        """EOD锛氫粠 Oracle 鑱氬悎寰楀埌褰撴棩涓?20D window銆?""
+        """EOD: build current day and recent 20-day sentiment window."""
         warnings: List[str] = []
         error_type: Optional[str] = None
         error_message: Optional[str] = None
@@ -169,7 +169,7 @@ class MarketSentimentDataSource(DataSourceBase):
                 warnings=["empty:oracle_agg_df"],
             )
 
-        # 闄嶅簭宸茬敱 SQL 淇濊瘉锛屾渶鏂板湪鍓?
+        # 闂傚倸鍊搁崐鍝モ偓姘煎墰缁梻鈧灚鐡曟慨铏亜閹捐泛鍓遍柛鐔锋嚇閺屻倗鍠婇崡鐐差潽闂?SQL 婵犵數鍎戠徊钘壝洪敂鐐床闁糕剝绋掗崕濠傤熆閼搁潧濮堥柡鍜佸墴閹﹢鎮欓棃娑楀婵炲濮甸敃銏ゅ蓟閿熺姴纾兼繛鎴炵懅閸戔€斥攽閻橆偄浜惧銈呯箰閻楀棛绮?
         recent_df = df.head(20).copy()
 
         latest_row = recent_df.iloc[0]
@@ -577,7 +577,7 @@ class MarketSentimentDataSource(DataSourceBase):
 
     # ------------------------------------------------------------
     def build_intraday_block(self, trade_date: str, refresh_mode: str) -> Dict[str, Any]:
-        """INTRADAY锛氫粠 SpotStore spot 缁熻褰撴棩妯埅闈€?""
+        """INTRADAY: build sentiment metrics from SpotStore daily snapshot."""
         warnings: List[str] = []
         error_type: Optional[str] = None
         error_message: Optional[str] = None
@@ -605,17 +605,17 @@ class MarketSentimentDataSource(DataSourceBase):
                 warnings=["empty:spot_df"],
             )
 
-        if "娑ㄨ穼骞? not in df.columns:
+        if "chg_pct" not in df.columns:
             return self._neutral_block(
                 trade_date=trade_date,
                 kind="INTRADAY",
                 data_status="ERROR",
                 warnings=["missing:spot_chg_pct_col"],
                 error_type="KeyError",
-                error_message="missing column 娑ㄨ穼骞?,
+                error_message="missing column chg_pct",
             )
 
-        chg = pd.to_numeric(df["娑ㄨ穼骞?], errors="coerce")
+        chg = pd.to_numeric(df["chg_pct"], errors="coerce")
         if chg.isna().all():
             return self._neutral_block(
                 trade_date=trade_date,
@@ -637,7 +637,7 @@ class MarketSentimentDataSource(DataSourceBase):
         flat = int((chg == 0).sum())
 
         # board-aware limit up/down
-        symbol_col = self._pick_col(df, ["浠ｇ爜", "symbol", "璇佸埜浠ｇ爜", "鑲＄エ浠ｇ爜", "ts_code", "浠ｇ爜6"])
+        symbol_col = self._pick_col(df, ["symbol", "code", "ts_code", "sec_code"])
         if symbol_col is None:
             warnings.append("missing:symbol_col_limit_by_prefix_fallback_9.9")
             data_status = "PARTIAL"
@@ -653,7 +653,7 @@ class MarketSentimentDataSource(DataSourceBase):
             limit_pct = limit_pct.where(~prefix3.isin(self.BOARD20_PREFIX), self.LIMIT_PCT_20)
             limit_pct = limit_pct.where(~(prefix1.isin(self.BOARD30_PREFIX_1) | prefix2.isin(self.BOARD30_PREFIX_2)), self.LIMIT_PCT_30)
 
-            name_col = self._pick_col(df, ["鍚嶇О", "name", "鑲＄エ绠€绉?, "璇佸埜绠€绉?])
+            name_col = self._pick_col(df, ["name", "sec_name"])
             if name_col is not None:
                 nm = df[name_col].astype(str).str.strip().str.upper()
                 is_st = nm.str.startswith("*ST") | nm.str.startswith("ST")
@@ -796,18 +796,18 @@ class MarketSentimentDataSource(DataSourceBase):
         cnt = int(len(df))
         evidence: Dict[str, Any] = {"count": cnt}
 
-        # 杩炴澘楂樺害
-        if "杩炴澘鏁? in df.columns:
+        max_consecutive_col = self._pick_col(df, ["max_consecutive", "max_consecutive_limit_up"])
+        if max_consecutive_col is not None:
             try:
-                evidence["max_consecutive_limit_up"] = int(pd.to_numeric(df["杩炴澘鏁?], errors="coerce").max())
+                evidence["max_consecutive_limit_up"] = int(pd.to_numeric(df[max_consecutive_col], errors="coerce").max())
             except Exception:
                 warnings.append("parse_failed:zt_pool_max_consecutive")
         else:
-            warnings.append("missing:zt_pool_col_杩炴澘鏁?)
+            warnings.append("missing:zt_pool_col_max_consecutive")
 
-        # 灏佹澘璧勯噾寮哄害
-        if "灏佹澘璧勯噾" in df.columns:
-            x = pd.to_numeric(df["灏佹澘璧勯噾"], errors="coerce").dropna()
+        seal_fund_col = self._pick_col(df, ["灏佸崟璧勯噾", "seal_fund"])
+        if seal_fund_col is not None:
+            x = pd.to_numeric(df[seal_fund_col], errors="coerce").dropna()
             if not x.empty:
                 evidence["seal_fund_total"] = float(x.sum())
                 evidence["seal_fund_median"] = float(x.median())
@@ -815,16 +815,16 @@ class MarketSentimentDataSource(DataSourceBase):
             else:
                 warnings.append("empty:zt_pool_seal_fund_all_nan")
         else:
-            warnings.append("missing:zt_pool_col_灏佹澘璧勯噾")
+            warnings.append("missing:zt_pool_col_seal_fund")
 
-        # 鐐告澘 proxy锛氭定鍋滄睜鍐呯偢鏉挎鏁?0 鍗犳瘮
-        if "鐐告澘娆℃暟" in df.columns:
-            z = pd.to_numeric(df["鐐告澘娆℃暟"], errors="coerce").fillna(0)
+        opened_col = self._pick_col(df, ["鐐告澘娆℃暟", "opened_times", "broken_times"])
+        if opened_col is not None:
+            z = pd.to_numeric(df[opened_col], errors="coerce").fillna(0)
             opened_cnt = int((z > 0).sum())
             evidence["opened_limitup_count_proxy"] = opened_cnt
             evidence["opened_limitup_ratio_proxy"] = round(opened_cnt / cnt, 4) if cnt > 0 else 0.0
         else:
-            warnings.append("missing:zt_pool_col_鐐告澘娆℃暟")
+            warnings.append("missing:zt_pool_col_opened_times")
 
         data_status = "OK"
         if warnings:
@@ -882,24 +882,24 @@ class MarketSentimentDataSource(DataSourceBase):
         cnt = int(len(df))
         evidence: Dict[str, Any] = {"count": cnt}
 
-        if "鐐告澘娆℃暟" in df.columns:
-            z = pd.to_numeric(df["鐐告澘娆℃暟"], errors="coerce").fillna(0)
+        broken_col = self._pick_col(df, ["鐐告澘娆℃暟", "broken_times", "opened_times"])
+        if broken_col is not None:
+            z = pd.to_numeric(df[broken_col], errors="coerce").fillna(0)
             evidence["broken_times_sum"] = int(z.sum())
             evidence["broken_times_max"] = int(z.max()) if len(z) else 0
         else:
-            warnings.append("missing:zb_pool_col_鐐告澘娆℃暟")
+            warnings.append("missing:zb_pool_col_broken_times")
 
-        # 棣栨灏佹澘鏃堕棿鍒嗗竷锛堝彲閫夛級
-        if "棣栨灏佹澘鏃堕棿" in df.columns:
+        first_seal_col = self._pick_col(df, ["棣栨灏佹澘鏃堕棿", "first_seal_time"])
+        if first_seal_col is not None:
             try:
-                t = df["棣栨灏佹澘鏃堕棿"].astype(str)
-                # normalize to HH:MM:SS if possible
+                t = df[first_seal_col].astype(str)
                 t2 = t.str.replace(":", "", regex=False).str.strip()
                 evidence["first_seal_0925_count"] = int((t2 == "092500").sum())
             except Exception:
                 warnings.append("parse_failed:zb_pool_first_seal_time")
         else:
-            warnings.append("missing:zb_pool_col_棣栨灏佹澘鏃堕棿")
+            warnings.append("missing:zb_pool_col_first_seal_time")
 
         data_status = "OK"
         if warnings:
@@ -954,7 +954,7 @@ class MarketSentimentDataSource(DataSourceBase):
         error_type: Optional[str] = None,
         error_message: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """绋冲畾瀛愬潡灏佽锛坅ppend-only锛夈€?""
+        """Build a standard append-only subblock payload."""
         return {
             "schema_version": f"{name}.v1",
             "asof": {"trade_date": trade_date, "kind": kind},
@@ -1005,7 +1005,8 @@ class MarketSentimentDataSource(DataSourceBase):
         )
 
     def _pick_col(self, df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
-        cols = set(getattr(df, "columns", []) or [])
+        cols_obj = getattr(df, "columns", None)
+        cols = set(cols_obj.tolist()) if cols_obj is not None else set()
         for c in candidates:
             if c in cols:
                 return c

@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """
 UnifiedRisk V12 - Liquidity Quality DataSource (F Block)
 
@@ -129,7 +129,7 @@ class LiquidityQualityDataSource(DataSourceBase):
             # 鐠嬪啰鏁?DBProvider 閼惧嘲褰囬弫鐗堝祦閿涘牆瀵橀幏顒勵暕閺€鍓佹磸/濞戙劏绌奸獮?閹存劒姘︽０婵撶礆
             rows = self.db.query_stock_closes(start_dt, as_date)
         except Exception as exc:
-            LOG.error("[DS.LiquidityQuality] oracle fetch error: %s", exc)
+            LOG.error("[DS.LiquidityQuality] mysql fetch error: %s", exc)
             return self._neutral_block(trade_date)
 
         if not rows:

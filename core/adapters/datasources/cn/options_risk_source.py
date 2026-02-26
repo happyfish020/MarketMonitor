@@ -1,29 +1,29 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """
 UnifiedRisk V12 - Options Risk DataSource (E Block)
 
-璁捐鐩殑锛?
-    鑱氬悎 ETF 鏈熸潈鏃ヨ鎯呮暟鎹紝璁＄畻鍔犳潈娑ㄨ穼棰濄€佹€绘定璺岄銆佸姞鏉冩敹鐩樹环浠ュ強鍏跺彉鍖栬秼鍔裤€?
-    姝ゆ暟鎹簮涓烘湡鏉冮闄╁垎鏋愭彁渚涘熀纭€鍘熷鏁版嵁锛岀敤浜庡悗缁洜瀛愭墦鍒嗗拰鎶ュ憡灞曠ず銆?
+鐠佹崘顓搁惄顔炬畱閿?
+    閼辨艾鎮?ETF 閺堢喐娼堥弮銉攽閹懏鏆熼幑顕嗙礉鐠侊紕鐣婚崝鐘虫綀濞戙劏绌兼０婵勨偓浣光偓缁樺畾鐠哄矂顤傞妴浣稿閺夊啯鏁归惄妯圭幆娴犮儱寮烽崗璺哄綁閸栨牞绉奸崝瑁も偓?
+    濮濄倖鏆熼幑顔界爱娑撶儤婀￠弶鍐棑闂勨晛鍨庨弸鎰絹娓氭稑鐔€绾偓閸樼喎顫愰弫鐗堝祦閿涘瞼鏁ゆ禍搴℃倵缂侇厼娲滅€涙劖澧﹂崚鍡楁嫲閹躲儱鎲＄仦鏇犮仛閵?
 
-绾︽潫锛?
-    - 浠呬緷璧?DBOracleProvider锛屼笉璁块棶澶栭儴 API銆?
-    - 浠呰仛鍚堜竴缁勫浐瀹氱殑 ETF 鏈熸潈鏍囩殑锛堜節鍙狤TF锛夛紝鏍规嵁閰嶇疆鍙皟鏁淬€?
-    - 鎸夋棩鏋勫缓鏃堕棿搴忓垪锛岄粯璁ゅ洖婧?60 鏃ャ€?
+缁撅附娼敍?
+    - 娴犲懍绶风挧?DBOracleProvider閿涘奔绗夌拋鍧楁６婢舵牠鍎?API閵?
+    - 娴犲懓浠涢崥鍫滅缂佸嫬娴愮€规氨娈?ETF 閺堢喐娼堥弽鍥╂畱閿涘牅绡€閸欑嫟TF閿涘绱濋弽瑙勫祦闁板秶鐤嗛崣顖濈殶閺佹番鈧?
+    - 閹稿妫╅弸鍕紦閺冨爼妫挎惔蹇撳灙閿涘矂绮拋銈呮礀濠?60 閺冦儯鈧?
 
-杈撳嚭瀛楁锛?
-    trade_date: 鏈€鏂颁氦鏄撴棩鏈燂紙瀛楃涓诧級
-    weighted_change: 鎸夋垚浜ら噺鍔犳潈鐨勬定璺岄鍧囧€?
-    total_change:    鎵€鏈夊悎绾︽定璺岄姹傚拰
-    total_volume:    鎬绘垚浜ら噺
-    weighted_close:  鎸夋垚浜ら噺鍔犳潈鐨勬敹鐩樹环
-    change_ratio:    weighted_change / weighted_close锛堣嫢鏀剁洏浠蜂负 0锛屽垯涓?0 鎴?None锛?
-    trend_10d:       杩?10 鏃?weighted_change 鍙樺寲
-    acc_3d:         杩?3 鏃?weighted_change 鍙樺寲
-    series: 鍘嗗彶搴忓垪鍒楄〃锛屾瘡椤瑰寘鍚?trade_date, weighted_change, total_change, total_volume,
+鏉堟挸鍤€涙顔岄敍?
+    trade_date: 閺堚偓閺傞姘﹂弰鎾存）閺堢噦绱欑€涙顑佹稉璇х礆
+    weighted_change: 閹稿鍨氭禍銈夊櫤閸旂姵娼堥惃鍕畾鐠哄矂顤傞崸鍥р偓?
+    total_change:    閹碘偓閺堝鎮庣痪锔藉畾鐠哄矂顤傚Ч鍌氭嫲
+    total_volume:    閹粯鍨氭禍銈夊櫤
+    weighted_close:  閹稿鍨氭禍銈夊櫤閸旂姵娼堥惃鍕暪閻╂ü鐜?
+    change_ratio:    weighted_change / weighted_close閿涘牐瀚㈤弨鍓佹磸娴犺渹璐?0閿涘苯鍨稉?0 閹?None閿?
+    trend_10d:       鏉?10 閺?weighted_change 閸欐ê瀵?
+    acc_3d:         鏉?3 閺?weighted_change 閸欐ê瀵?
+    series: 閸樺棗褰舵惔蹇撳灙閸掓銆冮敍灞剧槨妞ょ懓瀵橀崥?trade_date, weighted_change, total_change, total_volume,
             weighted_close, change_ratio
 
-褰撴暟鎹己澶辨垨寮傚父鏃讹紝杩斿洖 neutral_block銆?
+瑜版挻鏆熼幑顔惧繁婢惰鲸鍨ㄥ鍌氱埗閺冭绱濇潻鏂挎礀 neutral_block閵?
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ import pandas as pd
 from core.datasources.datasource_base import DataSourceConfig, DataSourceBase
 from core.utils.ds_refresh import apply_refresh_cleanup
 from core.utils.logger import get_logger
-from core.adapters.providers.db_provider_mysql_market import DBOracleProvider
+from core.adapters.providers.db_provider_mysql_market import DBMySQLMarketProvider
 
 LOG = get_logger("DS.OptionsRisk")
 
@@ -46,23 +46,23 @@ class OptionsRiskDataSource(DataSourceBase):
     """
     Options Risk DataSource
 
-    鑱氬悎 ETF 鏈熸潈鏃ヨ鎯呮暟鎹紝璁＄畻鍔犳潈娑ㄨ穼棰濆強鍏惰秼鍔?鍔犻€熷害銆?
+    閼辨艾鎮?ETF 閺堢喐娼堥弮銉攽閹懏鏆熼幑顕嗙礉鐠侊紕鐣婚崝鐘虫綀濞戙劏绌兼０婵嗗挤閸忔儼绉奸崝?閸旂娀鈧喎瀹抽妴?
     """
 
     def __init__(self, config: DataSourceConfig, window: int = 60) -> None:
-        # 鍥哄畾鍚嶇О锛屼究浜庢棩蹇楄瘑鍒?
+        # 閸ュ搫鐣鹃崥宥囆為敍灞肩┒娴滃孩妫╄箛妤勭槕閸?
         super().__init__(name="DS.OptionsRisk")
         self.config = config
         self.window = int(window) if window and window > 0 else 60
-        self.db = DBOracleProvider()
+        self.db = DBMySQLMarketProvider()
 
-        # 缂撳瓨鍜屽巻鍙茶矾寰?
+        # 缂傛挸鐡ㄩ崪灞藉坊閸欒尪鐭惧?
         self.cache_root = config.cache_root
         self.history_root = config.history_root
         os.makedirs(self.cache_root, exist_ok=True)
         os.makedirs(self.history_root, exist_ok=True)
 
-        # 鍗曟棩 cache 鏂囦欢鍚?
+        # 閸楁洘妫?cache 閺傚洣娆㈤崥?
         self.cache_file = os.path.join(self.cache_root, "options_risk_today.json")
         self.history_file = os.path.join(self.history_root, "options_risk_series.json")
 
@@ -78,13 +78,13 @@ class OptionsRiskDataSource(DataSourceBase):
     # ------------------------------------------------------------------
     def build_block(self, trade_date: str, refresh_mode: str = "none") -> Dict[str, Any]:
         """
-        鏋勫缓鏈熸潈椋庨櫓鍘熷鏁版嵁鍧椼€?
+        閺嬪嫬缂撻張鐔告綀妞嬪酣娅撻崢鐔奉潗閺佺増宓侀崸妞尖偓?
 
-        鍙傛暟锛?
-            trade_date: 瀛楃涓诧紝璇勪及鏃ユ湡锛堥€氬父涓?T 鎴?T-1锛?
-            refresh_mode: 鍒锋柊绛栫暐锛屾敮鎸?none/readonly/full
+        閸欏倹鏆熼敍?
+            trade_date: 鐎涙顑佹稉璇х礉鐠囧嫪鍙婇弮銉︽埂閿涘牓鈧艾鐖舵稉?T 閹?T-1閿?
+            refresh_mode: 閸掗攱鏌婄粵鏍殣閿涘本鏁幐?none/readonly/full
         """
-        # 娓呯悊缂撳瓨渚濇嵁 refresh_mode
+        # 濞撳懐鎮婄紓鎾崇摠娓氭繃宓?refresh_mode
         apply_refresh_cleanup(
             refresh_mode=refresh_mode,
             cache_path=self.cache_file,
@@ -92,7 +92,7 @@ class OptionsRiskDataSource(DataSourceBase):
             spot_path=None,
         )
 
-        # 鍛戒腑缂撳瓨鐩存帴杩斿洖
+        # 閸涙垝鑵戠紓鎾崇摠閻╁瓨甯存潻鏂挎礀
         if refresh_mode in ("none", "readonly") and os.path.exists(self.cache_file):
             try:
                 with open(self.cache_file, "r", encoding="utf-8") as f:
@@ -100,7 +100,7 @@ class OptionsRiskDataSource(DataSourceBase):
             except Exception as exc:
                 LOG.error("[DS.OptionsRisk] load cache error: %s", exc)
 
-        # 璋冪敤 DB provider 鑱氬悎鏁版嵁
+        # 鐠嬪啰鏁?DB provider 閼辨艾鎮庨弫鐗堝祦
         try:
             df: pd.DataFrame = self.db.fetch_options_risk_series(
                 start_date=trade_date,
@@ -172,13 +172,13 @@ class OptionsRiskDataSource(DataSourceBase):
             "trend_10d": trend_10d,
             "acc_3d": acc_3d,
             "series": merged_series,
-            # 鏍囪鏁版嵁鐘舵€佷负 OK锛岃〃鏄庢暟鎹潵婧愭甯?
+            # 閺嶅洩顔囬弫鐗堝祦閻樿埖鈧椒璐?OK閿涘矁銆冮弰搴㈡殶閹诡喗娼靛┃鎰劀鐢?
             "data_status": "OK",
-            # 榛樿鏃?warnings锛涜嫢涓婂眰闇€瑕佸彲瑕嗙洊
+            # 姒涙顓婚弮?warnings閿涙稖瀚㈡稉濠傜湴闂団偓鐟曚礁褰茬憰鍡欐磰
             "warnings": [],
         }
 
-        # 淇濆瓨鍘嗗彶鍜岀紦瀛?
+        # 娣囨繂鐡ㄩ崢鍡楀蕉閸滃瞼绱︾€?
         try:
             self._save(self.history_file, merged_series)
             with open(self.cache_file, "w", encoding="utf-8") as f:
@@ -191,7 +191,7 @@ class OptionsRiskDataSource(DataSourceBase):
     # ------------------------------------------------------------------
     def _merge_history(self, recent: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
-        鍚堝苟鍘嗗彶涓庡綋鍓嶇獥鍙ｏ紝淇濊瘉闀垮害鍥哄畾涓?window銆?
+        閸氬牆鑻熼崢鍡楀蕉娑撳骸缍嬮崜宥囩崶閸欙綇绱濇穱婵婄槈闂€鍨閸ュ搫鐣炬稉?window閵?
         """
         old: List[Dict[str, Any]] = []
         if os.path.exists(self.history_file):
@@ -208,7 +208,7 @@ class OptionsRiskDataSource(DataSourceBase):
     # ------------------------------------------------------------------
     def _calc_trend(self, series: List[Dict[str, Any]]) -> tuple[float, float]:
         """
-        璁＄畻 10 鏃ヨ秼鍔垮拰 3 鏃ュ姞閫熷害锛堝熀浜?weighted_change锛夈€?
+        鐠侊紕鐣?10 閺冦儴绉奸崝鍨嫲 3 閺冦儱濮為柅鐔峰閿涘牆鐔€娴?weighted_change閿涘鈧?
         """
         if len(series) < 2:
             return 0.0, 0.0
@@ -238,11 +238,11 @@ class OptionsRiskDataSource(DataSourceBase):
     @staticmethod
     def _neutral_block(trade_date: str) -> Dict[str, Any]:
         """
-        杩斿洖绌?涓€у潡锛屾墍鏈夋寚鏍囦负 0.0锛宻eries 涓虹┖銆?
+        鏉╂柨娲栫粚?娑擃厽鈧冩健閿涘本澧嶉張澶嬪瘹閺嶅洣璐?0.0閿涘eries 娑撹櫣鈹栭妴?
 
-        娉ㄦ剰锛氬綋鏁版嵁缂哄け鎴栨棤娉曞姞杞芥椂锛岄渶鏄庣‘鏍囨敞 data_status 涓?"MISSING"銆傚鏋滅渷鐣ユ瀛楁锛?
-        涓婂眰鍥犲瓙鍜屾姤鍛婁細榛樿璁や负鏁版嵁姝ｅ父锛?OK"锛夛紝浠庤€岀粰鍑轰笉鍑嗙‘鐨勬彁绀恒€傛澶勬垜浠槑纭?
-        璁剧疆 data_status 涓?"MISSING" 浠ヤ究 WatchlistLeadFactor 鑳芥纭瘑鍒暟鎹己澶辨儏鍐点€?
+        濞夈劍鍓伴敍姘秼閺佺増宓佺紓鍝勩亼閹存牗妫ゅ▔鏇炲鏉炶姤妞傞敍宀勬付閺勫海鈥橀弽鍥ㄦ暈 data_status 娑?"MISSING"閵嗗倸顩ч弸婊呮阜閻ｃ儲顒濈€涙顔岄敍?
+        娑撳﹤鐪伴崶鐘茬摍閸滃本濮ら崨濠佺窗姒涙顓荤拋銈勮礋閺佺増宓佸锝呯埗閿?OK"閿涘绱濇禒搴も偓宀€绮伴崙杞扮瑝閸戝棛鈥橀惃鍕絹缁€鎭掆偓鍌涱劃婢跺嫭鍨滄禒顒佹绾?
+        鐠佸墽鐤?data_status 娑?"MISSING" 娴犮儰绌?WatchlistLeadFactor 閼宠姤顒滅涵顔跨槕閸掝偅鏆熼幑顔惧繁婢惰鲸鍎忛崘鐐光偓?
         """
         return {
             "trade_date": trade_date,
@@ -255,6 +255,7 @@ class OptionsRiskDataSource(DataSourceBase):
             "acc_3d": 0.0,
             "series": [],
             "data_status": "MISSING",
-            # 鎻愪緵涓€涓?warnings 瀛楁浠ヤ究涓婂眰闈㈡澘璁板綍缂哄け鍘熷洜
+            # 閹绘劒绶垫稉鈧稉?warnings 鐎涙顔屾禒銉ょ┒娑撳﹤鐪伴棃銏℃緲鐠佹澘缍嶇紓鍝勩亼閸樼喎娲?
             "warnings": ["missing:options_risk_series"],
         }
+

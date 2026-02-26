@@ -1,27 +1,27 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """
 UnifiedRisk V12 - Futures Basis DataSource (D Block)
 
-璁捐鐩殑锛?
-    浠庢湰鍦?Oracle 鏁版嵁搴撶殑鑲℃寚鏈熻揣鏃ヨ鎯呰〃锛圕N_FUT_INDEX_HIS锛夊拰鎸囨暟鏃ヨ鎯呰〃锛圕N_INDEX_DAILY_PRICE锛?
-    鑱氬悎璁＄畻鑲℃寚鏈熻揣鍩哄樊锛堟湡璐х粨绠椾环 - 鎸囨暟鏀剁洏浠凤級鍙婂叾璧板娍锛岀敤浜庨闄╃洃娴嬨€傝繑鍥炲師濮嬫椂闂村簭鍒椼€?
-    鍩哄樊鍧囧€笺€佽秼鍔垮拰鍔犻€熷害銆?
+鐠佹崘顓搁惄顔炬畱閿?
+    娴犲孩婀伴崷?Oracle 閺佺増宓佹惔鎾舵畱閼测剝瀵氶張鐔绘彛閺冦儴顢戦幆鍛般€冮敍鍦昇_FUT_INDEX_HIS閿涘鎷伴幐鍥ㄦ殶閺冦儴顢戦幆鍛般€冮敍鍦昇_INDEX_DAILY_PRICE閿?
+    閼辨艾鎮庣拋锛勭暬閼测剝瀵氶張鐔绘彛閸╁搫妯婇敍鍫熸埂鐠愌呯波缁犳ぞ鐜?- 閹稿洦鏆熼弨鍓佹磸娴犲嚖绱氶崣濠傚従鐠ф澘濞嶉敍宀€鏁ゆ禍搴棑闂勨晝娲冨ù瀣ㄢ偓鍌濈箲閸ョ偛甯慨瀣闂傛潙绨崚妞尖偓?
+    閸╁搫妯婇崸鍥р偓绗衡偓浣界Ъ閸斿灝鎷伴崝鐘烩偓鐔峰閵?
 
-绾︽潫锛?
-    - 浠呬緷璧?DBOracleProvider锛屼笉璁块棶澶栭儴 API銆?
-    - 涓嶅畾涔夋柊鐨?provider 鎺ュ彛锛岀洿鎺ヨ皟鐢?provider 灞傛彁渚涚殑鑱氬悎鏂规硶 fetch_futures_basis_series銆?
-    - 鎸夋棩鏋勫缓鏃堕棿搴忓垪锛寃indow 榛樿 60 澶┿€?
+缁撅附娼敍?
+    - 娴犲懍绶风挧?DBOracleProvider閿涘奔绗夌拋鍧楁６婢舵牠鍎?API閵?
+    - 娑撳秴鐣炬稊澶嬫煀閻?provider 閹恒儱褰涢敍宀€娲块幒銉ㄧ殶閻?provider 鐏炲倹褰佹笟娑氭畱閼辨艾鎮庨弬瑙勭《 fetch_futures_basis_series閵?
+    - 閹稿妫╅弸鍕紦閺冨爼妫挎惔蹇撳灙閿涘瘍indow 姒涙顓?60 婢垛斂鈧?
 
-杈撳嚭瀛楁锛?
-    trade_date: 浜ゆ槗鏃ユ湡锛堟渶鏂颁竴涓氦鏄撴棩瀛楃涓诧級
-    avg_basis:  鎸夋垚浜ら噺鍔犳潈鐨勫熀宸潎鍊硷紙鏈熻揣 - 鎸囨暟锛夛紝姝ｅ€间负鍗囨按锛岃礋鍊间负璐存按
-    total_basis: 鎸夊悎绾︾畝鍗曟眰鍜岀殑鍩哄樊锛堣緟鍔╋級
-    basis_ratio: 鍩哄樊鐩稿浜庡姞鏉冩寚鏁版敹鐩樹环鐨勬瘮鍊?
-    trend_10d:   杩?10 鏃ュ熀宸彉鍖栵紙鍩哄樊鍧囧€煎樊锛?
-    acc_3d:     杩?3 鏃ュ熀宸彉鍖栵紙鍩哄樊鍧囧€煎樊锛?
-    series: 鍘嗗彶搴忓垪鍒楄〃锛屾瘡椤瑰寘鍚?trade_date銆乤vg_basis銆乼otal_basis銆乥asis_ratio銆亀eighted_future_price銆亀eighted_index_price銆乼otal_volume
+鏉堟挸鍤€涙顔岄敍?
+    trade_date: 娴溿倖妲楅弮銉︽埂閿涘牊娓堕弬棰佺娑擃亙姘﹂弰鎾存）鐎涙顑佹稉璇х礆
+    avg_basis:  閹稿鍨氭禍銈夊櫤閸旂姵娼堥惃鍕唨瀹割喖娼庨崐纭风礄閺堢喕鎻?- 閹稿洦鏆熼敍澶涚礉濮濓絽鈧棿璐熼崡鍥ㄦ寜閿涘矁绀嬮崐闂磋礋鐠愬瓨鎸?
+    total_basis: 閹稿鎮庣痪锔剧暆閸楁洘鐪伴崪宀€娈戦崺鍝勬▕閿涘牐绶熼崝鈺嬬礆
+    basis_ratio: 閸╁搫妯婇惄绋款嚠娴滃骸濮為弶鍐╁瘹閺佺増鏁归惄妯圭幆閻ㄥ嫭鐦崐?
+    trend_10d:   鏉?10 閺冦儱鐔€瀹割喖褰夐崠鏍电礄閸╁搫妯婇崸鍥р偓鐓庢▕閿?
+    acc_3d:     鏉?3 閺冦儱鐔€瀹割喖褰夐崠鏍电礄閸╁搫妯婇崸鍥р偓鐓庢▕閿?
+    series: 閸樺棗褰舵惔蹇撳灙閸掓銆冮敍灞剧槨妞ょ懓瀵橀崥?trade_date閵嗕工vg_basis閵嗕辜otal_basis閵嗕攻asis_ratio閵嗕簚eighted_future_price閵嗕簚eighted_index_price閵嗕辜otal_volume
 
-褰撴暟鎹己澶辨垨寮傚父鏃讹紝杩斿洖 neutral_block銆?
+瑜版挻鏆熼幑顔惧繁婢惰鲸鍨ㄥ鍌氱埗閺冭绱濇潻鏂挎礀 neutral_block閵?
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ import pandas as pd
 from core.datasources.datasource_base import DataSourceConfig, DataSourceBase
 from core.utils.ds_refresh import apply_refresh_cleanup
 from core.utils.logger import get_logger
-from core.adapters.providers.db_provider_mysql_market import DBOracleProvider
+from core.adapters.providers.db_provider_mysql_market import DBMySQLMarketProvider
 
 LOG = get_logger("DS.FuturesBasis")
 
@@ -44,23 +44,23 @@ class FuturesBasisDataSource(DataSourceBase):
     """
     Futures Basis DataSource
 
-    鑱氬悎鑲℃寚鏈熻揣鍜屾寚鏁版棩琛屾儏琛ㄧ殑鏁版嵁锛岃绠楀姞鏉冨熀宸簭鍒楀強鍏惰秼鍔?鍔犻€熷害銆?
+    閼辨艾鎮庨懖鈩冨瘹閺堢喕鎻ｉ崪灞惧瘹閺佺増妫╃悰灞惧剰鐞涖劎娈戦弫鐗堝祦閿涘矁顓哥粻妤€濮為弶鍐ㄧ唨瀹割喖绨崚妤€寮烽崗鎯扮Ъ閸?閸旂娀鈧喎瀹抽妴?
     """
 
     def __init__(self, config: DataSourceConfig, window: int = 60):
-        # 鍥哄畾鍚嶇О锛屼究浜庢棩蹇楄瘑鍒?
+        # 閸ュ搫鐣鹃崥宥囆為敍灞肩┒娴滃孩妫╄箛妤勭槕閸?
         super().__init__(name="DS.FuturesBasis")
         self.config = config
         self.window = int(window) if window and window > 0 else 60
-        self.db = DBOracleProvider()
+        self.db = DBMySQLMarketProvider()
 
-        # 缂撳瓨鍜屽巻鍙茶矾寰?
+        # 缂傛挸鐡ㄩ崪灞藉坊閸欒尪鐭惧?
         self.cache_root = config.cache_root
         self.history_root = config.history_root
         os.makedirs(self.cache_root, exist_ok=True)
         os.makedirs(self.history_root, exist_ok=True)
 
-        # 鍗曟棩 cache 鏂囦欢鍚?
+        # 閸楁洘妫?cache 閺傚洣娆㈤崥?
         self.cache_file = os.path.join(self.cache_root, "futures_basis_today.json")
         self.history_file = os.path.join(self.history_root, "futures_basis_series.json")
 
@@ -76,13 +76,13 @@ class FuturesBasisDataSource(DataSourceBase):
     # ------------------------------------------------------------------
     def build_block(self, trade_date: str, refresh_mode: str = "none") -> Dict[str, Any]:
         """
-        鏋勫缓鏈熸寚鍩哄樊鍘熷鏁版嵁鍧椼€?
+        閺嬪嫬缂撻張鐔稿瘹閸╁搫妯婇崢鐔奉潗閺佺増宓侀崸妞尖偓?
 
-        鍙傛暟锛?
-            trade_date: 瀛楃涓诧紝璇勪及鏃ユ湡锛堥€氬父涓?T 鎴?T-1锛?
-            refresh_mode: 鍒锋柊绛栫暐锛屾敮鎸?none/readonly/full
+        閸欏倹鏆熼敍?
+            trade_date: 鐎涙顑佹稉璇х礉鐠囧嫪鍙婇弮銉︽埂閿涘牓鈧艾鐖舵稉?T 閹?T-1閿?
+            refresh_mode: 閸掗攱鏌婄粵鏍殣閿涘本鏁幐?none/readonly/full
         """
-        # 娓呯悊缂撳瓨渚濇嵁 refresh_mode
+        # 濞撳懐鎮婄紓鎾崇摠娓氭繃宓?refresh_mode
         apply_refresh_cleanup(
             refresh_mode=refresh_mode,
             cache_path=self.cache_file,
@@ -90,7 +90,7 @@ class FuturesBasisDataSource(DataSourceBase):
             spot_path=None,
         )
 
-        # 鍛戒腑缂撳瓨鐩存帴杩斿洖
+        # 閸涙垝鑵戠紓鎾崇摠閻╁瓨甯存潻鏂挎礀
         if refresh_mode in ("none", "readonly") and os.path.exists(self.cache_file):
             try:
                 with open(self.cache_file, "r", encoding="utf-8") as f:
@@ -98,7 +98,7 @@ class FuturesBasisDataSource(DataSourceBase):
             except Exception as exc:
                 LOG.error("[DS.FuturesBasis] load cache error: %s", exc)
 
-        # 璇诲彇鑱氬悎鏁版嵁
+        # 鐠囪褰囬懕姘値閺佺増宓?
         try:
             df: pd.DataFrame = self.db.fetch_futures_basis_series(
                 start_date=trade_date,
@@ -173,7 +173,7 @@ class FuturesBasisDataSource(DataSourceBase):
             "series": merged_series,
         }
 
-        # 淇濆瓨鍘嗗彶鍜岀紦瀛?
+        # 娣囨繂鐡ㄩ崢鍡楀蕉閸滃瞼绱︾€?
         try:
             self._save(self.history_file, merged_series)
             with open(self.cache_file, "w", encoding="utf-8") as f:
@@ -186,7 +186,7 @@ class FuturesBasisDataSource(DataSourceBase):
     # ------------------------------------------------------------------
     def _merge_history(self, recent: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
-        鍚堝苟鍘嗗彶涓庡綋鍓嶇獥鍙ｏ紝淇濊瘉闀垮害鍥哄畾涓?window銆?
+        閸氬牆鑻熼崢鍡楀蕉娑撳骸缍嬮崜宥囩崶閸欙綇绱濇穱婵婄槈闂€鍨閸ュ搫鐣炬稉?window閵?
         """
         old: List[Dict[str, Any]] = []
         if os.path.exists(self.history_file):
@@ -203,7 +203,7 @@ class FuturesBasisDataSource(DataSourceBase):
     # ------------------------------------------------------------------
     def _calc_trend(self, series: List[Dict[str, Any]]) -> tuple[float, float]:
         """
-        璁＄畻 10 鏃ヨ秼鍔垮拰 3 鏃ュ姞閫熷害锛堝熀宸潎鍊煎樊锛夈€?
+        鐠侊紕鐣?10 閺冦儴绉奸崝鍨嫲 3 閺冦儱濮為柅鐔峰閿涘牆鐔€瀹割喖娼庨崐鐓庢▕閿涘鈧?
         """
         if len(series) < 2:
             return 0.0, 0.0
@@ -233,7 +233,7 @@ class FuturesBasisDataSource(DataSourceBase):
     @staticmethod
     def _neutral_block(trade_date: str) -> Dict[str, Any]:
         """
-        杩斿洖绌?涓€у潡锛屾墍鏈夋寚鏍囦负 0.0锛宻eries 涓虹┖銆?
+        鏉╂柨娲栫粚?娑擃厽鈧冩健閿涘本澧嶉張澶嬪瘹閺嶅洣璐?0.0閿涘eries 娑撹櫣鈹栭妴?
         """
         return {
             "trade_date": trade_date,
@@ -244,3 +244,4 @@ class FuturesBasisDataSource(DataSourceBase):
             "acc_3d": 0.0,
             "series": [],
         }
+

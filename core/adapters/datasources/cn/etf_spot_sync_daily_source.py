@@ -1,14 +1,14 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """
 UnifiedRisk V12 FULL
-ETF 脳 Spot Synchronization Daily DataSource (T-1 Confirmed)
+ETF 鑴?Spot Synchronization Daily DataSource (T-1 Confirmed)
 
-璁捐閾佸緥锛?
-- Phase-1 DataSource锛堜簨瀹炲眰锛?
-- 鍙鍙?oracle DB锛圱-1 宸叉敹鐩樺叏琛屾儏锛?
-- snapshot_type 姘歌繙涓?EOD
-- 鍙洖鏀俱€佸彲瀹¤
-- 涓撲緵 Gate / Phase-3 浣跨敤
+鐠佹崘顓搁柧浣哥伐閿?
+- Phase-1 DataSource閿涘牅绨ㄧ€圭偛鐪伴敍?
+- 閸欘亣顕伴崣?oracle DB閿涘湵-1 瀹稿弶鏁归惄妯哄弿鐞涘本鍎忛敍?
+- snapshot_type 濮樻瓕绻欐稉?EOD
+- 閸欘垰娲栭弨淇扁偓浣稿讲鐎孤ゎ吀
+- 娑撴挷绶?Gate / Phase-3 娴ｈ法鏁?
 """
 
 import os
@@ -16,7 +16,7 @@ import json
 from typing import Dict, Any
 from datetime import datetime
 import pandas as pd
-from core.adapters.providers.db_provider_mysql_market import DBOracleProvider
+from core.adapters.providers.db_provider_mysql_market import DBMySQLMarketProvider
 
 from core.utils.logger import get_logger
 from core.datasources.datasource_base import (
@@ -29,12 +29,12 @@ LOG = get_logger("DS.ETFSpotSyncDaily")
 
 class ETFSpotSyncDailyDataSource(DataSourceBase):
     """
-    ETF 脳 甯傚満妯埅闈㈠悓姝ユ€?DataSource锛圱-1 纭鎬侊級
+    ETF 鑴?鐢倸婧€濡亝鍩呴棃銏犳倱濮濄儲鈧?DataSource閿涘湵-1 绾喛顓婚幀渚婄礆
 
-    杈撳嚭浜嬪疄锛堜笉瑙ｉ噴锛夛細
-    - 涓婃定 / 涓嬭穼姣斾緥
-    - 鎴愪氦棰濋泦涓害锛圱op 20%锛?
-    - 娑ㄨ穼骞呭垎鍖栫▼搴︼紙dispersion锛?
+    鏉堟挸鍤禍瀣杽閿涘牅绗夌憴锝夊櫞閿涘绱?
+    - 娑撳﹥瀹?/ 娑撳绌煎В鏂剧伐
+    - 閹存劒姘︽０婵嬫肠娑擃厼瀹抽敍鍦眔p 20%閿?
+    - 濞戙劏绌奸獮鍛瀻閸栨牜鈻兼惔锔肩礄dispersion閿?
     """
 
     def __init__(self, config: DataSourceConfig):
@@ -44,7 +44,7 @@ class ETFSpotSyncDailyDataSource(DataSourceBase):
         self.cache_root = config.cache_root
         os.makedirs(self.cache_root, exist_ok=True)
 
-        self.db = DBOracleProvider()
+        self.db = DBMySQLMarketProvider()
         if self.db is None:
             raise RuntimeError("oracle provider not configured")
 
@@ -58,14 +58,14 @@ class ETFSpotSyncDailyDataSource(DataSourceBase):
     # ------------------------------------------------------------------
     def build_block(self, trade_date: str, refresh_mode: str = "none") -> Dict[str, Any]:
         """
-        trade_date: T-1锛堢‘璁ゆ€侊級
+        trade_date: T-1閿涘牏鈥樼拋銈嗏偓渚婄礆
         """
 
         cache_file = os.path.join(
             self.cache_root, f"etf_spot_sync_daily_{trade_date}.json"
         )
 
-        # 鍛戒腑 cache锛坉aily 姘歌繙鍏佽锛?
+        # 閸涙垝鑵?cache閿涘潐aily 濮樻瓕绻欓崗浣筋啅閿?
         if refresh_mode in ("none", "readonly") and os.path.exists(cache_file):
             try:
                 with open(cache_file, "r", encoding="utf-8") as f:
@@ -74,7 +74,7 @@ class ETFSpotSyncDailyDataSource(DataSourceBase):
                 LOG.error("[DS.ETFSpotSyncDaily] load cache error: %s", e)
 
         # ------------------------------------------------------------
-        # 1锔忊儯 浠?oracle 璇诲彇 T-1 鍏ㄨ鎯咃紙宸叉敹鐩橈級
+        # 1閿斿繆鍎?娴?oracle 鐠囪褰?T-1 閸忋劏顢戦幆鍜冪礄瀹稿弶鏁归惄姗堢礆
         # ------------------------------------------------------------
         
         #last_td = self.oracle.query_last_trade_date(trade_date)  # trade_date is T (as-of)
@@ -87,7 +87,7 @@ class ETFSpotSyncDailyDataSource(DataSourceBase):
             LOG.error("[DS.ETFSpotSyncDaily] empty market snapshot")
             return self._neutral_block(trade_date)
 
-        # 杞负 DataFrame锛堢粺涓€璁＄畻鍙ｅ緞锛?
+        # 鏉烆兛璐?DataFrame閿涘牏绮烘稉鈧拋锛勭暬閸欙絽绶為敍?
         df = pd.DataFrame.from_dict(market, orient="index")
         
         NUMERIC_COLS = ["chg_pct", "amount", "close", "prev_close"]
@@ -102,8 +102,8 @@ class ETFSpotSyncDailyDataSource(DataSourceBase):
             return self._neutral_block(trade_date)
          
         # ------------------------------------------------------------
-        # 2锔忊儯 璁＄畻娑ㄨ穼骞咃紙T-1 鍙兘鐢?close / prev_close锛?
-        # 杩欓噷鍋囪 oracle 琛ㄤ腑宸叉湁 prev_close
+        # 2閿斿繆鍎?鐠侊紕鐣诲☉銊ㄧ┘楠炲拑绱橳-1 閸欘亣鍏橀悽?close / prev_close閿?
+        # 鏉╂瑩鍣烽崑鍥啎 oracle 鐞涖劋鑵戝鍙夋箒 prev_close
         # ------------------------------------------------------------
         if "pre_close" not in df.columns:
             LOG.error("[DS.ETFSpotSyncDaily] prev_close missing")
@@ -124,7 +124,7 @@ class ETFSpotSyncDailyDataSource(DataSourceBase):
         dec_ratio = round(dec / total, 4)
 
         # ------------------------------------------------------------
-        # 3锔忊儯 鎴愪氦棰濋泦涓害锛圱op 20%锛?
+        # 3閿斿繆鍎?閹存劒姘︽０婵嬫肠娑擃厼瀹抽敍鍦眔p 20%閿?
         # ------------------------------------------------------------
         if "amount" in df.columns:
             df_turn = df[df["amount"] > 0]
@@ -146,14 +146,14 @@ class ETFSpotSyncDailyDataSource(DataSourceBase):
             total_amount = 0.0
 
         # ------------------------------------------------------------
-        # 4锔忊儯 鍒嗗寲绋嬪害
+        # 4閿斿繆鍎?閸掑棗瀵茬粙瀣
         # ------------------------------------------------------------
         dispersion = round(float(df["chg_pct"].std(ddof=0)), 4)
 
         block: Dict[str, Any] = {
             "trade_date": trade_date,
-            "snapshot_type": "EOD",          # 寮哄埗纭鎬?
-            "amount_stage": "FULL",        # daily 鍥哄畾 FULL
+            "snapshot_type": "EOD",          # 瀵搫鍩楃涵顔款吇閹?
+            "amount_stage": "FULL",        # daily 閸ュ搫鐣?FULL
 
             "total_stocks": total,
             "adv_count": adv,
@@ -172,7 +172,7 @@ class ETFSpotSyncDailyDataSource(DataSourceBase):
             },
         }
 
-        # 鍐?cache
+        # 閸?cache
         try:
             with open(cache_file, "w", encoding="utf-8") as f:
                 json.dump(block, f, ensure_ascii=False, indent=2)
@@ -193,3 +193,4 @@ class ETFSpotSyncDailyDataSource(DataSourceBase):
             "top20_amount_ratio": 0.0,
             "dispersion": 0.0,
         }
+

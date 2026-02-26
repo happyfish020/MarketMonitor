@@ -1,30 +1,30 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """
 UnifiedRisk V12 - Liquidity Quality DataSource (F Block)
 
-鍔熻兘锛?
-    璁＄畻鍏ㄥ競鍦烘祦鍔ㄦ€ц川閲忕浉鍏虫寚鏍囷紝鍖呮嫭锛?
-      - Top20 鎴愪氦闆嗕腑搴︼紙鍓?20 鍚嶆垚浜ら鍗犳瘮锛?
-      - 澶?灏忕洏鎴愪氦鍗犳瘮锛堟寜鑲＄エ浠ｇ爜鍓嶇紑鍒掑垎澶х洏涓庡皬鐩橈級
-      - 缂╅噺涓嬭穼姣旓紙涓嬭穼鑲＄エ涓垚浜ら浣庝簬鑷韩杩?20 鏃ュ潎棰濈殑姣斾緥锛?
+閸旂喕鍏橀敍?
+    鐠侊紕鐣婚崗銊ョ閸︾儤绁﹂崝銊︹偓褑宸濋柌蹇曟祲閸忚櫕瀵氶弽鍥风礉閸栧懏瀚敍?
+      - Top20 閹存劒姘﹂梿鍡曡厬鎼达讣绱欓崜?20 閸氬秵鍨氭禍銈夘杺閸楃姵鐦敍?
+      - 婢?鐏忓繒娲忛幋鎰唉閸楃姵鐦敍鍫熷瘻閼诧紕銈ㄦ禒锝囩垳閸撳秶绱戦崚鎺戝瀻婢堆呮磸娑撳骸鐨惄姗堢礆
+      - 缂傗晠鍣烘稉瀣┘濮ｆ棑绱欐稉瀣┘閼诧紕銈ㄦ稉顓熷灇娴溿倝顤傛担搴濈艾閼奉亣闊╂潻?20 閺冦儱娼庢０婵堟畱濮ｆ柧绶ラ敍?
 
-瀹炵幇瑕佺偣锛?
-    1. 浠?Oracle 涓殑 CN_STOCK_DAILY_PRICE 琛ㄨ鍙栨寚瀹氬洖婧獥鍙ｅ唴鐨勮偂绁ㄦ棩绾挎暟鎹細
+鐎圭偟骞囩憰浣哄仯閿?
+    1. 娴?Oracle 娑擃厾娈?CN_STOCK_DAILY_PRICE 鐞涖劏顕伴崣鏍ㄥ瘹鐎规艾娲栧┃顖滅崶閸欙絽鍞撮惃鍕亗缁併劍妫╃痪鎸庢殶閹诡噯绱?
          symbol, exchange, trade_date, chg_pct, amount
-       閫氳繃 DBOracleProvider.query_stock_closes 鎺ュ彛鑾峰彇銆?
-    2. 鎸夎偂绁ㄩ€愪竴璁＄畻 20 鏃ユ粴鍔ㄥ钩鍧囨垚浜ら锛堝惈褰撳墠鏃ワ級銆?
-    3. 鍦ㄦ墍閫夌獥鍙ｅ唴锛堥粯璁?60 鏃ワ級锛岄€愭棩缁熻涓婅堪鎸囨爣锛?
-         * Top20 鎴愪氦闆嗕腑搴?= sum(top 20 amount) / sum(total amount)
-         * 澶?灏忕洏鎴愪氦鍗犳瘮 = sum(amount of big-cap) / sum(amount of small-cap)
-           澶х洏鑲＄エ鐨勫垽鏂熀浜庤偂绁ㄤ唬鐮佸墠缂€锛?00/601/603锛夛細
-               鑻?symbol 浠?"60", "601", "603" 寮€澶村垯瑙嗕负澶х洏锛涘惁鍒欒涓哄皬鐩樸€?
-         * 缂╅噺涓嬭穼姣?= count(chg_pct < 0 & amount < ma20_amount) / count(chg_pct < 0)
-    4. 璁＄畻 10 鏃ヨ秼鍔垮拰 3 鏃ュ姞閫熷害锛堝彇鍚勬寚鏍囪繎 10 鏃?3 鏃ュ樊鍊硷級銆?
-    5. 杈撳嚭鏈€鏂版棩鏈熺殑鎸囨爣锛屼互鍙婂巻鍙插簭鍒椾綔涓?evidence銆?
+       闁俺绻?DBOracleProvider.query_stock_closes 閹恒儱褰涢懢宄板絿閵?
+    2. 閹稿鍋傜粊銊┾偓鎰鐠侊紕鐣?20 閺冦儲绮撮崝銊ラ挬閸у洦鍨氭禍銈夘杺閿涘牆鎯堣ぐ鎾冲閺冦儻绱氶妴?
+    3. 閸︺劍澧嶉柅澶岀崶閸欙絽鍞撮敍鍫ョ帛鐠?60 閺冦儻绱氶敍宀勨偓鎰）缂佺喕顓告稉濠呭牚閹稿洦鐖ｉ敍?
+         * Top20 閹存劒姘﹂梿鍡曡厬鎼?= sum(top 20 amount) / sum(total amount)
+         * 婢?鐏忓繒娲忛幋鎰唉閸楃姵鐦?= sum(amount of big-cap) / sum(amount of small-cap)
+           婢堆呮磸閼诧紕銈ㄩ惃鍕灲閺傤厼鐔€娴滃氦鍋傜粊銊ゅ敩閻礁澧犵紓鈧敍?00/601/603閿涘绱?
+               閼?symbol 娴?"60", "601", "603" 瀵偓婢舵潙鍨憴鍡曡礋婢堆呮磸閿涙稑鎯侀崚娆掝潒娑撳搫鐨惄妯糕偓?
+         * 缂傗晠鍣烘稉瀣┘濮?= count(chg_pct < 0 & amount < ma20_amount) / count(chg_pct < 0)
+    4. 鐠侊紕鐣?10 閺冦儴绉奸崝鍨嫲 3 閺冦儱濮為柅鐔峰閿涘牆褰囬崥鍕瘹閺嶅洩绻?10 閺?3 閺冦儱妯婇崐纭风礆閵?
+    5. 鏉堟挸鍤張鈧弬鐗堟）閺堢喓娈戦幐鍥ㄧ垼閿涘奔浜掗崣濠傚坊閸欐彃绨崚妞剧稊娑?evidence閵?
 
-    娉ㄦ剰锛?
-      - 鏈暟鎹簮涓嶈闂閮?API锛屼粎渚濊禆鏈湴 Oracle 鏁版嵁銆?
-      - 鑻ヨ繑鍥炴暟鎹负绌烘垨寮傚父锛屽垯杈撳嚭涓€у潡骞舵爣璁?data_status銆?
+    濞夈劍鍓伴敍?
+      - 閺堫剚鏆熼幑顔界爱娑撳秷顔栭梻顔碱樆闁?API閿涘奔绮庢笟婵婄閺堫剙婀?Oracle 閺佺増宓侀妴?
+      - 閼汇儴绻戦崶鐐存殶閹诡喕璐熺粚鐑樺灗瀵倸鐖堕敍灞藉灟鏉堟挸鍤稉顓熲偓褍娼￠獮鑸电垼鐠?data_status閵?
 """
 
 from __future__ import annotations
@@ -39,7 +39,7 @@ import pandas as pd
 from core.datasources.datasource_base import DataSourceBase, DataSourceConfig
 from core.utils.ds_refresh import apply_refresh_cleanup
 from core.utils.logger import get_logger
-from core.adapters.providers.db_provider_mysql_market import DBOracleProvider
+from core.adapters.providers.db_provider_mysql_market import DBMySQLMarketProvider
 
 LOG = get_logger("DS.LiquidityQuality")
 
@@ -51,7 +51,7 @@ class LiquidityQualityDataSource(DataSourceBase):
         super().__init__(name="DS.LiquidityQuality")
         self.config = config
         self.window = int(window) if window and window > 0 else 60
-        self.db = DBOracleProvider()
+        self.db = DBMySQLMarketProvider()
 
         # Prepare cache and history directories
         self.cache_root = config.cache_root
@@ -90,15 +90,15 @@ class LiquidityQualityDataSource(DataSourceBase):
     # --------------------------------------------------------------
     def build_block(self, trade_date: str, refresh_mode: str = "none") -> Dict[str, Any]:
         """
-        鏋勫缓娴佸姩鎬ц川閲忓師濮嬫暟鎹潡銆?
+        閺嬪嫬缂撳ù浣稿З閹嗗窛闁插繐甯慨瀣殶閹诡喖娼￠妴?
 
-        鍙傛暟锛?
-            trade_date: 璇勪及鏃ユ湡锛堝瓧绗︿覆鏍煎紡 'YYYY-MM-DD' 鎴?'YYYYMMDD'锛?
-            refresh_mode: 鍒锋柊绛栫暐锛屾敮鎸?'none'|'readonly'|'full'
+        閸欏倹鏆熼敍?
+            trade_date: 鐠囧嫪鍙婇弮銉︽埂閿涘牆鐡х粭锔胯閺嶇厧绱?'YYYY-MM-DD' 閹?'YYYYMMDD'閿?
+            refresh_mode: 閸掗攱鏌婄粵鏍殣閿涘本鏁幐?'none'|'readonly'|'full'
 
-        杩斿洖锛氬寘鍚渶鏂版棩鏈熸寚鏍囧強鍘嗗彶搴忓垪鐨勫瓧鍏搞€?
+        鏉╂柨娲栭敍姘瘶閸氼偅娓堕弬鐗堟）閺堢喐瀵氶弽鍥у挤閸樺棗褰舵惔蹇撳灙閻ㄥ嫬鐡ч崗鎼炩偓?
         """
-        # 娓呯悊缂撳瓨
+        # 濞撳懐鎮婄紓鎾崇摠
         apply_refresh_cleanup(
             refresh_mode=refresh_mode,
             cache_path=self.cache_file,
@@ -106,7 +106,7 @@ class LiquidityQualityDataSource(DataSourceBase):
             spot_path=None,
         )
 
-        # 灏濊瘯璇诲彇缂撳瓨
+        # 鐏忔繆鐦拠璇插絿缂傛挸鐡?
         if refresh_mode in ("none", "readonly") and os.path.exists(self.cache_file):
             try:
                 with open(self.cache_file, "r", encoding="utf-8") as f:
@@ -114,19 +114,19 @@ class LiquidityQualityDataSource(DataSourceBase):
             except Exception as exc:
                 LOG.error("[DS.LiquidityQuality] load cache error: %s", exc)
 
-        # 璁＄畻鍥炴函鍖洪棿锛氶澶栧彇 20 澶╃敤浜庤绠楁粴鍔ㄥ潎鍊?
+        # 鐠侊紕鐣婚崶鐐村嚱閸栨椽妫块敍姘额杺婢舵牕褰?20 婢垛晝鏁ゆ禍搴ゎ吀缁犳绮撮崝銊ユ綆閸?
         try:
             as_date = pd.to_datetime(trade_date).date()
         except Exception:
-            # 鑻?trade_date 瑙ｆ瀽澶辫触锛屽垯杩斿洖涓€?
+            # 閼?trade_date 鐟欙絾鐎芥径杈Е閿涘苯鍨潻鏂挎礀娑擃厽鈧?
             return self._neutral_block(trade_date)
 
         look_back_days = self.window + 20
-        # 璧峰鏃ユ湡 = trade_date - look_back_days 澶?
+        # 鐠у嘲顫愰弮銉︽埂 = trade_date - look_back_days 婢?
         start_dt = as_date - timedelta(days=look_back_days)
 
         try:
-            # 璋冪敤 DBProvider 鑾峰彇鏁版嵁锛堝寘鎷鏀剁洏/娑ㄨ穼骞?鎴愪氦棰濓級
+            # 鐠嬪啰鏁?DBProvider 閼惧嘲褰囬弫鐗堝祦閿涘牆瀵橀幏顒勵暕閺€鍓佹磸/濞戙劏绌奸獮?閹存劒姘︽０婵撶礆
             rows = self.db.query_stock_closes(start_dt, as_date)
         except Exception as exc:
             LOG.error("[DS.LiquidityQuality] oracle fetch error: %s", exc)
@@ -136,9 +136,9 @@ class LiquidityQualityDataSource(DataSourceBase):
             LOG.warning("[DS.LiquidityQuality] no data returned for %s", trade_date)
             return self._neutral_block(trade_date)
 
-        # 杞负 DataFrame
+        # 鏉烆兛璐?DataFrame
         df = pd.DataFrame(rows, columns=["symbol", "exchange", "trade_date", "pre_close", "chg_pct", "close", "amount"])
-        # 绫诲瀷杞崲
+        # 缁鐎锋潪顒佸床
         try:
             df["trade_date"] = pd.to_datetime(df["trade_date"])
         except Exception:
@@ -146,26 +146,26 @@ class LiquidityQualityDataSource(DataSourceBase):
         df["amount"] = pd.to_numeric(df["amount"], errors="coerce").fillna(0.0)
         df["chg_pct"] = pd.to_numeric(df["chg_pct"], errors="coerce").fillna(0.0)
 
-        # 鎸?symbol + trade_date 鎺掑簭锛屼互渚胯绠楁粴鍔ㄥ潎鍊?
+        # 閹?symbol + trade_date 閹烘帒绨敍灞间簰娓氳儻顓哥粻妤佺泊閸斻劌娼庨崐?
         df_sorted = df.sort_values(["symbol", "trade_date"]).copy()
-        # 璁＄畻姣忎釜 symbol 鐨勮繎 20 鏃ュ钩鍧?amount锛堝寘鍚綋鍓嶆棩锛?
+        # 鐠侊紕鐣诲В蹇庨嚋 symbol 閻ㄥ嫯绻?20 閺冦儱閽╅崸?amount閿涘牆瀵橀崥顐㈢秼閸撳秵妫╅敍?
         df_sorted["ma20_amount"] = (
             df_sorted.groupby("symbol")["amount"].transform(lambda x: x.rolling(window=20, min_periods=1).mean())
         )
 
-        # 閫夋嫨鏈€鍚?window 鏃ョ殑鏁版嵁
-        # 棣栧厛鎵惧嚭鎵€鏈夋棩鏈燂紝鍗囧簭鎺掑垪
+        # 闁瀚ㄩ張鈧崥?window 閺冦儳娈戦弫鐗堝祦
+        # 妫ｆ牕鍘涢幍鎯у毉閹碘偓閺堝妫╅張鐕傜礉閸楀洤绨幒鎺戝灙
         unique_dates = sorted(df_sorted["trade_date"].unique())
         if not unique_dates:
             return self._neutral_block(trade_date)
-        # 鍙栨渶鍚?window 澶?
+        # 閸欐牗娓堕崥?window 婢?
         selected_dates = unique_dates[-self.window:]
 
         series: List[Dict[str, Any]] = []
         for dt in selected_dates:
             df_day = df_sorted[df_sorted["trade_date"] == dt]
             total_amount = float(df_day["amount"].sum())
-            # Top20 鎴愪氦棰濆崰姣?
+            # Top20 閹存劒姘︽０婵嗗窗濮?
             top20_ratio = 0.0
             if total_amount > 0:
                 df_sorted_day = df_day.sort_values("amount", ascending=False)
@@ -173,9 +173,9 @@ class LiquidityQualityDataSource(DataSourceBase):
                 top_amount = float(df_sorted_day.head(topn)["amount"].sum())
                 if total_amount > 0:
                     top20_ratio = top_amount / total_amount
-            # 澶?灏忕洏鎴愪氦鍗犳瘮
+            # 婢?鐏忓繒娲忛幋鎰唉閸楃姵鐦?
             big_prefixes = ("60", "601", "603")
-            # 鍒ゆ柇 symbol 棣栧瓧娈碉紝娉ㄦ剰 symbol 鍙兘涓哄瓧绗︿覆鎴栨暟瀛?
+            # 閸掋倖鏌?symbol 妫ｆ牕鐡у▓纰夌礉濞夈劍鍓?symbol 閸欘垵鍏樻稉鍝勭摟缁楋缚瑕嗛幋鏍ㄦ殶鐎?
             symbols = df_day["symbol"].astype(str).fillna("")
             big_mask = symbols.str.startswith(big_prefixes)
             big_amount = float(df_day.loc[big_mask, "amount"].sum())
@@ -183,9 +183,9 @@ class LiquidityQualityDataSource(DataSourceBase):
             if small_amount > 0:
                 big_small_ratio = big_amount / small_amount
             else:
-                # 濡傛灉灏忕洏鎴愪氦棰濅负 0锛屽垯鏃犳硶璁＄畻姣斾緥锛岃涓?None
+                # 婵″倹鐏夌亸蹇曟磸閹存劒姘︽０婵呰礋 0閿涘苯鍨弮鐘崇《鐠侊紕鐣诲В鏂剧伐閿涘矁顔曟稉?None
                 big_small_ratio = None
-            # 缂╅噺涓嬭穼姣旓細涓嬭穼涓旀垚浜ら浣庝簬 ma20_amount
+            # 缂傗晠鍣烘稉瀣┘濮ｆ棑绱版稉瀣┘娑撴梹鍨氭禍銈夘杺娴ｅ簼绨?ma20_amount
             df_neg = df_day[df_day["chg_pct"] < 0]
             neg_cnt = len(df_neg)
             if neg_cnt > 0:
@@ -203,11 +203,11 @@ class LiquidityQualityDataSource(DataSourceBase):
                 }
             )
 
-        # 濡傛湭鐢熸垚 series 鎴栨渶鏂版棩鏈熶笉鍖归厤锛屽垯杩斿洖涓€?
+        # 婵″倹婀悽鐔稿灇 series 閹存牗娓堕弬鐗堟）閺堢喍绗夐崠褰掑帳閿涘苯鍨潻鏂挎礀娑擃厽鈧?
         if not series:
             return self._neutral_block(trade_date)
 
-        # 璁＄畻瓒嬪娍鍜屽姞閫熷害锛堣繎 10 鏃ュ拰杩?3 鏃ュ樊鍊硷級
+        # 鐠侊紕鐣荤搾瀣◢閸滃苯濮為柅鐔峰閿涘牐绻?10 閺冦儱鎷版潻?3 閺冦儱妯婇崐纭风礆
         def _calc_delta(vals: List[Optional[float]], days: int) -> Optional[float]:
             try:
                 if len(vals) > days and vals[-1] is not None and vals[-days - 1] is not None:
@@ -216,7 +216,7 @@ class LiquidityQualityDataSource(DataSourceBase):
                 pass
             return None
 
-        # 鎻愬彇姣忎竴鍒楃殑鍊?
+        # 閹绘劕褰囧В蹇庣閸掓娈戦崐?
         top20_vals = [s.get("top20_ratio") for s in series]
         big_small_vals = [s.get("big_small_ratio") for s in series]
         down_low_vals = [s.get("down_low_ratio") for s in series]
@@ -248,7 +248,7 @@ class LiquidityQualityDataSource(DataSourceBase):
             "series": series,
         }
 
-        # 淇濆瓨鍘嗗彶鍜岀紦瀛?
+        # 娣囨繂鐡ㄩ崢鍡楀蕉閸滃瞼绱︾€?
         try:
             self._save(self.history_file, series)
             with open(self.cache_file, "w", encoding="utf-8") as f:
@@ -273,4 +273,5 @@ class LiquidityQualityDataSource(DataSourceBase):
             "down_low_acc_3d": None,
             "series": [],
         }
+
 

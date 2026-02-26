@@ -1,13 +1,13 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """
 UnifiedRisk V12 - BreadthDataSource (CN A-Share)
 
-鑱岃矗锛堜簨瀹炲眰锛夛細
-- 浠庢湰鍦?DB 璇诲彇鍏ㄥ競鍦鸿偂绁?close
-- 璁＄畻锛?0 鏃ユ柊浣庢瘮渚嬶紙new_low_ratio锛?
-- 涓嶅仛鐘舵€佸垽鏂紝涓嶅仛棰勬祴
+閼卞矁鐭楅敍鍫滅皑鐎圭偛鐪伴敍澶涚窗
+- 娴犲孩婀伴崷?DB 鐠囪褰囬崗銊ョ閸﹂缚鍋傜粊?close
+- 鐠侊紕鐣婚敍?0 閺冦儲鏌婃担搴㈢槷娓氬绱檔ew_low_ratio閿?
+- 娑撳秴浠涢悩鑸碘偓浣稿灲閺傤叏绱濇稉宥呬粵妫板嫭绁?
 
-杈撳嚭锛堝綋鏃ワ級锛?
+鏉堟挸鍤敍鍫濈秼閺冦儻绱氶敍?
 {
   "trade_date": "YYYY-MM-DD",
   "window": 50,
@@ -26,7 +26,7 @@ import pandas as pd
 
 from core.utils.logger import get_logger
 from core.datasources.datasource_base import DataSourceBase, DataSourceConfig
-from core.adapters.providers.db_provider_mysql_market import DBOracleProvider
+from core.adapters.providers.db_provider_mysql_market import DBMySQLMarketProvider
 
 LOG = get_logger("DS.Breadth")
 
@@ -37,9 +37,9 @@ class BreadthDataSource(DataSourceBase):
         self.config = cfg
 
         self.cache_root = self.config.cache_root        
-        self.window = int(window)   # 鈫?鈽?蹇呴』鏈夎繖涓€琛?
+        self.window = int(window)   # 閳?閳?韫囧懘銆忛張澶庣箹娑撯偓鐞?
         
-        self.db = DBOracleProvider()
+        self.db = DBMySQLMarketProvider()
 
     def build_block(self, trade_date: str, refresh_mode: str = "auto") -> Dict[str, Any]:
 
@@ -49,17 +49,17 @@ class BreadthDataSource(DataSourceBase):
         start = (td - timedelta(days=self.window * 2)).strftime("%Y-%m-%d")
         end = td.strftime("%Y-%m-%d")
          
-        # 璇诲彇绐楀彛鍐?close锛堝厑璁稿仠鐗岀己澶憋級
+        # 鐠囪褰囩粣妤€褰涢崘?close閿涘牆鍘戠拋绋夸粻閻楀瞼宸辨径鎲嬬礆
         #df = self.db.query_stock_closes(window_start=start, trade_date=end)
         df: pd.DataFrame = self.db.fetch_daily_new_low_stats(
             trade_date=trade_date,
-            look_back_days=90,  # 鍥炴函瓒冲澶╂暟淇濊瘉鏈?0涓氦鏄撴棩
-            #window_days=20,     # 绐楀彛鍥哄畾20鏃?
+            look_back_days=90,  # 閸ョ偞鍑界搾鍐差檮婢垛晜鏆熸穱婵婄槈閺?0娑擃亙姘﹂弰鎾存）
+            #window_days=20,     # 缁愭褰涢崶鍝勭暰20閺?
         )
  
 
 
-        # === 馃敶 鍏抽敭淇锛欴B 杩斿洖鐨勬槸 list[tuple] ===
+        # === 棣冩暥 閸忔娊鏁穱顔碱槻閿涙B 鏉╂柨娲栭惃鍕Ц list[tuple] ===
         if df is None or len(df) == 0:
             LOG.warning("[DS.Breadth] empty data (raw)")
             raise Exception("[DS.Breadth] empty data (raw)")
@@ -71,26 +71,26 @@ class BreadthDataSource(DataSourceBase):
             return {}
     
 ###
-# SQL 宸叉寜鏃ユ湡闄嶅簭杩斿洖锛屾渶鏂板湪鍓?
-        recent_df = df.head(20)  # 鍙栨渶杩?0涓氦鏄撴棩
+# SQL 瀹稿弶瀵滈弮銉︽埂闂勫秴绨潻鏂挎礀閿涘本娓堕弬鏉挎躬閸?
+        recent_df = df.head(20)  # 閸欐牗娓舵潻?0娑擃亙姘﹂弰鎾存）
 
         if recent_df.empty:
             LOG.error("[DS.Breadth] no recent data after head(20) for %s", trade_date)
             return self._empty_block()
 
-        # 褰撳墠鍊硷細鏈€鏂颁竴澶?
+        # 瑜版挸澧犻崐纭风窗閺堚偓閺傞绔存径?
         latest_row = recent_df.iloc[0]
         current_ratio = float(latest_row["new_low_50d_ratio"])
-        current_total = int(latest_row["count_total"])          # 鈫?鍘熶唬鐮?count_total 鐨勬浛浠?
-        current_new_low = int(latest_row["count_new_low_50d"]) # 鍙€変娇鐢?
+        current_total = int(latest_row["count_total"])          # 閳?閸樼喍鍞惍?count_total 閻ㄥ嫭娴涙禒?
+        current_new_low = int(latest_row["count_new_low_50d"]) # 閸欘垶鈧濞囬悽?
         latest_trade_date = latest_row["trade_date"].strftime("%Y-%m-%d")
 
-        # window 鍒楄〃锛堥檷搴忥細鏈€鏂板湪鍓嶏級
+        # window 閸掓銆冮敍鍫ユ鎼村骏绱伴張鈧弬鏉挎躬閸撳稄绱?
         window = [
             {
                 "trade_date": row["trade_date"].strftime("%Y-%m-%d"),
                 "count_new_low": int(row["count_new_low_50d"]),
-                "count_total": int(row["count_total"]),            # 鈫?鏇夸唬鍘?merged.shape[0]
+                "count_total": int(row["count_total"]),            # 閳?閺囧じ鍞崢?merged.shape[0]
                 "new_low_ratio": float(row["new_low_50d_ratio"]),
             }
             for _, row in recent_df.iterrows()
@@ -99,7 +99,7 @@ class BreadthDataSource(DataSourceBase):
         block = {
             "trade_date": latest_trade_date,
             "count_new_low": current_new_low,           
-            "count_total": current_total,          # 濡傛灉浣犲師鏉ュ湪 block 涓敤浜?count_total锛屽彲鍔?
+            "count_total": current_total,          # 婵″倹鐏夋担鐘插斧閺夈儱婀?block 娑擃厾鏁ゆ禍?count_total閿涘苯褰查崝?
             "new_low_ratio": current_ratio, 
             "window": window,
         }
@@ -112,7 +112,7 @@ class BreadthDataSource(DataSourceBase):
             len(window),
         )
 
-        # 缂撳瓨 + history锛堜繚鎸佷笉鍙橈級
+        # 缂傛挸鐡?+ history閿涘牅绻氶幐浣风瑝閸欐﹫绱?
         try:
             with open(cache_file, "w", encoding="utf-8") as f:
                 json.dump(block, f, ensure_ascii=False, indent=2)
@@ -120,4 +120,5 @@ class BreadthDataSource(DataSourceBase):
             LOG.error("[DS.Breadth] cache save failed: %s", e) 
 
         return block
+
 

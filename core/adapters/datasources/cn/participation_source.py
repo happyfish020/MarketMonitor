@@ -29,7 +29,7 @@ import pandas as pd
 from core.utils.logger import get_logger
 from core.datasources.datasource_base import DataSourceConfig, DataSourceBase
 from core.utils.ds_refresh import apply_refresh_cleanup
-from core.adapters.providers.db_provider_mysql_market import DBOracleProvider
+from core.adapters.providers.db_provider_mysql_market import DBMySQLMarketProvider
 
 
 LOG = get_logger("DS.Participation")
@@ -69,7 +69,7 @@ class ParticipationDataSource(DataSourceBase):
         self.index_code = index_code
         self.lookback_days = int(lookback_days)
 
-        self.db = DBOracleProvider()
+        self.db = DBMySQLMarketProvider()
 
         LOG.info(
             "[DS.Participation] init ok. market=%s ds=%s cache=%s index=%s lookback_days=%s",
@@ -245,5 +245,6 @@ class ParticipationDataSource(DataSourceBase):
             LOG.warning("[DS.Participation] cache write failed: %s", e)
 
         return block
+
 
 

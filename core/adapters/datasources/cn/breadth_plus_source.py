@@ -1,17 +1,17 @@
-# core/adapters/datasources/cn/breadth_plus_source.py
+﻿# core/adapters/datasources/cn/breadth_plus_source.py
 # -*- coding: utf-8 -*-
 """
 BreadthPlusDataSource (Leading-Structure DataPack v1 / Panel B)
 
-鐩爣锛堝喕缁擄級锛?
-- 杈撳嚭骞垮害澧炲己 raw block锛堜笉鍋氫笟鍔¤В閲?鎵撳垎锛?
-- 鏁版嵁缂哄け/瑕嗙洊涓嶈冻锛氬繀椤讳互 MISSING/PARTIAL + warnings 浣撶幇锛涚姝?silent exception
-- 榛樿浠呮敮鎸?EOD锛汭NTRADAY 杩斿洖鍗犱綅 MISSING锛坅ppend-only 鍚庡啀鎵╁睍锛?
+閻╊喗鐖ｉ敍鍫濆枙缂佹搫绱氶敍?
+- 鏉堟挸鍤獮鍨婢х偛宸?raw block閿涘牅绗夐崑姘瑹閸斅ば掗柌?閹垫挸鍨庨敍?
+- 閺佺増宓佺紓鍝勩亼/鐟曞棛娲婃稉宥堝喕閿涙艾绻€妞よ浜?MISSING/PARTIAL + warnings 娴ｆ挾骞囬敍娑氼洣濮?silent exception
+- 姒涙顓绘禒鍛暜閹?EOD閿涙杯NTRADAY 鏉╂柨娲栭崡鐘辩秴 MISSING閿涘潊ppend-only 閸氬骸鍟€閹碘晛鐫嶉敍?
 
-鏈増鏈寮猴紙v1 schema append-only锛夛細
-- 琛ラ綈 %>MA20 / %>MA50锛堣В鍐?coverage=0 / missing:pct_above_ma20/ma50锛?
-- 琛ラ綈 New High / New Low锛?0D/50D锛変笌 new_high_low_ratio锛堥粯璁?50D锛?
-- 琛ラ綈 A/D line锛堝噣涓婃定瀹舵暟绱鐨?5D/20D delta 绛夛級
+閺堫剛澧楅張顒€顤冨鐚寸礄v1 schema append-only閿涘绱?
+- 鐞涖儵缍?%>MA20 / %>MA50閿涘牐袙閸?coverage=0 / missing:pct_above_ma20/ma50閿?
+- 鐞涖儵缍?New High / New Low閿?0D/50D閿涘绗?new_high_low_ratio閿涘牓绮拋?50D閿?
+- 鐞涖儵缍?A/D line閿涘牆鍣ｆ稉濠冨畾鐎硅埖鏆熺槐顖濐吀閻?5D/20D delta 缁涘绱?
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ import pandas as pd
 from core.utils.logger import get_logger
 from core.datasources.datasource_base import DataSourceBase, DataSourceConfig
 from core.utils.ds_refresh import apply_refresh_cleanup
-from core.adapters.providers.db_provider_mysql_market import DBOracleProvider
+from core.adapters.providers.db_provider_mysql_market import DBMySQLMarketProvider
 
 LOG = get_logger("DS.BreadthPlus")
 
@@ -87,7 +87,7 @@ class BreadthPlusDataSource(DataSourceBase):
         os.makedirs(self.cache_root, exist_ok=True)
         os.makedirs(self.history_root, exist_ok=True)
 
-        self.db = DBOracleProvider()
+        self.db = DBMySQLMarketProvider()
 
     # -------------------------
     # Public API
@@ -291,9 +291,9 @@ class BreadthPlusDataSource(DataSourceBase):
                 "total_stocks": int(total),
                 "total": int(total),
                 "count": int(total),
-                # factor鍏煎锛歝overage 瀛楁鐢ㄤ簬鈥滄€绘牱鏈暟鈥濊€屼笉鏄?dict
+                # factor閸忕厧顔愰敍姝漮verage 鐎涙顔岄悽銊ょ艾閳ユ粍鈧粯鐗遍張顒佹殶閳ユ繆鈧奔绗夐弰?dict
                 "coverage": int(total),
-                # 璇︾粏瑕嗙洊淇℃伅锛坅ppend-only锛?
+                # 鐠囷妇绮忕憰鍡欐磰娣団剝浼呴敍鍧卲pend-only閿?
                 "coverage_detail": {
                     "total": int(total),
                     "valid_ma20": int(valid_ma20),
@@ -402,4 +402,5 @@ class BreadthPlusDataSource(DataSourceBase):
             "error_message": None,
             "evidence": {},
         }
+
 

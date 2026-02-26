@@ -1,4 +1,4 @@
-# core/adapters/datasources/cn/market_sentiment_source.py
+﻿# core/adapters/datasources/cn/market_sentiment_source.py
 # -*- coding: utf-8 -*-
 
 
@@ -33,35 +33,35 @@ from core.datasources.datasource_base import DataSourceConfig, DataSourceBase
 from core.utils.ds_refresh import apply_refresh_cleanup
 from core.utils.spot_store import get_spot_daily
 
-from core.adapters.providers.db_provider_mysql_market import DBOracleProvider
+from core.adapters.providers.db_provider_mysql_market import DBMySQLMarketProvider
 
 LOG = get_logger("DS.Sentiment")
 
 
 class MarketSentimentDataSource(DataSourceBase):
     """
-    V12 市场情绪（宽度）数据源（market_sentiment_raw）：
+    V12 甯傚満鎯呯华锛堝搴︼級鏁版嵁婧愶紙market_sentiment_raw锛夛細
 
-    - EOD：从本地 Oracle（CN_STOCK_DAILY_PRICE 聚合）获取“确认态”全市场横截面统计
-    - INTRADAY：从 SpotStore 获取当日全市场 spot，再做横截面统计
-    - 可选增强（近期数据）：东方财富涨停/炸板股池（AkShare）
-      * stock_zt_pool_em(date)  -> 涨停股池（ztgc）
-      * stock_zt_pool_zbgc_em(date) -> 炸板股池（zbgc）
+    - EOD锛氫粠鏈湴 Oracle锛圕N_STOCK_DAILY_PRICE 鑱氬悎锛夎幏鍙栤€滅‘璁ゆ€佲€濆叏甯傚満妯埅闈㈢粺璁?
+    - INTRADAY锛氫粠 SpotStore 鑾峰彇褰撴棩鍏ㄥ競鍦?spot锛屽啀鍋氭í鎴潰缁熻
+    - 鍙€夊寮猴紙杩戞湡鏁版嵁锛夛細涓滄柟璐㈠瘜娑ㄥ仠/鐐告澘鑲℃睜锛圓kShare锛?
+      * stock_zt_pool_em(date)  -> 娑ㄥ仠鑲℃睜锛坺tgc锛?
+      * stock_zt_pool_zbgc_em(date) -> 鐐告澘鑲℃睜锛坺bgc锛?
 
-    冻结约束（本文件内遵守）：
-    - 不做业务判断（仅 raw 事实统计）
-    - 缺数据不抛 silent exception：返回 MISSING/ERROR + warnings/error_type/error_message
-    - append-only：保留历史字段（trade_date/adv/dec/flat/limit_up/limit_down/adv_ratio/window）
+    鍐荤粨绾︽潫锛堟湰鏂囦欢鍐呴伒瀹堬級锛?
+    - 涓嶅仛涓氬姟鍒ゆ柇锛堜粎 raw 浜嬪疄缁熻锛?
+    - 缂烘暟鎹笉鎶?silent exception锛氳繑鍥?MISSING/ERROR + warnings/error_type/error_message
+    - append-only锛氫繚鐣欏巻鍙插瓧娈碉紙trade_date/adv/dec/flat/limit_up/limit_down/adv_ratio/window锛?
     """
 
     SCHEMA_VERSION = "market_sentiment_raw.v1"
-    # 近期接口保护：东财涨停/炸板股池只能取近期
+    # 杩戞湡鎺ュ彛淇濇姢锛氫笢璐㈡定鍋?鐐告澘鑲℃睜鍙兘鍙栬繎鏈?
     RECENT_ONLY_DAYS = 120
-    # 板块/状态涨跌停阈值（v2, Frozen / append-only）：
-    # - ST（NAME 以 '*ST' 或 'ST' 开头）: 5%
-    # - 20% 板块（SYMBOL 前缀 300/301/688/689）: 20%
-    # - 北交所启发式（SYMBOL 前缀 8* 或 43*/83*/87*）: 30%
-    # - 其它默认 10%
+    # 鏉垮潡/鐘舵€佹定璺屽仠闃堝€硷紙v2, Frozen / append-only锛夛細
+    # - ST锛圢AME 浠?'*ST' 鎴?'ST' 寮€澶达級: 5%
+    # - 20% 鏉垮潡锛圫YMBOL 鍓嶇紑 300/301/688/689锛? 20%
+    # - 鍖椾氦鎵€鍚彂寮忥紙SYMBOL 鍓嶇紑 8* 鎴?43*/83*/87*锛? 30%
+    # - 鍏跺畠榛樿 10%
     BOARD20_PREFIX = {"300", "301", "688", "689"}
     BOARD30_PREFIX_1 = {"8"}
     BOARD30_PREFIX_2 = {"43", "83", "87"}
@@ -83,7 +83,7 @@ class MarketSentimentDataSource(DataSourceBase):
         self.config = config
         self.cache_root = config.cache_root
         self.history_root = config.history_root
-        self.db = DBOracleProvider()
+        self.db = DBMySQLMarketProvider()
         self.is_intraday = is_intraday
 
         os.makedirs(self.cache_root, exist_ok=True)
@@ -100,7 +100,7 @@ class MarketSentimentDataSource(DataSourceBase):
 
     # ------------------------------------------------------------
     def build_block(self, trade_date: str, refresh_mode: str = "none") -> Dict[str, Any]:
-        """V12 统一入口（支持 cache）。"""
+        """V12 缁熶竴鍏ュ彛锛堟敮鎸?cache锛夈€?""
         cache_file = os.path.join(self.cache_root, f"sentiment_{trade_date}.json")
 
         _ = apply_refresh_cleanup(
@@ -117,7 +117,7 @@ class MarketSentimentDataSource(DataSourceBase):
             except Exception as e:
                 LOG.error("[DS.Sentiment] load cache error: %s", e)
 
-        # daily window：intraday 也需要 window，但不必重复拉涨停/炸板池（避免重复网络）
+        # daily window锛歩ntraday 涔熼渶瑕?window锛屼絾涓嶅繀閲嶅鎷夋定鍋?鐐告澘姹狅紙閬垮厤閲嶅缃戠粶锛?
         daily_series_block = self.build_daily_series_block(trade_date, attach_zt_zb_pool=(not self.is_intraday))
 
         if not self.is_intraday:
@@ -136,7 +136,7 @@ class MarketSentimentDataSource(DataSourceBase):
 
     # ------------------------------------------------------------
     def build_daily_series_block(self, trade_date: str, attach_zt_zb_pool: bool = True) -> Dict[str, Any]:
-        """EOD：从 Oracle 聚合得到当日与 20D window。"""
+        """EOD锛氫粠 Oracle 鑱氬悎寰楀埌褰撴棩涓?20D window銆?""
         warnings: List[str] = []
         error_type: Optional[str] = None
         error_message: Optional[str] = None
@@ -169,7 +169,7 @@ class MarketSentimentDataSource(DataSourceBase):
                 warnings=["empty:oracle_agg_df"],
             )
 
-        # 降序已由 SQL 保证，最新在前
+        # 闄嶅簭宸茬敱 SQL 淇濊瘉锛屾渶鏂板湪鍓?
         recent_df = df.head(20).copy()
 
         latest_row = recent_df.iloc[0]
@@ -577,7 +577,7 @@ class MarketSentimentDataSource(DataSourceBase):
 
     # ------------------------------------------------------------
     def build_intraday_block(self, trade_date: str, refresh_mode: str) -> Dict[str, Any]:
-        """INTRADAY：从 SpotStore spot 统计当日横截面。"""
+        """INTRADAY锛氫粠 SpotStore spot 缁熻褰撴棩妯埅闈€?""
         warnings: List[str] = []
         error_type: Optional[str] = None
         error_message: Optional[str] = None
@@ -605,17 +605,17 @@ class MarketSentimentDataSource(DataSourceBase):
                 warnings=["empty:spot_df"],
             )
 
-        if "涨跌幅" not in df.columns:
+        if "娑ㄨ穼骞? not in df.columns:
             return self._neutral_block(
                 trade_date=trade_date,
                 kind="INTRADAY",
                 data_status="ERROR",
                 warnings=["missing:spot_chg_pct_col"],
                 error_type="KeyError",
-                error_message="missing column 涨跌幅",
+                error_message="missing column 娑ㄨ穼骞?,
             )
 
-        chg = pd.to_numeric(df["涨跌幅"], errors="coerce")
+        chg = pd.to_numeric(df["娑ㄨ穼骞?], errors="coerce")
         if chg.isna().all():
             return self._neutral_block(
                 trade_date=trade_date,
@@ -637,7 +637,7 @@ class MarketSentimentDataSource(DataSourceBase):
         flat = int((chg == 0).sum())
 
         # board-aware limit up/down
-        symbol_col = self._pick_col(df, ["代码", "symbol", "证券代码", "股票代码", "ts_code", "代码6"])
+        symbol_col = self._pick_col(df, ["浠ｇ爜", "symbol", "璇佸埜浠ｇ爜", "鑲＄エ浠ｇ爜", "ts_code", "浠ｇ爜6"])
         if symbol_col is None:
             warnings.append("missing:symbol_col_limit_by_prefix_fallback_9.9")
             data_status = "PARTIAL"
@@ -653,7 +653,7 @@ class MarketSentimentDataSource(DataSourceBase):
             limit_pct = limit_pct.where(~prefix3.isin(self.BOARD20_PREFIX), self.LIMIT_PCT_20)
             limit_pct = limit_pct.where(~(prefix1.isin(self.BOARD30_PREFIX_1) | prefix2.isin(self.BOARD30_PREFIX_2)), self.LIMIT_PCT_30)
 
-            name_col = self._pick_col(df, ["名称", "name", "股票简称", "证券简称"])
+            name_col = self._pick_col(df, ["鍚嶇О", "name", "鑲＄エ绠€绉?, "璇佸埜绠€绉?])
             if name_col is not None:
                 nm = df[name_col].astype(str).str.strip().str.upper()
                 is_st = nm.str.startswith("*ST") | nm.str.startswith("ST")
@@ -796,18 +796,18 @@ class MarketSentimentDataSource(DataSourceBase):
         cnt = int(len(df))
         evidence: Dict[str, Any] = {"count": cnt}
 
-        # 连板高度
-        if "连板数" in df.columns:
+        # 杩炴澘楂樺害
+        if "杩炴澘鏁? in df.columns:
             try:
-                evidence["max_consecutive_limit_up"] = int(pd.to_numeric(df["连板数"], errors="coerce").max())
+                evidence["max_consecutive_limit_up"] = int(pd.to_numeric(df["杩炴澘鏁?], errors="coerce").max())
             except Exception:
                 warnings.append("parse_failed:zt_pool_max_consecutive")
         else:
-            warnings.append("missing:zt_pool_col_连板数")
+            warnings.append("missing:zt_pool_col_杩炴澘鏁?)
 
-        # 封板资金强度
-        if "封板资金" in df.columns:
-            x = pd.to_numeric(df["封板资金"], errors="coerce").dropna()
+        # 灏佹澘璧勯噾寮哄害
+        if "灏佹澘璧勯噾" in df.columns:
+            x = pd.to_numeric(df["灏佹澘璧勯噾"], errors="coerce").dropna()
             if not x.empty:
                 evidence["seal_fund_total"] = float(x.sum())
                 evidence["seal_fund_median"] = float(x.median())
@@ -815,16 +815,16 @@ class MarketSentimentDataSource(DataSourceBase):
             else:
                 warnings.append("empty:zt_pool_seal_fund_all_nan")
         else:
-            warnings.append("missing:zt_pool_col_封板资金")
+            warnings.append("missing:zt_pool_col_灏佹澘璧勯噾")
 
-        # 炸板 proxy：涨停池内炸板次数>0 占比
-        if "炸板次数" in df.columns:
-            z = pd.to_numeric(df["炸板次数"], errors="coerce").fillna(0)
+        # 鐐告澘 proxy锛氭定鍋滄睜鍐呯偢鏉挎鏁?0 鍗犳瘮
+        if "鐐告澘娆℃暟" in df.columns:
+            z = pd.to_numeric(df["鐐告澘娆℃暟"], errors="coerce").fillna(0)
             opened_cnt = int((z > 0).sum())
             evidence["opened_limitup_count_proxy"] = opened_cnt
             evidence["opened_limitup_ratio_proxy"] = round(opened_cnt / cnt, 4) if cnt > 0 else 0.0
         else:
-            warnings.append("missing:zt_pool_col_炸板次数")
+            warnings.append("missing:zt_pool_col_鐐告澘娆℃暟")
 
         data_status = "OK"
         if warnings:
@@ -882,24 +882,24 @@ class MarketSentimentDataSource(DataSourceBase):
         cnt = int(len(df))
         evidence: Dict[str, Any] = {"count": cnt}
 
-        if "炸板次数" in df.columns:
-            z = pd.to_numeric(df["炸板次数"], errors="coerce").fillna(0)
+        if "鐐告澘娆℃暟" in df.columns:
+            z = pd.to_numeric(df["鐐告澘娆℃暟"], errors="coerce").fillna(0)
             evidence["broken_times_sum"] = int(z.sum())
             evidence["broken_times_max"] = int(z.max()) if len(z) else 0
         else:
-            warnings.append("missing:zb_pool_col_炸板次数")
+            warnings.append("missing:zb_pool_col_鐐告澘娆℃暟")
 
-        # 首次封板时间分布（可选）
-        if "首次封板时间" in df.columns:
+        # 棣栨灏佹澘鏃堕棿鍒嗗竷锛堝彲閫夛級
+        if "棣栨灏佹澘鏃堕棿" in df.columns:
             try:
-                t = df["首次封板时间"].astype(str)
+                t = df["棣栨灏佹澘鏃堕棿"].astype(str)
                 # normalize to HH:MM:SS if possible
                 t2 = t.str.replace(":", "", regex=False).str.strip()
                 evidence["first_seal_0925_count"] = int((t2 == "092500").sum())
             except Exception:
                 warnings.append("parse_failed:zb_pool_first_seal_time")
         else:
-            warnings.append("missing:zb_pool_col_首次封板时间")
+            warnings.append("missing:zb_pool_col_棣栨灏佹澘鏃堕棿")
 
         data_status = "OK"
         if warnings:
@@ -954,7 +954,7 @@ class MarketSentimentDataSource(DataSourceBase):
         error_type: Optional[str] = None,
         error_message: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """稳定子块封装（append-only）。"""
+        """绋冲畾瀛愬潡灏佽锛坅ppend-only锛夈€?""
         return {
             "schema_version": f"{name}.v1",
             "asof": {"trade_date": trade_date, "kind": kind},
@@ -1051,4 +1051,5 @@ class MarketSentimentDataSource(DataSourceBase):
             return float(x)
         except Exception:
             return None
+
 

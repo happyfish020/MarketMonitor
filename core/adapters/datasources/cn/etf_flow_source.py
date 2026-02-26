@@ -1,27 +1,27 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """
 UnifiedRisk V12 - ETF Flow DataSource (C Block)
 
-璁捐鐩殑锛?
-    浠庢湰鍦?Oracle 鏁版嵁搴撶殑鍩洪噾 ETF 鏃ヨ鎯呰〃锛圕N_FUND_ETF_HIST_EM锛?
-    鑱氬悎璁＄畻 ETF 浠介鍙樺寲浠ｇ悊鎸囨爣锛屾彁渚涘師濮嬬獥鍙ｅ簭鍒楀拰瓒嬪娍鎸囨爣銆?
+鐠佹崘顓搁惄顔炬畱閿?
+    娴犲孩婀伴崷?Oracle 閺佺増宓佹惔鎾舵畱閸╂椽鍣?ETF 閺冦儴顢戦幆鍛般€冮敍鍦昇_FUND_ETF_HIST_EM閿?
+    閼辨艾鎮庣拋锛勭暬 ETF 娴犱粙顤傞崣妯哄娴狅絿鎮婇幐鍥ㄧ垼閿涘本褰佹笟娑樺斧婵鐛ラ崣锝呯碍閸掓鎷扮搾瀣◢閹稿洦鐖ｉ妴?
 
-绾︽潫锛?
-    - 浠呬緷璧?DBOracleProvider锛屼笉璁块棶澶栭儴 API
-    - 涓嶅畾涔夋柊鐨?provider 鎺ュ彛锛岀洿鎺ヨ皟鐢?provider 灞傛彁渚涚殑鑱氬悎鏂规硶
-    - 鎸夋棩鏋勫缓鏃堕棿搴忓垪锛寃indow 榛樿 60 澶?
+缁撅附娼敍?
+    - 娴犲懍绶风挧?DBOracleProvider閿涘奔绗夌拋鍧楁６婢舵牠鍎?API
+    - 娑撳秴鐣炬稊澶嬫煀閻?provider 閹恒儱褰涢敍宀€娲块幒銉ㄧ殶閻?provider 鐏炲倹褰佹笟娑氭畱閼辨艾鎮庨弬瑙勭《
+    - 閹稿妫╅弸鍕紦閺冨爼妫挎惔蹇撳灙閿涘瘍indow 姒涙顓?60 婢?
 
-杈撳嚭瀛楁锛?
-    trade_date: 浜ゆ槗鏃ユ湡锛堟渶鏂颁竴涓氦鏄撴棩瀛楃涓诧級
-    total_change_amount: 褰撴棩鎵€鏈?ETF price change 涔嬪拰
-    total_volume: 褰撴棩 ETF 鎴愪氦閲忎箣鍜?
-    total_amount: 褰撴棩 ETF 鎴愪氦棰濅箣鍜?
-    flow_ratio: 褰撴棩浠锋牸娑ㄨ穼棰濅笌鎴愪氦閲忕殑姣斿€硷紙proxy锛?
-    trend_10d: 10 鏃ョ疮璁″彉鍖栵紙鎬?price change锛?
-    acc_3d: 3 鏃ョ疮璁″彉鍖栵紙鎬?price change锛?
-    series: 浠庢棫鍒版柊鐨勫巻鍙插簭鍒楀垪琛紝姣忛」鍖呭惈 trade_date銆乼otal_change_amount銆乼otal_volume銆乼otal_amount
+鏉堟挸鍤€涙顔岄敍?
+    trade_date: 娴溿倖妲楅弮銉︽埂閿涘牊娓堕弬棰佺娑擃亙姘﹂弰鎾存）鐎涙顑佹稉璇х礆
+    total_change_amount: 瑜版挻妫╅幍鈧張?ETF price change 娑斿鎷?
+    total_volume: 瑜版挻妫?ETF 閹存劒姘﹂柌蹇庣閸?
+    total_amount: 瑜版挻妫?ETF 閹存劒姘︽０婵呯閸?
+    flow_ratio: 瑜版挻妫╂禒閿嬬壐濞戙劏绌兼０婵呯瑢閹存劒姘﹂柌蹇曟畱濮ｆ柨鈧》绱檖roxy閿?
+    trend_10d: 10 閺冦儳鐤拋鈥冲綁閸栨牭绱欓幀?price change閿?
+    acc_3d: 3 閺冦儳鐤拋鈥冲綁閸栨牭绱欓幀?price change閿?
+    series: 娴犲孩妫崚鐗堟煀閻ㄥ嫬宸婚崣鎻掔碍閸掓鍨悰顭掔礉濮ｅ繘銆嶉崠鍛儓 trade_date閵嗕辜otal_change_amount閵嗕辜otal_volume閵嗕辜otal_amount
 
-褰撴暟鎹己澶辨垨寮傚父鏃讹紝杩斿洖 neutral_block
+瑜版挻鏆熼幑顔惧繁婢惰鲸鍨ㄥ鍌氱埗閺冭绱濇潻鏂挎礀 neutral_block
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ import pandas as pd
 from core.datasources.datasource_base import DataSourceConfig, DataSourceBase
 from core.utils.ds_refresh import apply_refresh_cleanup
 from core.utils.logger import get_logger
-from core.adapters.providers.db_provider_mysql_market import DBOracleProvider
+from core.adapters.providers.db_provider_mysql_market import DBMySQLMarketProvider
 
 LOG = get_logger("DS.ETFFlow")
 
@@ -44,26 +44,26 @@ class ETFFlowDataSource(DataSourceBase):
     """
     ETF Flow DataSource
 
-    鑱氬悎 ETF 鏃ヨ鎯呰〃鐨?price change / volume / amount 鏁版嵁锛?
-    閫氳繃 10 澶╁拰 3 澶╃疮绉€兼彁渚涜秼鍔垮拰鍔犻€熷害淇℃伅銆?
+    閼辨艾鎮?ETF 閺冦儴顢戦幆鍛般€冮惃?price change / volume / amount 閺佺増宓侀敍?
+    闁俺绻?10 婢垛晛鎷?3 婢垛晝鐤粔顖氣偓鍏煎絹娓氭稖绉奸崝鍨嫲閸旂娀鈧喎瀹虫穱鈩冧紖閵?
     """
 
     def __init__(self, config: DataSourceConfig, window: int = 60):
-        # 浣跨敤鍥哄畾鍚嶇О锛屼究浜庢棩蹇楄瘑鍒?
+        # 娴ｈ法鏁ら崶鍝勭暰閸氬秶袨閿涘奔绌舵禍搴㈡）韫囨鐦戦崚?
         super().__init__(name="DS.ETFFlow")
         self.config = config
         self.window = int(window) if window and window > 0 else 60
-        self.db = DBOracleProvider()
+        self.db = DBMySQLMarketProvider()
 
-        # cache 鍜?history 璺緞
+        # cache 閸?history 鐠侯垰绶?
         self.cache_root = config.cache_root
         self.history_root = config.history_root
         os.makedirs(self.cache_root, exist_ok=True)
         os.makedirs(self.history_root, exist_ok=True)
 
-        # 鍗曟棩 cache 缁熶竴鍛藉悕锛岄伩鍏嶄娇鐢?trade_date 浣滀负鏂囦欢鍚?
+        # 閸楁洘妫?cache 缂佺喍绔撮崨钘夋倳閿涘矂浼╅崗宥勫▏閻?trade_date 娴ｆ粈璐熼弬鍥︽閸?
         self.cache_file = os.path.join(self.cache_root, "etf_flow_today.json")
-        # 鎸佷箙鍖栧巻鍙插簭鍒?
+        # 閹镐椒绠欓崠鏍у坊閸欐彃绨崚?
         self.history_file = os.path.join(self.history_root, "etf_flow_series.json")
 
         LOG.info(
@@ -78,13 +78,13 @@ class ETFFlowDataSource(DataSourceBase):
     # ------------------------------------------------------------------
     def build_block(self, trade_date: str, refresh_mode: str = "none") -> Dict[str, Any]:
         """
-        涓诲叆鍙ｏ細鏋勫缓 ETF flow 鍘熷鏁版嵁鍧椼€?
+        娑撹鍙嗛崣锝忕窗閺嬪嫬缂?ETF flow 閸樼喎顫愰弫鐗堝祦閸фぜ鈧?
 
-        鍙傛暟锛?
-            trade_date: 瀛楃涓诧紝璇勪及鏃ユ湡锛堥€氬父涓?T 鎴?T-1锛?
-            refresh_mode: 鍒锋柊绛栫暐锛屾敮鎸?none/readonly/full
+        閸欏倹鏆熼敍?
+            trade_date: 鐎涙顑佹稉璇х礉鐠囧嫪鍙婇弮銉︽埂閿涘牓鈧艾鐖舵稉?T 閹?T-1閿?
+            refresh_mode: 閸掗攱鏌婄粵鏍殣閿涘本鏁幐?none/readonly/full
         """
-        # 鎸?refresh_mode 娓呯悊缂撳瓨鏂囦欢
+        # 閹?refresh_mode 濞撳懐鎮婄紓鎾崇摠閺傚洣娆?
         apply_refresh_cleanup(
             refresh_mode=refresh_mode,
             cache_path=self.cache_file,
@@ -92,7 +92,7 @@ class ETFFlowDataSource(DataSourceBase):
             spot_path=None,
         )
 
-        # 鍛戒腑缂撳瓨鐩存帴杩斿洖
+        # 閸涙垝鑵戠紓鎾崇摠閻╁瓨甯存潻鏂挎礀
         if refresh_mode in ("none", "readonly") and os.path.exists(self.cache_file):
             try:
                 with open(self.cache_file, "r", encoding="utf-8") as f:
@@ -100,7 +100,7 @@ class ETFFlowDataSource(DataSourceBase):
             except Exception as exc:
                 LOG.error("[DS.ETFFlow] load cache error: %s", exc)
 
-        # 璇诲彇鑱氬悎鏁版嵁
+        # 鐠囪褰囬懕姘値閺佺増宓?
         try:
             df: pd.DataFrame = self.db.fetch_etf_hist_series(
                 start_date=trade_date,
@@ -114,10 +114,10 @@ class ETFFlowDataSource(DataSourceBase):
             LOG.warning("[DS.ETFFlow] no data returned for %s", trade_date)
             return self._neutral_block(trade_date)
 
-        # 纭繚鏈夊簭锛氭寜鏃ユ湡鍗囧簭锛堟棫鈫掓柊锛?
+        # 绾喕绻氶張澶婄碍閿涙碍瀵滈弮銉︽埂閸楀洤绨敍鍫熸＋閳帗鏌婇敍?
         df_sorted = df.sort_index(ascending=True)
 
-        # 灏?DataFrame 杞负鍒楄〃 [{trade_date, total_change_amount, ...}]
+        # 鐏?DataFrame 鏉烆兛璐熼崚妤勩€?[{trade_date, total_change_amount, ...}]
         series: List[Dict[str, Any]] = []
         for idx, row in df_sorted.iterrows():
             series.append({
@@ -127,13 +127,13 @@ class ETFFlowDataSource(DataSourceBase):
                 "total_amount": float(row["total_amount"]) if pd.notna(row["total_amount"]) else 0.0,
             })
 
-        # 鍚堝苟鍘嗗彶锛堜繚璇佹粦绐楅暱搴﹀浐瀹氾紝鍚戝悗琛ラ綈锛?
+        # 閸氬牆鑻熼崢鍡楀蕉閿涘牅绻氱拠浣圭拨缁愭鏆辨惔锕€娴愮€规熬绱濋崥鎴濇倵鐞涖儵缍堥敍?
         merged_series = self._merge_history(series)
 
-        # 璁＄畻瓒嬪娍/鍔犻€熷害
+        # 鐠侊紕鐣荤搾瀣◢/閸旂娀鈧喎瀹?
         trend_10d, acc_3d = self._calc_trend(merged_series)
 
-        # 鏈€鏂拌褰?
+        # 閺堚偓閺傛媽顔囪ぐ?
         latest = merged_series[-1] if merged_series else None
         if latest is None:
             LOG.warning("[DS.ETFFlow] merged_series empty")
@@ -143,7 +143,7 @@ class ETFFlowDataSource(DataSourceBase):
         total_change_amount = latest.get("total_change_amount")
         total_volume = latest.get("total_volume")
         total_amount = latest.get("total_amount")
-        # 姣斿€硷細閬垮厤闄ら浂
+        # 濮ｆ柨鈧》绱伴柆鍨帳闂勩倝娴?
         flow_ratio = 0.0
         try:
             flow_ratio = round(total_change_amount / total_volume, 4) if total_volume else 0.0
@@ -161,11 +161,11 @@ class ETFFlowDataSource(DataSourceBase):
             "series": merged_series,
         }
 
-        # 淇濆瓨鍒板巻鍙插拰缂撳瓨
+        # 娣囨繂鐡ㄩ崚鏉垮坊閸欐彃鎷扮紓鎾崇摠
         try:
-            # 鎸佷箙鍖栧巻鍙?
+            # 閹镐椒绠欓崠鏍у坊閸?
             self._save(self.history_file, merged_series)
-            # 缂撳瓨褰撳ぉ鍧?
+            # 缂傛挸鐡ㄨぐ鎾炽亯閸?
             with open(self.cache_file, "w", encoding="utf-8") as f:
                 json.dump(block, f, ensure_ascii=False, indent=2)
         except Exception as exc:
@@ -176,10 +176,10 @@ class ETFFlowDataSource(DataSourceBase):
     # ------------------------------------------------------------------
     def _merge_history(self, recent: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
-        鍚堝苟鍘嗗彶搴忓垪銆?
+        閸氬牆鑻熼崢鍡楀蕉鎼村繐鍨妴?
 
-        recent: 褰撳墠鏌ヨ绐楀彛鍐呯殑鍒楄〃锛堝崌搴忥級銆?
-        history_file 涓繚鐣欐洿涔呰繙鐨勫巻鍙茶褰曪紝涓?recent 鍚堝苟鍚庢埅鍙?window 闀垮害銆?
+        recent: 瑜版挸澧犻弻銉嚄缁愭褰涢崘鍛畱閸掓銆冮敍鍫濆磳鎼村骏绱氶妴?
+        history_file 娑擃厺绻氶悾娆愭纯娑斿懓绻欓惃鍕坊閸欒尪顔囪ぐ鏇礉娑?recent 閸氬牆鑻熼崥搴㈠焻閸?window 闂€鍨閵?
         """
         old = []
         if os.path.exists(self.history_file):
@@ -187,7 +187,7 @@ class ETFFlowDataSource(DataSourceBase):
                 old = self._load(self.history_file)
             except Exception:
                 old = []
-        # 鏋勫缓瀛楀吀浠ユ棩鏈熷幓閲?
+        # 閺嬪嫬缂撶€涙鍚€娴犮儲妫╅張鐔峰箵闁?
         buf: Dict[str, Dict[str, Any]] = {r["trade_date"]: r for r in old}
         for r in recent:
             buf[r["trade_date"]] = r
@@ -197,10 +197,10 @@ class ETFFlowDataSource(DataSourceBase):
     # ------------------------------------------------------------------
     def _calc_trend(self, series: List[Dict[str, Any]]) -> tuple[float, float]:
         """
-        璁＄畻 10 澶╄秼鍔垮拰 3 澶╁姞閫熷害銆?
+        鐠侊紕鐣?10 婢垛晞绉奸崝鍨嫲 3 婢垛晛濮為柅鐔峰閵?
         trend_10d = last.total_change_amount - total_change_amount[-11]
         acc_3d   = last.total_change_amount - total_change_amount[-4]
-        鑻ラ暱搴︿笉澶燂紝鍒欒繑鍥?0.0
+        閼汇儵鏆辨惔锔跨瑝婢剁噦绱濋崚娆掔箲閸?0.0
         """
         if len(series) < 2:
             return 0.0, 0.0
@@ -230,7 +230,7 @@ class ETFFlowDataSource(DataSourceBase):
     @staticmethod
     def _neutral_block(trade_date: str) -> Dict[str, Any]:
         """
-        杩斿洖绌?涓€у潡銆?
+        鏉╂柨娲栫粚?娑擃厽鈧冩健閵?
         """
         return {
             "trade_date": trade_date,
@@ -242,3 +242,4 @@ class ETFFlowDataSource(DataSourceBase):
             "acc_3d": 0.0,
             "series": [],
         }
+

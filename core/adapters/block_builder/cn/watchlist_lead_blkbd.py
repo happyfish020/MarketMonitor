@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Dict, Any, List, Optional
 
 from core.adapters.block_builder.block_builder_base import FactBlockBuilderBase
@@ -146,7 +147,8 @@ class WatchlistLeadBlockBuilder(FactBlockBuilderBase):
             LOG.warning("[WatchlistLeadBB] build_block warnings=%s", ",".join(warnings))
         
         import json
-        with open(r"c:\temp\watch.json", "w", encoding="utf-8") as f:
+        os.makedirs(r"run\temp", exist_ok=True)
+        with open(r"run\temp\watch.json", "w", encoding="utf-8") as f:
             json.dump(block, f, ensure_ascii=False, indent=2)
          
 

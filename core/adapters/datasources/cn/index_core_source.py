@@ -109,11 +109,24 @@ class IndexCoreDateSource(DataSourceBase):
         # Compute pct from CLOSE; prev_close will be inferred in _df_to_block from prior row's close.
         df["pct"] = df["close"].pct_change() * 100.0
 
-        # Hard freshness assertion: must include the requested trade_date
+        # Freshness check: allow a small lag to avoid hard-failing the full block
+        # when one index table updates slightly later than the market close batch.
         max_dt = df["date"].iloc[-1] if len(df) else None
         if max_dt != str(trade_date):
-            raise RuntimeError(
-                f"[DS.IndexCore][DB] DATA_STALE symbol={symbol} max_dt={max_dt} expect={trade_date}"
+            try:
+                lag_days = (pd.to_datetime(str(trade_date)) - pd.to_datetime(str(max_dt))).days
+            except Exception:
+                lag_days = None
+            if lag_days is None or lag_days > 3:
+                raise RuntimeError(
+                    f"[DS.IndexCore][DB] DATA_STALE symbol={symbol} max_dt={max_dt} expect={trade_date}"
+                )
+            LOG.warning(
+                "[DS.IndexCore][DB] soft stale accepted symbol=%s max_dt=%s expect=%s lag_days=%s",
+                symbol,
+                max_dt,
+                trade_date,
+                lag_days,
             )
 
         return df[["date", "close", "pct"]].tail(int(window)).reset_index(drop=True)

@@ -2,11 +2,13 @@
 # UnifiedRisk V12 — Yahoo Finance Provider (full version)
 
 from __future__ import annotations
+import os
 import pandas as pd
 import traceback
 import time
 import random
 import yfinance as yf
+import yfinance.cache as yf_cache
 
 from core.adapters.providers.provider_base import ProviderBase
 from core.utils.logger import get_logger
@@ -22,9 +24,24 @@ class YFProvider(ProviderBase):
     - 支持多个子方法 (index / equity / future / crypto / default)
     - 针对 yfinance 输出进行 dataframe 标准化
     """
+    _cache_initialized = False
 
     def __init__(self):
         super().__init__("yf")
+        self._ensure_cache_dir()
+
+    @classmethod
+    def _ensure_cache_dir(cls) -> None:
+        if cls._cache_initialized:
+            return
+        cache_dir = os.path.join("run", "temp", "yfinance_cache")
+        try:
+            os.makedirs(cache_dir, exist_ok=True)
+            # yfinance 0.2.x stores tz/cookie/isin sqlite cache under this directory.
+            yf_cache.set_cache_location(cache_dir)
+            cls._cache_initialized = True
+        except Exception as e:
+            LOG.warning("[YFProvider] set cache location failed: %s", e)
 
     # =====================================================================
     # [核心方法] 覆写抽象方法：fetch_series_raw()
@@ -124,7 +141,7 @@ class YFProvider(ProviderBase):
         self,
         symbol: str,
         window: int,
-        max_attempts: int = 4,
+        max_attempts: int = 2,
         base_sleep_sec: float = 0.8,
         max_sleep_sec: float = 12.0,
     ) -> pd.DataFrame | None:
@@ -164,6 +181,9 @@ class YFProvider(ProviderBase):
                 LOG.warning(
                     f"[YFProvider] Download error (retryable) symbol={symbol} attempt={attempt}/{max_attempts}: {e}"
                 )
+                if "unable to open database file" in str(e).lower():
+                    LOG.error("[YFProvider] Non-retryable cache db error for symbol=%s", symbol)
+                    return None
 
             if attempt < max_attempts:
                 sleep = min(max_sleep_sec, base_sleep_sec * (2 ** (attempt - 1)))

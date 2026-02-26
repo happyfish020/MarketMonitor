@@ -13,6 +13,7 @@ def parse_args():
     parser.add_argument("--mode", type=str, default="ashare_daily")
     parser.add_argument("--full-refresh", action="store_true")
     parser.add_argument("--ss-refresh", action="store_true")
+    parser.add_argument("--trade-date", type=str, default=None, help="Force trade date (YYYY-MM-DD)")
 
     return parser.parse_args()
 
@@ -127,7 +128,7 @@ def main():
         # ✅ V12：只调用，不接收，不解析
         #is_intraday, trade_date = get_intraday_status_and_last_trade_date()
         #assert trade_date, "定位最后交易日失败！"
-        daily_engine = AShareDailyEngine(refresh_mode=refresh_mode)
+        daily_engine = AShareDailyEngine(refresh_mode=refresh_mode, trade_date_override=args.trade_date)
         daily_engine.run( )
 
     else:

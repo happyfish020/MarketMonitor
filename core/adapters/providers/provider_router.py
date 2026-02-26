@@ -10,7 +10,6 @@ from typing import Dict
 
 from core.utils.logger import get_logger
 
-from core.adapters.providers.provider_yf import YFProvider
 from core.adapters.providers.provider_bs import BSProvider
 from core.adapters.providers.provider_em import EMProvider
 from core.adapters.providers.db_provider_mysql_market import DBMarketProvider
@@ -37,7 +36,13 @@ class ProviderRouter:
         self.registry: Dict[str, object] = {}
 
         # Primary market data providers
-        self.registry["yf"] = YFProvider()
+        # yfinance is optional in offline/air-gapped environments.
+        try:
+            from core.adapters.providers.provider_yf import YFProvider  # local import to avoid hard startup dependency
+            self.registry["yf"] = YFProvider()
+        except Exception as e:
+            LOG.warning("[ProviderRouter] 'yf' provider unavailable: %s", e)
+
         self.registry["em"] = EMProvider()
         # self.registry["bs"] = BSProvider()
 

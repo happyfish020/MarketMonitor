@@ -138,7 +138,7 @@ class AShareDailyEngine:
     - Builder / Block / Case 不允许推断制�?
     """
 
-    def __init__(self, refresh_mode: str = "none") -> None:
+    def __init__(self, refresh_mode: str = "none", trade_date_override: Optional[str] = None) -> None:
         self.refresh_mode = refresh_mode
         self.snapshot = None
         self.factors = None
@@ -147,12 +147,18 @@ class AShareDailyEngine:
         # === 核心制度状态（只在 Engine 内部存在�?==
         self._distribution_risk_active: bool = False
         
-        self._resolve_trade_time()
-        #test 
-        #self.trade_date="2026-02-11"
         self.is_intraday = False
-         
-        self.report_kind ="EOD"
+        self.report_kind = "EOD"
+        self.trade_date = ""
+
+        td = (trade_date_override or "").strip()
+        if td:
+            # Historical/backfill rerun mode: use explicit date as frozen EOD asof.
+            self.trade_date = td
+            self.is_intraday = False
+            self.report_kind = "EOD"
+        else:
+            self._resolve_trade_time()
 
 
 
@@ -367,7 +373,8 @@ class AShareDailyEngine:
          
             ########## presiste  ###########
             
-            with open(r"c:\temp\des_payload.json", "w", encoding="utf-8") as f:
+            os.makedirs(r"run\temp", exist_ok=True)
+            with open(r"run\temp\des_payload.json", "w", encoding="utf-8") as f:
                 json.dump(des_payload, f, ensure_ascii=False, indent=2)
 
 
@@ -408,6 +415,7 @@ class AShareDailyEngine:
         engine_version = "V_"+ now.strftime("%Y-%m-%d_%H:%M:%S")
          
         format_string = "%Y-%m-%d"
+        run_id = None
         try:
             run_id = run_persist.start_run(
                     trade_date=self.trade_date,
@@ -447,17 +455,24 @@ class AShareDailyEngine:
                 engine_version=engine_version,
                 run_id=run_id,
                 )
-            run_persist.finish_run(run_id, status="COMPLETED")
+            try:
+                run_persist.finish_run(run_id, status="COMPLETED")
+            except Exception as e_finish:
+                LOG.warning("[Persist] finish_run(COMPLETED) failed run_id=%s err=%s", run_id, e_finish)
             #run_persist.finish_run(run_id, status="COMPLETED")     
             #run_persist.record_factor(run_id, "breadth", breadth_result)
             #run_persist.record_factor(run_id, "new_top50_lows", ntl_result)
         except Exception as e:
-            run_persist.finish_run(
-                run_id,
-                status="FAILED",
-                error_type=type(e).__name__,
-                error_message=str(e)[:1000],
-            )
+            if run_id:
+                try:
+                    run_persist.finish_run(
+                        run_id,
+                        status="FAILED",
+                        error_type=type(e).__name__,
+                        error_message=str(e)[:1000],
+                    )
+                except Exception as e_finish:
+                    LOG.warning("[Persist] finish_run(FAILED) failed run_id=%s err=%s", run_id, e_finish)
             raise
     # end def 
 
@@ -989,6 +1004,28 @@ class AShareDailyEngine:
                 adv_pct = ms_km.get("adv_ratio_pct")
                 if isinstance(adv_pct, (int, float)):
                     slots["breadth"]["adv_ratio"] = float(adv_pct) / 100.0
+                else:
+                    # fallback: market_sentiment_raw may carry ratio directly
+                    ms_raw = self.snapshot.get("market_sentiment_raw") if isinstance(getattr(self, "snapshot", None), dict) else {}
+                    if isinstance(ms_raw, dict):
+                        ev_raw = ms_raw.get("evidence") if isinstance(ms_raw.get("evidence"), dict) else {}
+                        adv_raw = ev_raw.get("adv_ratio_pct")
+                        if isinstance(adv_raw, (int, float)):
+                            slots["breadth"]["adv_ratio"] = float(adv_raw) / 100.0
+
+            # fallback coverage for pct_above_ma50 / pct_above_ma20 from breadth_plus_raw
+            if slots["breadth"].get("pct_above_ma50") is None or slots["breadth"].get("pct_above_ma20") is None:
+                bp_raw = self.snapshot.get("breadth_plus_raw") if isinstance(getattr(self, "snapshot", None), dict) else {}
+                if isinstance(bp_raw, dict):
+                    ev_bp = bp_raw.get("evidence") if isinstance(bp_raw.get("evidence"), dict) else {}
+                    if slots["breadth"].get("pct_above_ma20") is None:
+                        v20 = ev_bp.get("pct_above_ma20")
+                        if isinstance(v20, (int, float)):
+                            slots["breadth"]["pct_above_ma20"] = float(v20)
+                    if slots["breadth"].get("pct_above_ma50") is None:
+                        v50 = ev_bp.get("pct_above_ma50")
+                        if isinstance(v50, (int, float)):
+                            slots["breadth"]["pct_above_ma50"] = float(v50)
 
         # leverage_constraints/options_risk: prefer watchlist_lead panels levels (G/E) for governance hints
         if "leverage_constraints" not in slots or not isinstance(slots.get("leverage_constraints"), dict) or not slots.get("leverage_constraints"):

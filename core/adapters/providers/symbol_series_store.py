@@ -173,8 +173,8 @@ class SymbolSeriesStore:
                 provider_label,
                 e,
             )
-            if DEV_MODE:
-                sys.exit(1)
+            # Provider failures are non-fatal for daily pipeline:
+            # caller can fall back to history/neutral placeholders.
             return None
 
     # -------------------------------------------------

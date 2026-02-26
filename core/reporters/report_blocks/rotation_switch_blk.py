@@ -1,18 +1,9 @@
 # -*- coding: utf-8 -*-
-"""UnifiedRisk V12 · Rotation Switch block (Frozen)
-
-目标：
-- 在报告中明确展示：当前交易日是否“适合/不适合”启用板块轮动策略
-- 必须给出理由（结构化 reasons），并展示数据缺失情况
-
-注意：
-- 本 block 只读展示，不参与 Gate / ActionHint 决策
-- 任何异常都必须捕获为 warnings，避免影响其它区块
-"""
+"""UnifiedRisk V12 - Rotation Switch block (read-only)."""
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 
 from core.reporters.report_context import ReportContext
 from core.reporters.report_types import ReportBlock
@@ -40,11 +31,11 @@ class RotationSwitchBlock(ReportBlockRendererBase):
                     warnings=warnings,
                     payload={
                         "content": ["（未生成 rotation_switch：该区块仅用于占位）"],
-                        "note": "注：RotationSwitch 只读展示；缺失不影响其它 block。",
+                        "note": "RotationSwitch is read-only; missing slot does not affect other blocks.",
                     },
                 )
 
-            mode = rs.get("mode")
+            mode = str(rs.get("mode") or "OFF").upper()
             verdict = rs.get("verdict")
             conf = rs.get("confidence")
 
@@ -56,12 +47,11 @@ class RotationSwitchBlock(ReportBlockRendererBase):
             lines: List[str] = []
             header = f"- **今日结论：{mode}**"
             if isinstance(conf, (int, float)):
-                header += f"（conf={float(conf):.2f}）"
+                header += f" (conf={float(conf):.2f})"
             if isinstance(verdict, str) and verdict.strip():
-                header += f" · {verdict.strip()}"
+                header += f" - {verdict.strip()}"
             lines.append(header)
 
-            # Governance context
             ctx_bits: List[str] = []
             if isinstance(gate, str) and gate:
                 ctx_bits.append(f"Gate={gate}")
@@ -72,23 +62,19 @@ class RotationSwitchBlock(ReportBlockRendererBase):
             if ctx_bits:
                 lines.append("- 制度背景：" + " / ".join(ctx_bits))
 
-            # Execution meaning (must be explicit)
             meaning = None
-            if isinstance(mode, str):
-                m = mode.strip().upper()
-                if m == "OFF":
-                    meaning = "禁止板块轮动/换仓进攻；仅允许 HOLD 或按计划小幅降摩擦（不追涨、不扩风险）。"
-                elif m == "PARTIAL":
-                    meaning = "仅限低频/只做确认段：禁止 IGNITE 追涨；优先 CONFIRM/KEEP，控制换手。"
-                elif m == "ON":
-                    meaning = "允许启用板块轮动（仍受 Gate/Execution/DRS 约束）；建议持仓≥3天，避免高频切换。"
+            if mode == "OFF":
+                meaning = "禁止板块轮动/换仓进攻；仅允许 HOLD 或按计划小幅降摩擦执行（不追涨、不扩风险）。"
+            elif mode == "PARTIAL":
+                meaning = "仅限低频/确认段：禁止 IGNITE 追涨；优先 CONFIRM/KEEP，控制换手。"
+            elif mode == "ON":
+                meaning = "允许启用板块轮动（仍受 Gate/Execution/DRS 约束）；建议持有>=3天，避免高频切换。"
             if meaning:
                 lines.append(f"- 执行含义：{meaning}")
 
-            # Top reasons
             reasons = rs.get("reasons") if isinstance(rs.get("reasons"), list) else []
             if reasons:
-                lines.append("- 理由（Top）：")
+                lines.append("- 理由(Top)：")
                 for r in reasons[:8]:
                     if not isinstance(r, dict):
                         continue
@@ -99,15 +85,19 @@ class RotationSwitchBlock(ReportBlockRendererBase):
                         lv = f"{level} " if isinstance(level, str) and level else ""
                         lines.append(f"  - {lv}{code}: {msg}")
 
-            # Data status
+            # Enhancement: when OFF, still provide explanatory ranking from sector proxy
+            if mode == "OFF":
+                ref = self._build_explanatory_reference(context)
+                if ref:
+                    lines.append(f"- 解释性参考（不改变制度）: {ref}")
+
             ds = rs.get("data_status") if isinstance(rs.get("data_status"), dict) else {}
             cov = ds.get("coverage")
             missing = ds.get("missing") if isinstance(ds.get("missing"), list) else []
             if cov == "PARTIAL":
                 warnings.append("partial:rotation_switch")
-                lines.append(f"- ⚠ 数据不全：missing={missing}")
+                lines.append(f"- ⚠ 数据不全: missing={missing}")
 
-            # Execution constraints
             cons = rs.get("constraints") if isinstance(rs.get("constraints"), dict) else {}
             if cons:
                 mh = cons.get("min_hold_days")
@@ -121,7 +111,7 @@ class RotationSwitchBlock(ReportBlockRendererBase):
                 if ac is not None:
                     bits.append(f"allow_chase={ac}")
                 if bits:
-                    lines.append("- 执行边界：" + ", ".join(bits))
+                    lines.append("- 执行边界: " + ", ".join(bits))
 
             return ReportBlock(
                 block_alias=self.block_alias,
@@ -130,7 +120,7 @@ class RotationSwitchBlock(ReportBlockRendererBase):
                 payload={
                     "content": lines,
                     "raw": rs,
-                    "note": "注：RotationSwitch 仅作为策略开关与解释层展示，不直接改变 Gate/Execution/DRS。",
+                    "note": "RotationSwitch 为策略开关与解释层，不直接改变 Gate/Execution/DRS。",
                 },
             )
 
@@ -143,6 +133,37 @@ class RotationSwitchBlock(ReportBlockRendererBase):
                 warnings=warnings,
                 payload={
                     "content": ["RotationSwitch 渲染异常（已捕获）。"],
-                    "note": "注：异常已记录日志；本 block 不影响其它 block。",
+                    "note": "异常已记录日志；该 block 不影响其它 block。",
                 },
             )
+
+    def _build_explanatory_reference(self, context: ReportContext) -> Optional[str]:
+        factors = context.slots.get("factors") if isinstance(context.slots, dict) else None
+        if not isinstance(factors, dict):
+            return None
+        sp = factors.get("sector_proxy")
+        if not isinstance(sp, dict):
+            return None
+        details = sp.get("details") if isinstance(sp.get("details"), dict) else {}
+        sectors = details.get("sectors") if isinstance(details.get("sectors"), dict) else {}
+        if not sectors:
+            return None
+
+        pairs: List[Tuple[str, float]] = []
+        for k, v in sectors.items():
+            if not isinstance(v, dict):
+                continue
+            rs10 = v.get("rs_10d")
+            try:
+                if rs10 is not None:
+                    pairs.append((str(k), float(rs10)))
+            except Exception:
+                continue
+
+        if len(pairs) < 2:
+            return None
+
+        pairs.sort(key=lambda x: x[1], reverse=True)
+        leaders = ", ".join([f"{k}({v:+.2%})" for k, v in pairs[:2]])
+        laggards = ", ".join([f"{k}({v:+.2%})" for k, v in pairs[-2:]])
+        return f"leaders={leaders}; laggards={laggards}"

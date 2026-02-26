@@ -530,6 +530,16 @@ class AttackWindowEvaluator:
         )
 
         new_low_ratio_pct = _to_float(_get(slots, "breadth_plus.key_metrics.new_low_ratio_pct"))
+        if new_low_ratio_pct is None:
+            v = _to_float(_get(slots, "breadth.new_low_ratio"))
+            if v is not None:
+                # breadth.new_low_ratio is typically [0,1] ratio
+                new_low_ratio_pct = v * 100.0 if v <= 1.0 else v
+        # Hard fallback from breadth factor raw counts (most reliable)
+        cnt = _to_float(_get(slots, "factors.breadth.details._raw_data.count_new_low"))
+        tot = _to_float(_get(slots, "factors.breadth.details._raw_data.count_total"))
+        if cnt is not None and tot is not None and tot > 0:
+            new_low_ratio_pct = (cnt / tot) * 100.0
 
         # Amount contraction evidence (prefer structure.amount.evidence.amount_ratio)
         amount_ma20_ratio = (

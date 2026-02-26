@@ -45,16 +45,31 @@ def _detect_stage(trend: str, drs_sig: Optional[str], adv_ratio: Optional[float]
     s = (drs_sig or "").strip().upper()
     adv = adv_ratio if adv_ratio is not None else 0.0
     amt = amount_ratio if amount_ratio is not None else 0.0
-    if t == "intact" and s != "RED" and adv >= 0.55 and amt >= 0.9:
-        return "S1"
-    if t == "intact" and s == "YELLOW":
-        return "S2"
-    if t == "mixed" and amt < 0.9:
-        return "S3"
-    if t == "broken" and s != "RED":
-        return "S4"
+
+    # Normalize trend states from StructureFacts/Factor outputs.
+    if t in ("in_force", "inforce", "intact"):
+        t = "in_force"
+    elif t in ("weakening", "mixed", "weak"):
+        t = "weakening"
+    elif t in ("broken",):
+        t = "broken"
+    else:
+        return "UNKNOWN"
+
     if t == "broken" and s == "RED":
         return "S5"
+    if t == "broken":
+        return "S4"
+    if t == "in_force" and s == "GREEN" and adv >= 0.55 and amt >= 0.9:
+        return "S1"
+    if t == "in_force" and s in ("GREEN", "YELLOW"):
+        return "S2"
+    if t == "weakening" and s == "RED":
+        return "S4"
+    if t == "weakening" and s == "GREEN" and adv >= 0.50 and amt >= 0.85:
+        return "S2"
+    if t == "weakening":
+        return "S3"
     return "UNKNOWN"
 
 

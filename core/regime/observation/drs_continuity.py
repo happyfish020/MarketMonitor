@@ -65,7 +65,19 @@ class JsonStateStore:
         tmp = self.path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
-        os.replace(tmp, self.path)
+        try:
+            os.replace(tmp, self.path)
+        except PermissionError:
+            # Best-effort persistence only: avoid breaking full pipeline when file is locked.
+            fallback = self.path + ".new"
+            try:
+                os.replace(tmp, fallback)
+            except Exception:
+                try:
+                    if os.path.exists(tmp):
+                        os.remove(tmp)
+                except Exception:
+                    pass
 
 
 class DRSContinuity:

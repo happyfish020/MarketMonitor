@@ -80,9 +80,52 @@ class ASharesGateDecider:
         # ------------------------------
         participation = factors.get("participation")
         if participation and getattr(participation, "level", None) == "LOW":
-            gate = _max_gate(gate, "CAUTION")
-            reasons.append("participation=LOW")
-            evidence["participation"] = participation.level
+            # Soft-release rule:
+            # participation=LOW alone should not hard-lock Gate when structure is repaired.
+            trend_ok = False
+            fr_ok = False
+            br_ok = False
+
+            tif = factors.get("trend_in_force")
+            if tif:
+                tif_state = str(((getattr(tif, "details", None) or {}).get("state") or "")).lower()
+                trend_ok = (tif_state == "in_force")
+
+            frf = factors.get("failure_rate")
+            if frf:
+                fr_level = str(getattr(frf, "level", "")).upper()
+                fr_state = str(((getattr(frf, "details", None) or {}).get("state") or "")).lower()
+                fr_ok = (fr_level in ("LOW", "NEUTRAL")) and (fr_state in ("stable", "rising", ""))
+
+            breadth = factors.get("breadth")
+            if breadth:
+                br_level = str(getattr(breadth, "level", "")).upper()
+                br_state = str(((getattr(breadth, "details", None) or {}).get("state") or "")).lower()
+                br_ok = (br_level in ("LOW", "NEUTRAL")) and (br_state in ("healthy", "early", ""))
+
+            if trend_ok and fr_ok and br_ok:
+                reasons.append("participation=LOW(soft_released)")
+                evidence["participation"] = {
+                    "level": participation.level,
+                    "soft_release": True,
+                    "release_if": {
+                        "trend_in_force": trend_ok,
+                        "failure_rate": fr_ok,
+                        "breadth": br_ok,
+                    },
+                }
+            else:
+                gate = _max_gate(gate, "CAUTION")
+                reasons.append("participation=LOW")
+                evidence["participation"] = {
+                    "level": participation.level,
+                    "soft_release": False,
+                    "release_if": {
+                        "trend_in_force": trend_ok,
+                        "failure_rate": fr_ok,
+                        "breadth": br_ok,
+                    },
+                }
 
         # ------------------------------
         # ETF × crowding_conce

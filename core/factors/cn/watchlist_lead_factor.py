@@ -31,6 +31,7 @@ from core.factors.factor_result import FactorResult
 from core.utils.config_loader import load_watchlist_lead
 
 LOG = logging.getLogger(__name__)
+raw_asof = ""
 
 
 

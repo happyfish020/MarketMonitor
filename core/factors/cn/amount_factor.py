@@ -1,16 +1,7 @@
 # -*- coding: utf-8 -*-
 """UnifiedRisk V12 - AmountFactor (CN)
 
-用“成交额相对强弱”描述当日量能环境（结构解释用）。
-
-计算：
-- total = amount_raw.total_amount
-- maN  = 最近 N 日成交额均值（不足 N 用可用窗口均值）
-- ratio = total / maN
-
-输出给 StructureFactsBuilder：details.state = expanding / neutral / contracting。
-
-注意：该因子仅用于解释与结构验证，不直接作为进攻/调仓依据。
+Uses relative turnover strength to describe liquidity environment for structure interpretation.
 """
 
 from __future__ import annotations
@@ -23,7 +14,7 @@ from core.factors.factor_result import FactorResult
 
 
 class AmountFactor(FactorBase):
-    """日度量能（成交额）结构因子"""
+    """Daily amount structure factor."""
 
     def __init__(self, ma_window: int = 20) -> None:
         super().__init__(name="amount")
@@ -53,44 +44,51 @@ class AmountFactor(FactorBase):
         window = raw.get("window")
 
         series: List[float] = []
+        rows_asc: List[tuple[str, float]] = []
         if isinstance(window, list):
             for row in window:
-                if isinstance(row, dict):
-                    v = self._to_float(row.get("total_amount"))
-                    if v is not None:
-                        series.append(v)
+                if not isinstance(row, dict):
+                    continue
+                v = self._to_float(row.get("total_amount"))
+                if v is not None:
+                    series.append(v)
+                td = row.get("trade_date") or row.get("date") or row.get("dt")
+                if td and v is not None:
+                    rows_asc.append((str(td), float(v)))
 
-        # 允许只有 total 没有 window：此时只能给出弱解释
-        ma = self._mean(series[-self.ma_window :]) if series else None
+        if rows_asc:
+            rows_asc.sort(key=lambda x: x[0])  # old -> new
+            series_ordered = [x[1] for x in rows_asc]
+        else:
+            series_ordered = list(series)
+
+        ma = self._mean(series_ordered[-self.ma_window:]) if series_ordered else None
+        ma60 = self._mean(series_ordered[-60:]) if series_ordered else None
         ratio = (total / ma) if (total is not None and ma not in (None, 0.0)) else None
+        ratio_ma60 = (total / ma60) if (total is not None and ma60 not in (None, 0.0)) else None
 
-        
-        # prev / delta vs previous day (best-effort)
         latest_val = total
         prev_val: Optional[float] = None
         delta_prev: Optional[float] = None
         ratio_prev: Optional[float] = None
 
         try:
-            w = raw.get("window")
-            if isinstance(w, list) and len(w) >= 2:
-                rows = []
-                for r in w:
-                    if isinstance(r, dict):
-                        td = r.get("trade_date") or r.get("date") or r.get("dt")
-                        tv = self._to_float(r.get("total_amount") or r.get("amount") or r.get("total"))
-                        if td and tv is not None:
-                            rows.append((str(td), float(tv)))
-                if len(rows) >= 2:
-                    # Sort by trade_date descending (latest first)
-                    rows.sort(key=lambda x: x[0], reverse=True)
-                    latest_val = float(rows[0][1])
-                    prev_val = float(rows[1][1])
+            if len(rows_asc) >= 2:
+                latest_val = float(rows_asc[-1][1])
+                prev_val = float(rows_asc[-2][1])
+                delta_prev = latest_val - prev_val
+            elif isinstance(window, list) and len(window) >= 2:
+                first = window[0] if isinstance(window[0], dict) else {}
+                second = window[1] if isinstance(window[1], dict) else {}
+                fv = self._to_float(first.get("total_amount") or first.get("amount") or first.get("total"))
+                sv = self._to_float(second.get("total_amount") or second.get("amount") or second.get("total"))
+                if fv is not None and sv is not None:
+                    latest_val = float(fv)
+                    prev_val = float(sv)
                     delta_prev = latest_val - prev_val
         except Exception:
             pass
 
-        # if snapshot total is missing, fallback to computed latest
         if total is None and latest_val is not None:
             total = latest_val
 
@@ -99,19 +97,40 @@ class AmountFactor(FactorBase):
                 ratio_prev = float(prev_val) / float(ma)
             except Exception:
                 ratio_prev = None
+
+        ratio_slope_3d: Optional[float] = None
+        try:
+            if ma not in (None, 0.0) and len(series_ordered) >= 5:
+                recent = series_ordered[-5:]
+                ratios = [float(x) / float(ma) for x in recent]
+                ratio_slope_3d = float(ratios[-1] - (sum(ratios[-4:-1]) / 3.0))
+        except Exception:
+            ratio_slope_3d = None
+
+        amount_trend_signal = "neutral"
+        if isinstance(ratio, float):
+            if ratio >= 1.08 and (ratio_slope_3d is None or ratio_slope_3d >= 0.0):
+                amount_trend_signal = "strengthening"
+            elif ratio <= 0.95:
+                amount_trend_signal = "weakening"
+            elif ratio_slope_3d is not None and ratio_slope_3d <= -0.02:
+                amount_trend_signal = "weakening"
+
         details: Dict[str, Any] = {
             "data_status": "OK" if total is not None else "MISSING",
             "amount_total": total,
             "amount_ma20": ma,
+            "amount_ma60": ma60,
             "amount_ratio": ratio,
+            "amount_ratio_ma60": ratio_ma60,
             "amount_prev": prev_val,
             "amount_delta_prev": delta_prev,
             "amount_ratio_prev": ratio_prev,
+            "amount_ratio_slope_3d": ratio_slope_3d,
+            "amount_trend_signal": amount_trend_signal,
             "_raw_data": json.dumps(raw, ensure_ascii=False)[:2000],
         }
 
-        # score 设计：以 ratio 为主，绝对量作为兜底
-        #（单位不确定时，ratio 更稳；绝对量只做“极端高量/极端低量”的辅助）
         score = 50.0
         reasons: List[str] = []
 
@@ -119,7 +138,6 @@ class AmountFactor(FactorBase):
             score = 50.0
             reasons.append("missing_total")
         else:
-            # ratio 信号
             if ratio is not None:
                 if ratio >= 1.30:
                     score = 90.0
@@ -136,8 +154,14 @@ class AmountFactor(FactorBase):
                 else:
                     score = 55.0
                     reasons.append("ratio~1.00")
+
+                if amount_trend_signal == "weakening":
+                    score = max(0.0, score - 8.0)
+                    reasons.append("trend_signal=weakening")
+                elif amount_trend_signal == "strengthening":
+                    score = min(100.0, score + 5.0)
+                    reasons.append("trend_signal=strengthening")
             else:
-                # 无 ma 时，尝试用绝对量给粗略分档（阈值可后续配置化）
                 if total >= 10000:
                     score = 85.0
                     reasons.append("total>=10000")
@@ -151,7 +175,6 @@ class AmountFactor(FactorBase):
                     score = 50.0
                     reasons.append("no_ma_use_total")
 
-        # state：与结构层语义对齐（结构层优先读 state）
         state = "neutral"
         if score >= 70:
             state = "expanding"

@@ -1,19 +1,19 @@
-# core/adapters/datasources/cn/participation_source.py
+﻿# core/adapters/datasources/cn/participation_source.py
 # -*- coding: utf-8 -*-
 """
 UnifiedRisk V12 - ParticipationDataSource (CN A-Share)
 
-鑱岃矗锛堢敓浜у悜锛屾瀬绠€锛夛細
-- 浠庢湰鍦?Oracle DB 璇诲彇鍏ㄥ競鍦鸿偂绁ㄦ棩绾?close锛堜簨瀹炲眰锛?
-- 璁＄畻褰撴棩妯埅闈㈠弬涓庤川閲忔寚鏍囷細
-    - adv_ratio锛堜笂娑ㄥ鏁板崰姣旓級
-    - median_return锛堜釜鑲℃敹鐩婁腑浣嶆暟锛?
-    - index_return锛堟寚鏁版敹鐩婏紝鐢ㄤ簬瀵圭収锛氶粯璁?HS300=sh000300锛?
-- 杈撳嚭涓?snapshot["participation"] 鐨勬爣鍑嗚緭鍏ュ潡锛堜笉鍋氱姸鎬佸垽瀹氾級
+閼卞矁鐭楅敍鍫㈡晸娴溠冩倻閿涘本鐎粻鈧敍澶涚窗
+- 娴犲孩婀伴崷?Oracle DB 鐠囪褰囬崗銊ョ閸﹂缚鍋傜粊銊︽）缁?close閿涘牅绨ㄧ€圭偛鐪伴敍?
+- 鐠侊紕鐣昏ぐ鎾存）濡亝鍩呴棃銏犲棘娑撳氦宸濋柌蹇斿瘹閺嶅浄绱?
+    - adv_ratio閿涘牅绗傚☉銊ヮ啀閺佹澘宕板В鏃撶礆
+    - median_return閿涘牅閲滈懖鈩冩暪閻╁﹣鑵戞担宥嗘殶閿?
+    - index_return閿涘牊瀵氶弫鐗堟暪閻╁绱濋悽銊ょ艾鐎靛湱鍙庨敍姘剁帛鐠?HS300=sh000300閿?
+- 鏉堟挸鍤稉?snapshot["participation"] 閻ㄥ嫭鐖ｉ崙鍡氱翻閸忋儱娼￠敍鍫滅瑝閸嬫氨濮搁幀浣稿灲鐎规熬绱?
 
-娉ㄦ剰锛?
-- 鍋滅墝/缂哄け鏁版嵁鍚堟硶锛氬崟鍙偂绁ㄧ己 prev_close 鍒欒烦杩?
-- 涓嶅仛鏀剁泭鍥炴祴锛屼笉鍋氫氦鏄撲俊鍙?
+濞夈劍鍓伴敍?
+- 閸嬫粎澧?缂傚搫銇戦弫鐗堝祦閸氬牊纭堕敍姘礋閸欘亣鍋傜粊銊у繁 prev_close 閸掓瑨鐑︽潻?
+- 娑撳秴浠涢弨鍓佹抄閸ョ偞绁撮敍灞肩瑝閸嬫矮姘﹂弰鎾蹭繆閸?
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ LOG = get_logger("DS.Participation")
 
 
 def _parse_date(s: str) -> datetime:
-    # trade_date 鍏佽 'YYYY-MM-DD' / 'YYYYMMDD'
+    # trade_date 閸忎浇顔?'YYYY-MM-DD' / 'YYYYMMDD'
     s = str(s).strip()
     if len(s) == 8 and s.isdigit():
         return datetime.strptime(s, "%Y%m%d")
@@ -45,7 +45,7 @@ def _parse_date(s: str) -> datetime:
 
 class ParticipationDataSource(DataSourceBase):
     """
-    杈撳嚭鍧楃粨鏋勶紙snapshot["participation"]锛夛細
+    鏉堟挸鍤崸妤冪波閺嬪嫸绱檚napshot["participation"]閿涘绱?
 
     {
       "trade_date": "YYYY-MM-DD",
@@ -57,7 +57,7 @@ class ParticipationDataSource(DataSourceBase):
       "median_return": float,
       "index_return": float,
       "n_effective": int,
-      "_raw_data": {...鍙€夎皟璇?..}
+      "_raw_data": {...閸欘垶鈧鐨熺拠?..}
     }
     """
 
@@ -97,23 +97,17 @@ class ParticipationDataSource(DataSourceBase):
         df["trade_date"] = pd.to_datetime(df["trade_date"])
         df = df.sort_values(["symbol", "trade_date"])
 
-        # 鍙栨瘡涓?symbol 鏈€鍚庝袱琛岋紙涓嶈冻涓よ鐨勪細鍦?ret_one 閲岃杩囨护锛?
+        # 閸欐牗鐦℃稉?symbol 閺堚偓閸氬簼琚辩悰宀嬬礄娑撳秷鍐绘稉銈堫攽閻ㄥ嫪绱伴崷?ret_one 闁插矁顫︽潻鍥ㄦ姢閿?
         last2 = df.groupby("symbol", sort=False).tail(2)
 
-        def _ret_one(x: pd.DataFrame) -> Optional[float]:
-            if x.shape[0] < 2:
-                return None
-            c1 = float(x.iloc[-1]["close"])
-            c0 = float(x.iloc[-2]["close"])
-            if c0 == 0:
-                return None
-            return c1 / c0 - 1.0
+        closes = last2.groupby("symbol", sort=False)["close"]
+        rets = closes.apply(
+            lambda s: (float(s.iloc[-1]) / float(s.iloc[-2]) - 1.0)
+            if len(s) >= 2 and float(s.iloc[-2]) != 0.0
+            else np.nan
+        )
 
-        #rets = last2.groupby("symbol", sort=False).apply(_ret_one)
-        #
-        rets = last2.groupby("symbol", sort=False, group_keys=False).apply(_ret_one, include_groups=False)
-
-        rets = rets.dropna().astype(float)
+        rets = pd.to_numeric(rets, errors="coerce").dropna().astype(float)
         return rets
 
     @staticmethod
@@ -157,7 +151,7 @@ class ParticipationDataSource(DataSourceBase):
     def build_block(self, trade_date: str, refresh_mode: str = "auto") -> Dict[str, Any]:
         cache_file = self._cache_path(trade_date)
 
-        # refresh 鎺у埗锛堜粎 cache锛?
+        # refresh 閹貉冨煑閿涘牅绮?cache閿?
         _ = apply_refresh_cleanup(
             refresh_mode=refresh_mode,
             cache_path=cache_file,
@@ -166,7 +160,7 @@ class ParticipationDataSource(DataSourceBase):
         )
         
         refresh_mode = "full"
-        # cache 鍛戒腑
+        # cache 閸涙垝鑵?
         if refresh_mode in ("none", "readonly")  and os.path.exists(cache_file):
             try:
                 with open(cache_file, "r", encoding="utf-8") as f:
@@ -189,7 +183,7 @@ class ParticipationDataSource(DataSourceBase):
             stock_df = pd.DataFrame(stock_df)
         stock_df = self._normalize_stock_df(stock_df)
 
-        # 闃插尽锛氫粎淇濈暀 <= trade_date
+        # 闂冩彃灏介敍姘矌娣囨繄鏆€ <= trade_date
         if "trade_date" in stock_df.columns:
             stock_df["trade_date"] = pd.to_datetime(stock_df["trade_date"])
             stock_df = stock_df[stock_df["trade_date"] <= pd.to_datetime(td_str)]
@@ -243,7 +237,7 @@ class ParticipationDataSource(DataSourceBase):
             },
         }
 
-        # cache 鍐欏叆
+        # cache 閸愭瑥鍙?
         try:
             with open(cache_file, "w", encoding="utf-8") as f:
                 json.dump(block, f, ensure_ascii=False)
@@ -251,4 +245,5 @@ class ParticipationDataSource(DataSourceBase):
             LOG.warning("[DS.Participation] cache write failed: %s", e)
 
         return block
+
 

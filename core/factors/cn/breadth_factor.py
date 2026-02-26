@@ -42,8 +42,7 @@ class BreadthFactor(FactorBase):
                 },
             )
 
-
-        ratio = float(data.get("new_low_ratio", 0.0))
+        ratio = self._normalize_new_low_ratio(data)
 
         state, score, level, reason = self._map_state(ratio)
 
@@ -64,6 +63,30 @@ class BreadthFactor(FactorBase):
                 "_raw_data": data
             },
         )
+
+    @staticmethod
+    def _normalize_new_low_ratio(data: Dict[str, Any]) -> float:
+        """
+        Normalize new_low_ratio to [0,1].
+        Upstream may provide:
+        - ratio in fraction form: 0.0077
+        - ratio in percent points: 0.77 (means 0.77%)
+        - ratio in percent number: 77 (means 77%)
+        Prefer count-based recompute when available.
+        """
+        cnt = data.get("count_new_low")
+        total = data.get("count_total")
+        if isinstance(cnt, (int, float)) and isinstance(total, (int, float)) and float(total) > 0:
+            return max(0.0, min(1.0, float(cnt) / float(total)))
+
+        raw = float(data.get("new_low_ratio", 0.0))
+        if raw > 1.0:
+            return max(0.0, min(1.0, raw / 100.0))
+        # 0<x<1 could be either fraction(0.0077) or percent-point(0.77).
+        # Heuristic: values above 0.30 are almost surely percent-point for breadth.
+        if raw > 0.30:
+            return max(0.0, min(1.0, raw / 100.0))
+        return max(0.0, min(1.0, raw))
 
     @staticmethod
     def _map_state(r: float):

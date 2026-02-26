@@ -939,11 +939,10 @@ class DBMySQLMarketProvider:
         calc AS (
             SELECT
                 trade_date,
-                (close_price - prev_close) AS change_amount,
+                COALESCE(close_price - prev_close, 0) AS change_amount,
                 close_price,
                 volume
             FROM base
-            WHERE prev_close IS NOT NULL
         )
         SELECT
             trade_date,
@@ -1324,12 +1323,24 @@ class DBMarketProvider:
                 super().__init__(name="db")
                 self._db = DBMySQLMarketProvider()
                 self._yf = None
+                self._yf_unavailable = False
 
             def _ensure_yf(self):
-                if self._yf is None:
-                    from core.adapters.providers.provider_yf import YFProvider
+                if self._yf is None and not self._yf_unavailable:
+                    try:
+                        from core.adapters.providers.provider_yf import YFProvider
 
-                    self._yf = YFProvider()
+                        self._yf = YFProvider()
+                    except Exception as exc:
+                        self._yf_unavailable = True
+                        LOG.warning("[DBMarketProvider] yfinance fallback unavailable: %s", exc)
+
+            @staticmethod
+            def _empty_frame_for_method(method: str) -> pd.DataFrame:
+                m = (method or "default").strip().lower()
+                if m in ("etf", "etf_hist"):
+                    return pd.DataFrame(columns=["date", "open", "high", "low", "close", "volume"])
+                return pd.DataFrame(columns=["date", "close"])
 
             def fetch_series_raw(self, symbol: str, window: int, method: str = "default"):
                 m = (method or "default").strip().lower()
@@ -1411,8 +1422,16 @@ class DBMarketProvider:
                 except Exception as e:
                     # Fallback to yfinance
                     self._ensure_yf()
-                    LOG.warning(f"[DBMarketProvider] DB fetch failed for {symbol} method={method}: {e}; fallback=yf")
-                    return self._yf.fetch_series_raw(symbol, window=window, method=method)
+                    if self._yf is not None:
+                        LOG.warning(f"[DBMarketProvider] DB fetch failed for {symbol} method={method}: {e}; fallback=yf")
+                        return self._yf.fetch_series_raw(symbol, window=window, method=method)
+                    LOG.warning(
+                        "[DBMarketProvider] DB fetch failed for %s method=%s: %s; fallback skipped (yf unavailable)",
+                        symbol,
+                        method,
+                        e,
+                    )
+                    return self._empty_frame_for_method(method)
 
         self._impl = _Impl()
 

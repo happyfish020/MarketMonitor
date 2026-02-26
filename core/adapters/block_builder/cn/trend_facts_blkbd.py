@@ -92,6 +92,10 @@ class TrendFactsBlockBuilder(FactBlockBuilderBase):
         assert amount_trend, "amount_trend is empty!"
         if amount_trend:
             facts["amount"] = amount_trend
+
+        price_trend = self._build_price_trend(snapshot)
+        if price_trend:
+            facts["price"] = price_trend
         #
         # Todo other  trend like market_sentiment....breadth trend
         #
@@ -158,5 +162,43 @@ class TrendFactsBlockBuilder(FactBlockBuilderBase):
             # ★ 新增：完整时间序列（冻结）
             # 供 FRF / 其他 Observation 做窗口化分析
             "window": records,
+        }
+
+    def _build_price_trend(self, snapshot: dict) -> dict | None:
+        """
+        Build HS300 price trend facts from index_core_raw.
+        """
+        hs300 = snapshot.get("index_core_raw", {}).get("hs300", {})
+        window = hs300.get("window", []) if isinstance(hs300, dict) else []
+        if not isinstance(window, list) or len(window) < 12:
+            return None
+
+        rows = []
+        for item in window:
+            c = item.get("close") if isinstance(item, dict) else None
+            d = item.get("date") if isinstance(item, dict) else None
+            if isinstance(c, (int, float)) and d:
+                rows.append({"trade_date": str(d), "close": float(c)})
+        if len(rows) < 12:
+            return None
+
+        rows.sort(key=lambda x: x["trade_date"])
+        closes = [r["close"] for r in rows]
+        last = closes[-1]
+        avg_5d = sum(closes[-5:]) / 5
+        avg_10d = sum(closes[-10:]) / 10
+        slope_5d = (closes[-1] - closes[-6]) / 5
+        slope_10d = (closes[-1] - closes[-11]) / 10
+
+        return {
+            "symbol": hs300.get("symbol", "sh000300"),
+            "last_value": round(last, 4),
+            "avg_5d": round(avg_5d, 4),
+            "avg_10d": round(avg_10d, 4),
+            "ratio_vs_5d": round(last / avg_5d, 6) if avg_5d > 0 else None,
+            "ratio_vs_10d": round(last / avg_10d, 6) if avg_10d > 0 else None,
+            "slope_5d": round(slope_5d, 6),
+            "slope_10d": round(slope_10d, 6),
+            "window": rows,
         }
      

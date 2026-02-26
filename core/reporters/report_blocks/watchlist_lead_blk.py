@@ -683,10 +683,17 @@ class WatchlistLeadBlock(ReportBlockRendererBase):
     def render(self, context: ReportContext, doc_partial: Dict[str, Any]) -> ReportBlock:
         warnings: List[str] = []
 
-        # slots preferred
-        wl = context.slots.get("watchlist_lead")
-        if not isinstance(wl, dict) or not wl:
-            wl = _get_factor_details(context, "watchlist_lead") or {}
+        # slots preferred, but factor details may carry richer panel payload.
+        wl_slot = context.slots.get("watchlist_lead")
+        wl_factor = _get_factor_details(context, "watchlist_lead") or {}
+        wl = wl_slot if isinstance(wl_slot, dict) and wl_slot else {}
+        if not wl:
+            wl = wl_factor if isinstance(wl_factor, dict) else {}
+        elif isinstance(wl_factor, dict):
+            # Backfill when slots payload is partial (common in older pipelines).
+            for k in ("lead_panels", "tplus2_lead", "groups", "warnings", "data_status", "supply_pressure"):
+                if k not in wl and k in wl_factor:
+                    wl[k] = wl_factor.get(k)
 
         if not isinstance(wl, dict) or not wl:
             warnings.append("empty:watchlist_lead")
